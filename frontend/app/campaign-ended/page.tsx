@@ -36,7 +36,8 @@ export default function Ended({ searchParams }: { searchParams: { reason?: strin
     body: 'The campaign behind this QR code is no longer running.',
   };
   return (
-    <main style={{ maxWidth: 420, textAlign: 'center', paddingTop: 80 }}>
+    <main className="auth">
+      <div className="brand">VOID</div>
       <h1>{r.title}</h1>
       <p className="muted">{r.body}</p>
     </main>

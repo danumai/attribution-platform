@@ -76,7 +76,7 @@ const RULES = [
 
 export default function Landing() {
   return (
-    <main className="lp">
+    <div className="lp">
       <nav className="lp-nav">
         <div className="lp-nav-inner">
           <Link href="/" className="lp-mark">
@@ -94,6 +94,7 @@ export default function Landing() {
         </div>
       </nav>
 
+      <main>
       <header className="lp-hero lp-wrap">
         <div className="lp-pass lp-pass-shell">
           <div className="lp-coupon">
@@ -300,15 +301,16 @@ export default function Landing() {
             </Link>
           </aside>
         </div>
-
-        <footer className="lp-foot">
-          <span>QR Reward Platform</span>
-          <span>
-            Activity shown on this page is example data, not live traffic. ·{' '}
-            <Link href="/login">Sign in</Link>
-          </span>
-        </footer>
       </section>
-    </main>
+      </main>
+
+      <footer className="lp-foot lp-wrap">
+        <span>QR Reward Platform</span>
+        <span>
+          Activity shown on this page is example data, not live traffic. ·{' '}
+          <Link href="/login">Sign in</Link>
+        </span>
+      </footer>
+    </div>
   );
 }

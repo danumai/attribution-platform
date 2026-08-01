@@ -48,8 +48,9 @@ function Sim() {
   // not gated, toward unlocking the rest.
   if (result)
     return (
-      <main style={{ maxWidth: 460, textAlign: 'center', paddingTop: 60 }}>
-        <h1>🎉 {result.coins} coins added</h1>
+      <main className="auth" style={{ maxWidth: 460 }}>
+        <div className="brand">+{result.coins}</div>
+        <h1>{result.coins} coins added</h1>
         <p className="muted">
           Welcome to the app. Your coins are ready to unlock premium episodes.
         </p>
@@ -76,7 +77,8 @@ function Sim() {
 
   return (
     <main style={{ maxWidth: 460 }}>
-      <h1>DramaBox (publisher demo)</h1>
+      <h1>DramaBox</h1>
+      <p className="muted">Publisher demo</p>
       <p className="muted">
         {scanToken
           ? 'You scanned a partner QR — create an account to claim your coins.'

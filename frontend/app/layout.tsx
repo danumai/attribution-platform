@@ -34,12 +34,7 @@ export const metadata = {
     'Run QR reward campaigns with publishers — scans, redemptions and budgets in one place.',
 };
 
-export const viewport = {
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f7f7fa' },
-    { media: '(prefers-color-scheme: dark)', color: '#08080b' },
-  ],
-};
+export const viewport = { themeColor: '#e7ddc9' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

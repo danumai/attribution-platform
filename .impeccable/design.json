@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-01T00:00:00.000Z",
+  "title": "Design System: QR Reward Platform",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Buff Stock",
+        "canonical": "#e7ddc9",
+        "tonalRamp": ["#2a2416", "#463d27", "#63573a", "#83744f", "#a49468", "#c4b78f", "#e7ddc9", "#f6f1e5"]
+      },
+      "stock": {
+        "role": "neutral",
+        "displayName": "Ticket Card",
+        "canonical": "#faf6ee",
+        "tonalRamp": ["#2d2a22", "#4a4638", "#68624f", "#888068", "#a9a186", "#cbc4ab", "#e9e3d4", "#faf6ee"]
+      },
+      "thermal-ink": {
+        "role": "neutral",
+        "displayName": "Thermal Ink",
+        "canonical": "#1a1712",
+        "tonalRamp": ["#0d0b09", "#1a1712", "#332e24", "#4e483a", "#6f6757", "#9a9078", "#c6bda4", "#ebe4d5"]
+      },
+      "press-blue": {
+        "role": "primary",
+        "displayName": "Process Blue",
+        "canonical": "#1c39bb",
+        "tonalRamp": ["#0a1444", "#122566", "#173089", "#1c39bb", "#2a4ae0", "#5f77ec", "#9cabf4", "#dfe4fc"]
+      },
+      "held-ochre": {
+        "role": "secondary",
+        "displayName": "Held Ochre",
+        "canonical": "#a35c00",
+        "tonalRamp": ["#301b00", "#4d2c00", "#6b3d00", "#8a4e00", "#a35c00", "#cf8a2a", "#e3c893", "#f6ecd8"]
+      },
+      "posted-green": {
+        "role": "tertiary",
+        "displayName": "Posted Green",
+        "canonical": "#0a6b4a",
+        "tonalRamp": ["#02261a", "#043c2a", "#07533a", "#0a6b4a", "#118a61", "#3fae86", "#b6d8c8", "#e4f0e9"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The single thesis line on a surface. Archivo expanded, one per page." },
+      "label": { "displayName": "Stamped Field", "purpose": "The 10px caps name printed above a short value. Never a form question." },
+      "printed": { "displayName": "Printed Value", "purpose": "Monospace for codes, amounts, durations and endpoints — measurement, not costume." }
+    },
+    "shadows": [
+      {
+        "name": "contact",
+        "value": "0 1px 0 #fff inset, 0 2px 1px rgba(26,23,18,.04), 0 24px 50px -30px rgba(26,23,18,.45)",
+        "purpose": "A ticket lying on a desk. The only shadow in the system; passes and coupon strips only."
+      },
+      {
+        "name": "contact-sm",
+        "value": "0 1px 0 #fff inset, 0 2px 1px rgba(26,23,18,.04)",
+        "purpose": "The lit top edge of stock on in-page cards, with no cast shadow."
+      }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(.2,.7,.3,1)", "purpose": "Default state transitions." },
+      { "name": "ease-out", "value": "cubic-bezier(.16,1,.3,1)", "purpose": "Arrivals — rows posting, cards rising." },
+      { "name": "scan-cycle", "value": "5.2s", "purpose": "The hero sweep and its status flip share this duration and switch at 46%, so the beam reaching the code's bottom edge and the status re-printing are one event." }
+    ],
+    "breakpoints": [
+      { "name": "pass-stack", "value": "1000px" },
+      { "name": "mobile", "value": "720px" },
+      { "name": "nav-compact", "value": "480px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The committing action. Flat process blue, no shadow.",
+      "html": "<button class=\"ds-btn\">Start a campaign</button>",
+      "css": ".ds-btn { background: #1c39bb; color: #fff; border: 1px solid transparent; border-radius: 8px; padding: 11px 20px; font: 600 14px/1.3 Inter, system-ui, sans-serif; letter-spacing: -.005em; cursor: pointer; transition: background .16s cubic-bezier(.2,.7,.3,1), transform .08s; } .ds-btn:hover { background: #2a4ae0; } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 2px solid #1c39bb; outline-offset: 3px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "The secondary door. Its border must be ink-mute — a rule-colored border is 1.19:1 on buff and reads as no border.",
+      "html": "<button class=\"ds-btn-ghost\">Join as a publisher</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: #1a1712; border: 1px solid #6f6757; border-radius: 8px; padding: 11px 20px; font: 600 14px/1.3 Inter, system-ui, sans-serif; cursor: pointer; transition: background .16s, border-color .16s; } .ds-btn-ghost:hover { background: #f3ecdd; } .ds-btn-ghost:focus-visible { outline: 2px solid #1c39bb; outline-offset: 3px; }"
+    },
+    {
+      "name": "Stamped Field",
+      "kind": "custom",
+      "refersTo": "typography.label",
+      "description": "The system's atom: a caps field name over a monospace value.",
+      "html": "<dl class=\"ds-field\"><dt>Expires</dt><dd>30 days</dd></dl>",
+      "css": ".ds-field { display: grid; gap: 4px; margin: 0; } .ds-field dt { font: 700 10px/1.2 Inter, system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #6f6757; } .ds-field dd { margin: 0; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: -.01em; color: #1a1712; }"
+    },
+    {
+      "name": "Perforation",
+      "kind": "custom",
+      "description": "The tear line, terminated by ground-filled notches so the card reads as physically punched.",
+      "html": "<div class=\"ds-perf\"><span></span><i></i></div>",
+      "css": ".ds-perf { position: relative; height: 30px; background: #faf6ee; } .ds-perf span { position: absolute; inset: 50% 14px auto 14px; height: 2px; transform: translateY(-50%); background: repeating-linear-gradient(to right, #d8cbb2 0 5px, transparent 5px 11px); } .ds-perf::after, .ds-perf i { content: \"\"; position: absolute; top: 50%; width: 22px; height: 22px; transform: translateY(-50%); border-radius: 50%; background: #e7ddc9; box-shadow: inset 0 -1px 0 rgba(26,23,18,.12); } .ds-perf::after { left: -11px; } .ds-perf i { right: -11px; }"
+    },
+    {
+      "name": "State Chip",
+      "kind": "chip",
+      "refersTo": "chip-held",
+      "description": "Financial state, printed as a rectangle. Held (ochre) and posted (green) are the two that carry money meaning.",
+      "html": "<span class=\"ds-chip ds-chip-held\">guest</span> <span class=\"ds-chip ds-chip-posted\">verified</span>",
+      "css": ".ds-chip { display: inline-block; padding: 3px 9px; border-radius: 4px; border: 1px solid; font: 700 10.5px/1.4 Inter, system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; } .ds-chip-held { color: #8a4e00; background: #f6ecd8; border-color: #e3c893; } .ds-chip-posted { color: #0a6b4a; background: #e4f0e9; border-color: #b6d8c8; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "description": "Sentence-case label over a stock-filled input. Labels are questions, so they are not stamped caps.",
+      "html": "<label class=\"ds-label\" for=\"ds-i\">Coins granted per verified signup</label><input class=\"ds-input\" id=\"ds-i\" value=\"50\">",
+      "css": ".ds-label { display: block; font: 550 13px/1.4 Inter, system-ui, sans-serif; letter-spacing: -.004em; color: #4e483a; margin: 0 0 6px; } .ds-input { width: 100%; padding: 10px 12px; border: 1px solid #d8cbb2; border-radius: 8px; background: #faf6ee; color: #1a1712; font: 14.5px Inter, system-ui, sans-serif; transition: border-color .16s, box-shadow .16s; } .ds-input:hover { border-color: #6f6757; } .ds-input:focus { outline: none; border-color: #1c39bb; box-shadow: 0 0 0 3px rgba(28,57,187,.22); }"
+    },
+    {
+      "name": "Section Rule",
+      "kind": "nav",
+      "description": "A stamped section name with a perforation running out from it — the portal's only section divider.",
+      "html": "<h2 class=\"ds-h2\">Partnerships</h2>",
+      "css": ".ds-h2 { display: flex; align-items: center; gap: 12px; font: 700 10px/1.2 Inter, system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #6f6757; margin: 38px 0 12px; } .ds-h2::after { content: \"\"; flex: 1; height: 2px; background: repeating-linear-gradient(to right, #d8cbb2 0 5px, transparent 5px 11px); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Printed Instrument",
+    "overview": "A QR reward code is not a marketing asset. It is a spending instrument that leaves the building — printed on a boarding pass, a receipt, a seatback card — and cannot be recalled once it is in the world. This system dresses the product as the thing it actually is: ticket stock. Buff card, thermal-black ink, a perforated tear line, a stub that gets scanned, and stamped caps labels over monospace values.\n\nThe palette does the product's accounting. Process blue is validation, ochre is value held back, green is value posted. A promoter reading any screen should be able to tell those three states apart without reading a label.\n\nThe rejected alternative was the category default: a dark SaaS gradient hero, a row of identical icon cards, and a logo strip of customers this product does not yet have. That page would have claimed trust. This one demonstrates a mechanism instead.",
+    "keyCharacteristics": [
+      "Printed, not rendered — no gradients, no glass, no glow",
+      "Three inks with fixed jobs: validation, held, posted",
+      "Monospace for every printed field; caps labels stamped above their values",
+      "Perforation and notch as the system's signature geometry",
+      "Motion is one authored event, not decoration"
+    ],
+    "rules": [
+      { "name": "The Three Inks Rule", "body": "Blue validates, ochre holds, green posts. A number rendered in the wrong ink is a factual error, not a style choice.", "section": "colors" },
+      { "name": "The Buff Ground Rule", "body": "ink-mute is only legible on stock (5.19:1), not on paper (4.15:1). Any muted text sitting directly on the page ground steps up to ink-soft.", "section": "colors" },
+      { "name": "The Committed Stock Rule", "body": "This world does not follow the OS theme. Surfaces set color-scheme: light and restate any inherited token.", "section": "colors" },
+      { "name": "The Stamped Field Rule", "body": "A fact with a short name is a field: a 10px uppercase label at 0.14em over a monospace value. A form label that asks a question is a sentence, not a field.", "section": "typography" },
+      { "name": "The One Display Line Rule", "body": "Exactly one Display-sized line per surface. A second one means neither is the thesis.", "section": "typography" },
+      { "name": "The Contact Shadow Rule", "body": "One shadow, on the ticket only. Panels, chips, buttons and boards are flat and rely on a 1px rule for their edge.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do print every fact as a stamped label plus a monospace value.",
+      "Do keep the three inks on their jobs: blue validates, ochre holds, green posts.",
+      "Do subdivide a run of related items with perforations inside one container.",
+      "Do set color-scheme: light and restate inherited tokens on any surface built in this world.",
+      "Do step muted text up to ink-soft whenever it sits on the buff ground.",
+      "Do give a surface exactly one authored motion event, tied to the mechanism it explains.",
+      "Do label synthetic or illustrative data in the container that holds it."
+    ],
+    "donts": [
+      "Don't use backdrop-filter, glass, gradients on text, or a glowing shadow. This world is printed.",
+      "Don't build a grid of equally-sized icon-plus-heading cards.",
+      "Don't put a kicker or eyebrow above a heading.",
+      "Don't give an element a scroll entrance just because it is a section.",
+      "Don't animate something the reader will never see running — a scroll-linked effect below the fold needs animation-timeline: view().",
+      "Don't claim customers, logos, testimonials or traction. There are none to show yet.",
+      "Don't use a pill radius for a printed field or state chip."
+    ]
+  }
+}
