@@ -31,12 +31,45 @@ const device = (ua: string) =>
   !ua ? '—' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobile/.test(ua) ? 'Mobile' : 'Desktop';
 const pill = (s: string) => <span className={`pill ${s}`}>{s}</span>;
 
-type Col = { h: string; get: (row: any) => ReactNode; sort?: (row: any) => any };
+type Col = { h: string; get: (row: any) => ReactNode; sort?: (row: any) => any; num?: boolean };
 
-/** One table for every tab: free-text filter + click-to-sort headers. */
-function Table({ cols, rows, empty = 'Nothing here yet.' }: { cols: Col[]; rows: any[]; empty?: string }) {
+const PAGE = 50;
+
+/** Row actions live behind one control instead of a run of dot-separated links. */
+function Actions({ children }: { children: ReactNode }) {
+  return (
+    <details className="menu">
+      <summary aria-label="Row actions" title="Actions">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <circle cx="3" cy="8" r="1.5" />
+          <circle cx="8" cy="8" r="1.5" />
+          <circle cx="13" cy="8" r="1.5" />
+        </svg>
+      </summary>
+      {/* click-away: the backdrop closes the menu the way a native popover would */}
+      <div className="menu-scrim" onClick={(e) => (e.currentTarget.closest('details') as any)?.removeAttribute('open')} />
+      <div className="menu-pop" onClick={(e) => (e.currentTarget.closest('details') as any)?.removeAttribute('open')}>
+        {children}
+      </div>
+    </details>
+  );
+}
+
+/** One table for every tab: free-text filter, click-to-sort headers, paged rendering. */
+function Table({
+  cols,
+  rows,
+  empty = 'Nothing here yet.',
+  loading,
+}: {
+  cols: Col[];
+  rows: any[];
+  empty?: string;
+  loading?: boolean;
+}) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
+  const [limit, setLimit] = useState(PAGE);
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -53,48 +86,91 @@ function Table({ cols, rows, empty = 'Nothing here yet.' }: { cols: Col[]; rows:
     return out;
   }, [q, rows, sort, cols]);
 
+  // a narrowed result set starts at the top again, not 300 rows down
+  useEffect(() => setLimit(PAGE), [q, sort]);
+
+  if (loading)
+    return (
+      <div className="card" style={{ display: 'grid', gap: 10 }}>
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="skeleton" style={{ width: `${100 - i * 7}%` }} />
+        ))}
+      </div>
+    );
+
   return (
     <>
-      <div className="row" style={{ justifyContent: 'space-between', marginTop: 10 }}>
-        <input
-          placeholder="Filter these rows…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          style={{ maxWidth: 300 }}
-        />
+      <div className="tablebar">
+        <div className="search">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="m10.5 10.5 3 3" strokeLinecap="round" />
+          </svg>
+          <input placeholder="Filter these rows…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter rows" />
+          {q && (
+            <button className="ghost tiny" onClick={() => setQ('')}>
+              Clear
+            </button>
+          )}
+        </div>
         <span className="muted">
           {shown.length}
           {shown.length !== rows.length && ` of ${rows.length}`} rows
         </span>
       </div>
-      <table>
-        <thead>
-          <tr>
-            {cols.map((c, i) => (
-              <th
-                key={i}
-                style={{ cursor: c.h ? 'pointer' : 'default', userSelect: 'none' }}
-                onClick={() =>
-                  c.h && setSort((s) => (s?.i === i ? { i, dir: s.dir === 1 ? -1 : 1 } : { i, dir: 1 }))
-                }
-              >
-                {c.h}
-                {sort?.i === i ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((r, i) => (
-            <tr key={r.id ?? r.account ?? i}>
-              {cols.map((c, j) => (
-                <td key={j}>{c.get(r)}</td>
+
+      {shown.length ? (
+        <div className="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                {cols.map((c, i) => (
+                  <th
+                    key={i}
+                    className={`${c.num ? 'num' : ''}${sort?.i === i ? ' sorted' : ''}`}
+                    aria-sort={sort?.i === i ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
+                    style={{ cursor: c.h ? 'pointer' : 'default', userSelect: 'none' }}
+                    onClick={() =>
+                      c.h && setSort((s) => (s?.i === i ? { i, dir: s.dir === 1 ? -1 : 1 } : { i, dir: 1 }))
+                    }
+                  >
+                    {c.h}
+                    {sort?.i === i && <span className="caret">{sort.dir === 1 ? '↑' : '↓'}</span>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {shown.slice(0, limit).map((r, i) => (
+                <tr key={r.id ?? r.account ?? i}>
+                  {cols.map((c, j) => (
+                    <td key={j} className={c.num ? 'num' : ''}>
+                      {c.get(r)}
+                    </td>
+                  ))}
+                </tr>
               ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!shown.length && <p className="muted" style={{ marginTop: 12 }}>{empty}</p>}
+            </tbody>
+          </table>
+          {shown.length > limit && (
+            <div className="tablefoot">
+              <button className="ghost" onClick={() => setLimit((l) => l + PAGE)}>
+                Show {Math.min(PAGE, shown.length - limit)} more
+              </button>
+              <span className="muted">{shown.length - limit} rows below</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="card empty">
+          <p>{q ? `Nothing matches “${q}”.` : empty}</p>
+          {q && (
+            <button className="ghost" onClick={() => setQ('')}>
+              Clear the filter
+            </button>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -164,9 +240,15 @@ export default function Admin() {
       {label}
     </a>
   );
-  const sep = <span className="muted"> · </span>;
+  /** One row inside an Actions menu. */
+  const item = (label: string, onClick: () => void, danger = false) => (
+    <button key={label} className={`menu-item${danger ? ' danger' : ''}`} disabled={busy} onClick={onClick}>
+      {label}
+    </button>
+  );
 
   if (!me) return null;
+  const loading = !d.overview;
   const o = d.overview ?? {};
   const campaigns: any[] = d.campaigns ?? [];
   // Redemptions carry the publisher's user ref; scans only know the device. Join so a scan row
@@ -222,82 +304,109 @@ export default function Admin() {
         </div>
       )}
 
-      {tab === 'Overview' && (
-        <>
-          <h2>Platform</h2>
-          <div className="card row" style={{ justifyContent: 'space-between' }}>
-            {[
-              ['Promoters', o.promoters],
-              ['Publishers', o.publishers],
-              ['Partnerships', o.partnerships],
-              ['Campaigns', o.campaigns],
-              ['QR codes', o.qr_codes],
-              ['Scans', o.scans],
-              ['Redemptions', o.redemptions],
-            ].map(([k, v]) => (
-              <div className="stat" key={k as string}>
-                <b>{v ?? 0}</b>
-                <span className="muted">{k}</span>
-              </div>
+      {tab === 'Overview' &&
+        (loading ? (
+          <div className="card" style={{ display: 'grid', gap: 12 }}>
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className="skeleton" style={{ width: `${100 - i * 9}%` }} />
             ))}
           </div>
-
-          <h2>Money</h2>
-          <div className="card row" style={{ justifyContent: 'space-between' }}>
-            {[
-              ['Coins funded', o.total_funded],
-              ['Coins granted', o.coins_granted],
-              ['Unspent', (o.total_funded ?? 0) - (o.coins_granted ?? 0)],
-              ['Identified', o.identified_redemptions],
-              ['Guest', o.guest_redemptions],
-            ].map(([k, v]) => (
-              <div className="stat" key={k as string}>
-                <b>{v ?? 0}</b>
-                <span className="muted">{k}</span>
+        ) : (
+          <>
+            {/* The one thing a platform operator has to know before anything else: does the
+                money add up. It leads the page rather than sitting in a footnote row. */}
+            <div className={`health ${o.ledger_balanced ? 'good' : 'bad'}`}>
+              <div className="health-mark" aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  {o.ledger_balanced ? <path d="m5 10.5 3.2 3L15 6.5" /> : <path d="M10 5.5v5.5M10 14v.1" />}
+                </svg>
               </div>
-            ))}
-          </div>
-
-          <h2>Needs attention</h2>
-          <div className="card row" style={{ justifyContent: 'space-between' }}>
-            {[
-              ['Scans (24h)', o.scans_24h, 'Scans'],
-              ['Active campaigns', o.active_campaigns, 'Campaigns'],
-              ['Pending partnerships', o.pending_partnerships, 'Partnerships'],
-              ['Suspended orgs', o.suspended_orgs, 'Organizations'],
-              ['Voided codes', o.voided_codes, 'QR codes'],
-            ].map(([k, v, go]) => (
-              <div
-                className="stat"
-                key={k as string}
-                style={{ cursor: 'pointer' }}
-                onClick={() => setTab(go as Tab)}
-              >
-                <b>{v ?? 0}</b>
-                <span className="muted">{k as string}</span>
+              <div>
+                <b>{o.ledger_balanced ? 'Ledger balanced' : `Ledger off by ${o.ledger_sum}`}</b>
+                <p className="muted">
+                  {o.ledger_balanced
+                    ? 'Every entry sums to zero — no coins have been created or lost.'
+                    : 'Entries do not sum to zero. Coins have been created or destroyed outside the ledger — investigate before any payout.'}
+                </p>
               </div>
-            ))}
-          </div>
-
-          <div className="card">
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <span>Scan → signup conversion</span>
-              <b>{((o.conversion_rate ?? 0) * 100).toFixed(1)}%</b>
+              {!o.ledger_balanced && link('Open the ledger', () => setTab('Ledger'))}
             </div>
-            <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
-              <span>Ledger integrity (all entries sum to zero)</span>
-              <b className={o.ledger_balanced ? 'ok' : 'err'}>
-                {o.ledger_balanced ? 'balanced' : `OFF BY ${o.ledger_sum}`}
-              </b>
+
+            <h2>Live now</h2>
+            <div className="kpis">
+              {[
+                ['Scans, last 24h', o.scans_24h, 'Scans'],
+                ['Active campaigns', o.active_campaigns, 'Campaigns'],
+                ['Scan → signup', `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`, 'Scans'],
+              ].map(([k, v, go]) => (
+                <button className="kpi" key={k as string} onClick={() => setTab(go as Tab)}>
+                  <b>{v ?? 0}</b>
+                  <span className="muted">{k as string}</span>
+                </button>
+              ))}
             </div>
-          </div>
-        </>
-      )}
+
+            <h2>Needs attention</h2>
+            <div className="card queue">
+              {[
+                ['Partnerships waiting on a publisher', o.pending_partnerships, 'Partnerships'],
+                ['Suspended organizations', o.suspended_orgs, 'Organizations'],
+                ['Voided QR codes', o.voided_codes, 'QR codes'],
+              ].map(([k, v, go]) => (
+                <button className="queue-row" key={k as string} onClick={() => setTab(go as Tab)}>
+                  <span className={`queue-count${v ? ' hot' : ''}`}>{v ?? 0}</span>
+                  <span>{k as string}</span>
+                  <span className="queue-go" aria-hidden="true">
+                    →
+                  </span>
+                </button>
+              ))}
+              {!o.pending_partnerships && !o.suspended_orgs && !o.voided_codes && (
+                <p className="muted">Nothing is waiting on you.</p>
+              )}
+            </div>
+
+            <h2>Coins</h2>
+            <div className="card row statrow">
+              {[
+                ['funded', o.total_funded],
+                ['granted', o.coins_granted],
+                ['unspent', (o.total_funded ?? 0) - (o.coins_granted ?? 0)],
+                ['identified', o.identified_redemptions],
+                ['guest', o.guest_redemptions],
+              ].map(([k, v]) => (
+                <div className="stat" key={k as string}>
+                  <b>{v ?? 0}</b>
+                  <span className="muted">{k as string}</span>
+                </div>
+              ))}
+            </div>
+
+            <h2>Platform</h2>
+            <div className="card row statrow">
+              {[
+                ['promoters', o.promoters],
+                ['publishers', o.publishers],
+                ['partnerships', o.partnerships],
+                ['campaigns', o.campaigns],
+                ['QR codes', o.qr_codes],
+                ['scans', o.scans],
+                ['redemptions', o.redemptions],
+              ].map(([k, v]) => (
+                <div className="stat" key={k as string}>
+                  <b>{v ?? 0}</b>
+                  <span className="muted">{k as string}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ))}
 
       {tab === 'Organizations' && (
         <>
           <h2>Organizations</h2>
           <Table
+            loading={loading}
             rows={d.orgs ?? []}
             cols={[
               { h: 'Name', get: (x) => x.name },
@@ -305,19 +414,18 @@ export default function Admin() {
               { h: 'Email', get: (x) => x.email },
               { h: 'Landing URL', get: (x) => (x.landing_url ? <a href={x.landing_url} target="_blank" rel="noreferrer">{x.landing_url}</a> : '—') },
               { h: 'API key', get: (x) => (x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="err">missing</span>) },
-              { h: 'Campaigns', get: (x) => x.campaigns },
-              { h: 'Coins', get: (x) => x.coin_balance ?? '—' },
+              { h: 'Campaigns', num: true, get: (x) => x.campaigns },
+              { h: 'Coins', num: true, get: (x) => x.coin_balance ?? '—' },
               { h: 'Joined', get: (x) => when(x.created_at), sort: (x) => x.created_at },
               { h: 'Status', get: (x) => pill(x.suspended ? 'suspended' : 'active'), sort: (x) => x.suspended },
               {
                 h: '',
                 get: (x) => (
-                  <>
-                    {link(x.suspended ? 'Reinstate' : 'Suspend', () =>
+                  <Actions>
+                    {item(x.suspended ? 'Reinstate' : 'Suspend', () =>
                       patch(`/v1/admin/orgs/${x.id}`, { suspended: !x.suspended }, x.suspended ? 'Reinstated' : 'Suspended'),
                     )}
-                    {sep}
-                    {link('Rename', async () => {
+                    {item('Rename', async () => {
                       const name = await promptDialog({
                         title: `Rename ${x.name}`,
                         inputLabel: 'Organization name',
@@ -328,8 +436,7 @@ export default function Admin() {
                     })}
                     {x.type === 'publisher' && (
                       <>
-                        {sep}
-                        {link('Landing URL', async () => {
+                        {item('Set landing URL', async () => {
                           const landing_url = await promptDialog({
                             title: `Landing URL for ${x.name}`,
                             body: 'Where a scanned user is redirected. Must be https.',
@@ -339,8 +446,7 @@ export default function Admin() {
                           });
                           if (landing_url) patch(`/v1/admin/orgs/${x.id}`, { landing_url }, 'Landing URL updated');
                         })}
-                        {sep}
-                        {link('Rotate key', async () => {
+                        {item('Rotate API key', async () => {
                           const go = await confirmDialog({
                             title: `Rotate the API key for ${x.name}?`,
                             body: 'The old key stops working immediately, and their backend will fail until they deploy the new one.',
@@ -351,9 +457,8 @@ export default function Admin() {
                         })}
                       </>
                     )}
-                    {sep}
-                    {link(
-                      'Offboard',
+                    {item(
+                      'Offboard org',
                       async () => {
                         const reason = await promptDialog({
                           title: `Offboard ${x.name}?`,
@@ -367,7 +472,7 @@ export default function Admin() {
                       },
                       true,
                     )}
-                  </>
+                  </Actions>
                 ),
               },
             ]}
@@ -383,6 +488,7 @@ export default function Admin() {
             released if the user identifies within the grace window.
           </p>
           <Table
+            loading={loading}
             rows={d.partnerships ?? []}
             cols={[
               { h: 'Promoter', get: (x) => x.promoter_name },
@@ -424,21 +530,24 @@ export default function Admin() {
         <>
           <h2>Campaigns</h2>
           <Table
+            loading={loading}
             rows={campaigns}
             cols={[
               { h: 'Campaign', get: (x) => x.name },
               { h: 'Promoter', get: (x) => x.promoter_name },
               { h: 'Publisher', get: (x) => x.publisher_name },
-              { h: 'Rate', get: (x) => x.coin_rate },
-              { h: 'Scans', get: (x) => x.scans },
-              { h: 'Redemptions', get: (x) => x.redemptions },
+              { h: 'Rate', num: true, get: (x) => x.coin_rate },
+              { h: 'Scans', num: true, get: (x) => x.scans },
+              { h: 'Redemptions', num: true, get: (x) => x.redemptions },
               {
                 h: 'Conv.',
+                num: true,
                 sort: (x) => (x.scans ? x.redemptions / x.scans : -1),
                 get: (x) => (x.scans ? `${((x.redemptions / x.scans) * 100).toFixed(0)}%` : '—'),
               },
               {
                 h: 'Budget',
+                num: true,
                 sort: (x) => x.budget,
                 get: (x) => (
                   <span className={x.budget < x.coin_rate ? 'err' : ''}>{x.budget}</span>
@@ -462,8 +571,8 @@ export default function Admin() {
               {
                 h: '',
                 get: (x) => (
-                  <>
-                    {link('Adjust budget', async () => {
+                  <Actions>
+                    {item('Adjust budget', async () => {
                       const v = await promptDialog({
                         title: `Adjust budget for "${x.name}"`,
                         body: `Current budget is ${x.budget} coins. Negative claws back; the result cannot go below zero.`,
@@ -473,21 +582,18 @@ export default function Admin() {
                       });
                       if (v) post(`/v1/admin/campaigns/${x.id}/adjust`, { coins: +v }, 'Budget adjusted');
                     })}
-                    {sep}
-                    {link('Scans', () => {
+                    {item('View its scans', () => {
                       setCampaignFilter(x.id);
                       setTab('Scans');
                     })}
-                    {sep}
-                    {link('Ledger', () => {
+                    {item('View its ledger', () => {
                       setLedgerAccount(`campaign:${x.id}`);
                       setTab('Ledger');
                     })}
                     {x.status !== 'ended' && (
                       <>
-                        {sep}
-                        {link(
-                          'Kill',
+                        {item(
+                          'Kill campaign',
                           async () => {
                             const reason = await promptDialog({
                               title: `Kill "${x.name}"?`,
@@ -503,7 +609,7 @@ export default function Admin() {
                         )}
                       </>
                     )}
-                  </>
+                  </Actions>
                 ),
               },
             ]}
@@ -528,6 +634,7 @@ export default function Admin() {
             ))}
           </select>
           <Table
+            loading={loading}
             rows={d.scans ?? []}
             empty="No scans recorded."
             cols={[
@@ -559,6 +666,7 @@ export default function Admin() {
         <>
           <h2>Redemptions</h2>
           <Table
+            loading={loading}
             rows={d.redemptions ?? []}
             empty="No redemptions yet."
             cols={[
@@ -569,7 +677,7 @@ export default function Admin() {
               { h: 'Publisher user', get: (x) => <code>{x.publisher_user_ref}</code> },
               { h: 'Kind', sort: (x) => x.identified, get: (x) => pill(x.identified ? 'identified' : 'guest') },
               { h: 'Upgraded', sort: (x) => x.upgraded_at ?? '', get: (x) => when(x.upgraded_at) },
-              { h: 'Coins', sort: (x) => x.coins, get: (x) => x.coins },
+              { h: 'Coins', num: true, sort: (x) => x.coins, get: (x) => x.coins },
               {
                 h: '',
                 get: (x) =>
@@ -587,12 +695,13 @@ export default function Admin() {
         <>
           <h2>QR codes</h2>
           <Table
+            loading={loading}
             rows={d.qrCodes ?? []}
             empty="No codes issued."
             cols={[
               { h: 'Code', get: (x) => <code>{x.code}</code> },
               { h: 'Campaign', get: (x) => x.campaign_name },
-              { h: 'Scans', sort: (x) => x.scans, get: (x) => x.scans },
+              { h: 'Scans', num: true, sort: (x) => x.scans, get: (x) => x.scans },
               { h: 'Uses', sort: (x) => x.uses, get: (x) => `${x.uses}${x.max_uses ? ` / ${x.max_uses}` : ' / ∞'}` },
               { h: 'Expires', sort: (x) => x.expires_at ?? '', get: (x) => (x.expires_at ? when(x.expires_at) : 'never') },
               { h: 'Created', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
@@ -600,17 +709,15 @@ export default function Admin() {
               {
                 h: '',
                 get: (x) => (
-                  <>
-                    <a href={x.scan_url} target="_blank" rel="noreferrer">
-                      Open
+                  <Actions>
+                    <a className="menu-item" href={x.scan_url} target="_blank" rel="noreferrer">
+                      Open the scan URL
                     </a>
-                    {sep}
-                    {link('Copy URL', () => {
+                    {item('Copy scan URL', () => {
                       navigator.clipboard.writeText(x.scan_url);
                       toast.success('Scan URL copied');
                     })}
-                    {sep}
-                    {link('Expiry', async () => {
+                    {item('Set expiry', async () => {
                       const v = await promptDialog({
                         title: `Expiry for /${x.code}`,
                         body: 'ISO timestamp, or leave blank for a code that never expires.',
@@ -620,8 +727,7 @@ export default function Admin() {
                       });
                       if (v !== null) patch(`/v1/admin/qr-codes/${x.id}`, { expires_at: v.trim() || null }, 'Expiry updated');
                     })}
-                    {sep}
-                    {link('Max uses', async () => {
+                    {item('Set max uses', async () => {
                       const v = await promptDialog({
                         title: `Use limit for /${x.code}`,
                         body: 'Leave blank for unlimited scans.',
@@ -631,13 +737,12 @@ export default function Admin() {
                       });
                       if (v !== null) patch(`/v1/admin/qr-codes/${x.id}`, { max_uses: v.trim() ? +v : null }, 'Max uses updated');
                     })}
-                    {sep}
-                    {link(
-                      x.voided ? 'Unvoid' : 'Void',
+                    {item(
+                      x.voided ? 'Restore this code' : 'Void this code',
                       () => patch(`/v1/admin/qr-codes/${x.id}`, { voided: !x.voided }, x.voided ? 'Code restored' : 'Code voided'),
                       !x.voided,
                     )}
-                  </>
+                  </Actions>
                 ),
               },
             ]}
@@ -649,11 +754,12 @@ export default function Admin() {
         <>
           <h2>Account balances</h2>
           <Table
+            loading={loading}
             rows={d.ledger?.balances ?? []}
             empty="No accounts."
             cols={[
               { h: 'Account', get: (x) => <code>{x.account}</code> },
-              { h: 'Balance', sort: (x) => x.balance, get: (x) => x.balance },
+              { h: 'Balance', num: true, sort: (x) => x.balance, get: (x) => x.balance },
               { h: '', get: (x) => link('Entries', () => setLedgerAccount(x.account)) },
             ]}
           />
@@ -662,12 +768,13 @@ export default function Admin() {
           </h2>
           {ledgerAccount && link('Clear account filter', () => setLedgerAccount(''))}
           <Table
+            loading={loading}
             rows={d.ledger?.entries ?? []}
             empty="No entries."
             cols={[
               { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
               { h: 'Account', get: (x) => <code>{x.account}</code> },
-              { h: 'Amount', sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'err' : 'ok'}>{x.amount}</span> },
+              { h: 'Amount', num: true, sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'err' : 'ok'}>{x.amount}</span> },
               { h: 'Ref', get: (x) => <code>{x.ref}</code> },
             ]}
           />
@@ -679,6 +786,7 @@ export default function Admin() {
           <h2>Audit log</h2>
           <p className="muted">Every privileged override, newest first.</p>
           <Table
+            loading={loading}
             rows={d.audit ?? []}
             empty="No admin actions recorded."
             cols={[

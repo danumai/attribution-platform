@@ -1,6 +1,12 @@
 /* Landing surface. World: printed ticket stock — buff card, thermal-black ink,
    process-blue validation ink, ochre for value held back, green for value posted.
-   The composition is a boarding pass: coupon, perforation, stub. */
+   The composition is a boarding pass: coupon, perforation, stub.
+
+   This pass raises the world's material fidelity: laid-paper fibre in the stock,
+   letterpress deboss on the display line, a guilloché security tint on the stub,
+   crop marks as press furniture, and rubber-stamped tier states. Motion is one
+   authored sequence — the pass coming off the press — plus scroll-linked moves
+   that only exist where the scroll itself carries the meaning. */
 
 .lp {
   --paper: #e7ddc9;
@@ -13,11 +19,22 @@
   --line-soft: #e6dcc7;
   --press: #1c39bb;
   --press-lit: #2a4ae0;
+  --press-deep: #142a8c;
   --hold: #a35c00;
+  --hold-strong: #8a4e00;
   --hold-soft: #f6ecd8;
+  --hold-edge: #e3c893;
   --post: #0a6b4a;
   --post-soft: #e4f0e9;
+  --post-edge: #b6d8c8;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* laid fibre in the card surface — the tooth you feel on real ticket stock */
+  --fibre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.92' numOctaves='4'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23f)' opacity='.55'/%3E%3C/svg%3E");
+  /* uneven ink coverage, used as a mask so a stamp reads as pressed, not printed */
+  --distress: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='110' height='110'%3E%3Cfilter id='d'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.34' numOctaves='3'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='2.1' intercept='.34'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='110' height='110' filter='url(%23d)'/%3E%3C/svg%3E");
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* printed stock does not follow the OS theme; the portal still does */
   color-scheme: light;
@@ -36,15 +53,19 @@
   color: var(--ink-soft);
 }
 
-/* the portal's grid vignette and entrance stagger belong to the app, not to the page */
+/* the portal's grid vignette and entrance stagger belong to the app, not to the page.
+   The ground becomes a desk: fine grain over a slow, uneven wash of the stock's own tone. */
 body:has(.lp) { background: #e7ddc9; }
 body:has(.lp)::before {
   display: block;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23f)' opacity='.5'/%3E%3C/svg%3E");
-  background-size: 140px 140px;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23f)' opacity='.5'/%3E%3C/svg%3E"),
+    radial-gradient(120% 80% at 18% -10%, color-mix(in srgb, #ffffff 46%, transparent), transparent 62%),
+    radial-gradient(90% 70% at 92% 8%, color-mix(in srgb, #1a1712 16%, transparent), transparent 58%);
+  background-size: 140px 140px, cover, cover;
   mask-image: none;
   -webkit-mask-image: none;
-  opacity: 0.08;
+  opacity: 0.1;
   mix-blend-mode: multiply;
 }
 .lp > *, .lp main > * { animation: none; }
@@ -67,6 +88,28 @@ body:has(.lp)::before {
   margin-inline: auto;
 }
 
+/* ---------- the stock itself ---------- */
+
+/* every surface cut from card carries the fibre. The overlay sits under content
+   (negative z-index inside an isolated stacking context) so it tints the card,
+   never the type. */
+.lp-stocked {
+  position: relative;
+  isolation: isolate;
+}
+.lp-stocked::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: var(--fibre);
+  background-size: 120px 120px;
+  opacity: 0.055;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
 /* ---------- ticket vocabulary ---------- */
 
 .lp-field { display: grid; gap: 4px; }
@@ -84,6 +127,7 @@ body:has(.lp)::before {
   font-size: 13px;
   letter-spacing: -0.01em;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 /* the tear line, biting a notch out of both edges of the card */
@@ -110,18 +154,42 @@ body:has(.lp)::before {
   translate: -50% 0;
   border-radius: 50%;
   background: var(--paper);
-  box-shadow: inset 0 -1px 0 rgba(26, 23, 18, 0.12);
+  box-shadow: inset 0 -1px 0 rgba(26, 23, 18, 0.12), inset 0 2px 3px rgba(26, 23, 18, 0.14);
 }
 .lp-perf::after { top: -11px; }
 .lp-notch { bottom: -11px; }
 
 .lp-pass-shell {
   position: relative;
+  isolation: isolate;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--stock);
-  box-shadow: 0 1px 0 #fff inset, 0 2px 1px rgba(26, 23, 18, 0.04),
-    0 24px 50px -30px rgba(26, 23, 18, 0.45);
+  /* contact, not lift: a hairline lit edge, a tight contact shadow, one long cast */
+  box-shadow:
+    0 1px 0 #fff inset,
+    0 -1px 0 rgba(26, 23, 18, 0.05) inset,
+    0 1px 2px rgba(26, 23, 18, 0.05),
+    0 10px 18px -14px rgba(26, 23, 18, 0.3),
+    0 44px 64px -42px rgba(26, 23, 18, 0.55);
+}
+
+/* press furniture: registration crop marks around a trimmed card */
+.lp-cropped::after {
+  content: "";
+  position: absolute;
+  inset: -21px;
+  pointer-events: none;
+  --m: linear-gradient(var(--line) 0 0);
+  background-image: var(--m), var(--m), var(--m), var(--m), var(--m), var(--m), var(--m), var(--m);
+  background-repeat: no-repeat;
+  background-size:
+    13px 1px, 1px 13px, 13px 1px, 1px 13px,
+    13px 1px, 1px 13px, 13px 1px, 1px 13px;
+  background-position:
+    left top, left top, right top, right top,
+    left bottom, left bottom, right bottom, right bottom;
+  opacity: 0.7;
 }
 
 /* ---------- nav ---------- */
@@ -142,6 +210,17 @@ body:has(.lp)::before {
   justify-content: space-between;
   gap: 18px;
 }
+/* the page feeding through the press — reading progress in validation ink */
+.lp-nav-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--press);
+  transform: scaleX(0);
+  transform-origin: left;
+}
 .lp-mark {
   display: flex;
   align-items: center;
@@ -153,12 +232,20 @@ body:has(.lp)::before {
   text-decoration: none;
   white-space: nowrap;
 }
-.lp-mark svg { flex: 0 0 auto; width: 26px; height: 26px; fill: var(--ink); }
+.lp-mark svg {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  fill: var(--ink);
+  transition: fill 0.2s var(--ease), rotate 0.35s var(--ease);
+}
+.lp-mark:hover svg { fill: var(--press); rotate: -4deg; }
 .lp-nav-actions { display: flex; align-items: center; gap: 10px; }
 
 /* ---------- buttons ---------- */
 
 .lp-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -174,23 +261,46 @@ body:has(.lp)::before {
   cursor: pointer;
   background: var(--press);
   color: #fff;
-  transition: background 0.16s ease, transform 0.1s ease, border-color 0.16s ease,
-    box-shadow 0.16s ease;
+  box-shadow: 0 1px 0 var(--press-deep), 0 1px 2px color-mix(in srgb, var(--press-deep) 25%, transparent);
+  transition: background 0.16s ease, transform 0.09s ease, box-shadow 0.16s ease,
+    border-color 0.16s ease;
 }
-.lp-btn:hover { background: var(--press-lit); text-decoration: none; }
-.lp-btn:active { transform: translateY(1px); }
+.lp-btn:hover {
+  background: var(--press-lit);
+  text-decoration: none;
+  box-shadow: 0 2px 0 var(--press-deep), 0 6px 14px -8px color-mix(in srgb, var(--press-deep) 55%, transparent);
+}
+/* a key press: the button seats into the card and its printed edge disappears */
+.lp-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 0 0 var(--press-deep), 0 1px 2px color-mix(in srgb, var(--press-deep) 30%, transparent);
+}
+
 .lp-btn-ghost {
   background: transparent;
   color: var(--ink);
   border-color: var(--mut);
+  box-shadow: none;
+  /* ink soaking across the card from the left, rather than a state swap */
+  background-image: linear-gradient(var(--stock-2) 0 0);
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+  transition: background-size 0.28s var(--ease), border-color 0.16s ease, transform 0.09s ease,
+    color 0.16s ease;
 }
-.lp-btn-ghost:hover { background: var(--stock-2); border-color: var(--mut); }
+.lp-btn-ghost:hover {
+  background-color: transparent;
+  background-size: 100% 100%;
+  border-color: var(--ink);
+  box-shadow: none;
+}
+.lp-btn-ghost:active { transform: translateY(1px); box-shadow: none; }
 .lp-btn-lg { padding: 14px 26px; font-size: 15px; }
 .lp :focus-visible { outline: 2px solid var(--press); outline-offset: 3px; }
 
 /* ---------- hero ---------- */
 
-.lp-hero { padding: 34px 0 12px; }
+.lp-hero { padding: 46px 0 12px; }
 
 .lp-pass {
   display: grid;
@@ -219,12 +329,19 @@ body:has(.lp)::before {
   text-wrap: balance;
   margin: 0;
   color: var(--ink);
+  /* letterpress: the type is struck into the stock, lit from above */
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 -1px 0 rgba(26, 23, 18, 0.12);
 }
-.lp-h1 em { font-style: normal; color: var(--press); }
+.lp-h1 em {
+  position: relative;
+  font-style: normal;
+  color: var(--press);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+}
 
 .lp-lede {
   max-width: 52ch;
-  margin-top: 22px;
+  margin-top: 24px;
   font-size: 16.5px;
   line-height: 1.62;
   color: var(--ink-soft);
@@ -235,19 +352,39 @@ body:has(.lp)::before {
 .lp-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 .lp-cta-note { margin-top: 16px; font-size: 13px; color: var(--mut); }
 
-/* the stub: the part torn off and scanned */
+/* the stub: the part torn off and scanned. A security tint sits under it, the way
+   a real instrument prints a guilloché ground that a photocopier cannot hold. */
 .lp-stub {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   gap: 20px;
   padding: 40px 30px;
 }
+.lp-stub::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    repeating-radial-gradient(circle at 78% 16%, transparent 0 7px,
+      color-mix(in srgb, var(--press) 40%, transparent) 7px 7.7px, transparent 7.7px 15px),
+    repeating-radial-gradient(circle at 14% 84%, transparent 0 9px,
+      color-mix(in srgb, var(--press) 34%, transparent) 9px 9.7px, transparent 9.7px 19px);
+  opacity: 0.13;
+  mask-image: radial-gradient(120% 90% at 60% 40%, var(--ink) 30%, transparent 78%);
+  -webkit-mask-image: radial-gradient(120% 90% at 60% 40%, var(--ink) 30%, transparent 78%);
+}
+
 .lp-code {
   position: relative;
   padding: 14px;
   border-radius: 6px;
   background: #fff;
   border: 1px solid var(--line-soft);
+  box-shadow: 0 1px 2px rgba(26, 23, 18, 0.05);
   overflow: hidden;
 }
 .lp-code svg { display: block; width: 100%; height: auto; fill: var(--ink); }
@@ -263,7 +400,14 @@ body:has(.lp)::before {
   );
   border-bottom: 2px solid var(--press);
   opacity: 0;
-  animation: lp-sweep 5.2s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+/* the plate takes the reader's ring the instant the sweep clears the code */
+.lp-code-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--press) inset;
+  opacity: 0;
 }
 @keyframes lp-sweep {
   0% { transform: translateY(-100%); opacity: 0; }
@@ -271,23 +415,49 @@ body:has(.lp)::before {
   46% { transform: translateY(227%); opacity: 1; }
   56%, 100% { transform: translateY(227%); opacity: 0; }
 }
+@keyframes lp-ring {
+  0%, 44% { opacity: 0; }
+  47% { opacity: 1; }
+  62%, 100% { opacity: 0; }
+}
 
 .lp-stub-fields { display: grid; gap: 15px; margin: 0; }
 .lp-status { display: inline-grid; }
-.lp-status > span { grid-area: 1 / 1; font-family: var(--mono); font-size: 13px; }
-.lp-status-idle { color: var(--mut); animation: lp-flip-a 5.2s steps(1, end) infinite; }
-.lp-status-done { color: var(--post); font-weight: 600; animation: lp-flip-b 5.2s steps(1, end) infinite; }
+.lp-status > span {
+  grid-area: 1 / 1;
+  font-family: var(--mono);
+  font-size: 13px;
+  justify-self: start;
+}
+.lp-status-idle { color: var(--mut); }
+.lp-status-done { color: var(--post); font-weight: 600; opacity: 0; }
 @keyframes lp-flip-a { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
 @keyframes lp-flip-b { 0%, 45% { opacity: 0; } 46%, 100% { opacity: 1; } }
+
+/* the stub's tail: serial, revision and press number, the way stock is marked */
+.lp-serial {
+  margin-top: auto;
+  padding-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--mut);
+  border-top: 1px dashed var(--line);
+  padding-block-start: 14px;
+}
 
 /* ---------- the posting board ---------- */
 
 .lp-board {
-  margin-top: 16px;
+  margin-top: 18px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--stock);
   overflow: hidden;
+  box-shadow: 0 1px 0 #fff inset, 0 18px 40px -34px rgba(26, 23, 18, 0.4);
 }
 .lp-board-head {
   display: flex;
@@ -311,7 +481,7 @@ body:has(.lp)::before {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: 4px;
   border: 1px solid var(--line);
   color: var(--mut);
 }
@@ -323,11 +493,11 @@ body:has(.lp)::before {
   gap: 16px;
   padding: 13px 20px;
   border-bottom: 1px solid var(--line-soft);
-  animation: lp-post 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: lp-post 0.55s var(--ease) both;
 }
 .lp-board-row:last-child { border-bottom: 0; }
 @keyframes lp-post {
-  from { opacity: 0; transform: translateY(-10px); filter: blur(4px); }
+  from { opacity: 0; transform: translateY(-12px); filter: blur(5px); }
 }
 .lp-board-meta { display: grid; gap: 2px; min-width: 0; }
 .lp-board-meta b {
@@ -354,6 +524,34 @@ body:has(.lp)::before {
   color: var(--post);
   font-variant-numeric: tabular-nums;
 }
+/* the ink setting on the page as the figure lands */
+.lp-board-row:first-child .lp-board-coins { animation: lp-ink 0.6s var(--ease) both; }
+@keyframes lp-ink { from { filter: blur(3px); opacity: 0.2; } }
+
+.lp-board-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--stock-2);
+}
+.lp-board-foot span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+.lp-board-foot b {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
 .lp-tier {
   justify-self: start;
   padding: 3px 9px;
@@ -364,13 +562,24 @@ body:has(.lp)::before {
   text-transform: uppercase;
   border: 1px solid;
 }
-.lp-tier-guest { color: #8a4e00; background: var(--hold-soft); border-color: #e3c893; }
-.lp-tier-verified { color: var(--post); background: var(--post-soft); border-color: #b6d8c8; }
+.lp-tier-guest { color: var(--hold-strong); background: var(--hold-soft); border-color: var(--hold-edge); }
+.lp-tier-verified { color: var(--post); background: var(--post-soft); border-color: var(--post-edge); }
 
 /* ---------- section frame ---------- */
 
-.lp-section { padding: 100px 0 0; }
+.lp-section { padding: 108px 0 0; }
 .lp-section-head { max-width: 62ch; margin-bottom: 40px; }
+
+/* press furniture: the trim rule the sheet is cut along, with its registration
+   tick struck in validation ink. Graphic structure, not a label. */
+.lp-trim {
+  height: 1px;
+  margin: 0 0 34px;
+  border: 0;
+  background: linear-gradient(to right, var(--press) 0 26px,
+    color-mix(in srgb, var(--ink) 26%, transparent) 26px);
+}
+
 .lp-h2 {
   font-family: var(--font-display), var(--font-sans), sans-serif;
   font-weight: 800;
@@ -383,6 +592,7 @@ body:has(.lp)::before {
   color: var(--ink);
   margin: 0;
   display: block;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 .lp-h2::after { content: none; }
 .lp-sub {
@@ -402,9 +612,15 @@ body:has(.lp)::before {
   border-radius: 12px;
   background: var(--stock);
   overflow: hidden;
-  box-shadow: 0 1px 0 #fff inset, 0 20px 44px -30px rgba(26, 23, 18, 0.4);
+  box-shadow: 0 1px 0 #fff inset, 0 1px 2px rgba(26, 23, 18, 0.04),
+    0 34px 54px -40px rgba(26, 23, 18, 0.5);
 }
-.lp-leg { position: relative; padding: 30px 26px 32px; }
+.lp-leg {
+  position: relative;
+  padding: 30px 26px 32px;
+  transition: background 0.24s ease;
+}
+.lp-leg:hover { background: color-mix(in srgb, var(--stock-2) 60%, transparent); }
 .lp-leg + .lp-leg::before {
   content: "";
   position: absolute;
@@ -447,6 +663,8 @@ body:has(.lp)::before {
   gap: 20px;
 }
 .lp-class {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 32px 30px 30px;
@@ -469,7 +687,31 @@ body:has(.lp)::before {
   letter-spacing: -0.026em;
   color: var(--ink);
 }
-.lp-amount {
+
+/* struck across the card at an angle, with the uneven coverage of a real stamp */
+.lp-stamp {
+  position: absolute;
+  bottom: 22px;
+  right: 24px;
+  padding: 6px 14px 5px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  rotate: -11deg;
+  opacity: 0.34;
+  pointer-events: none;
+  -webkit-mask-image: var(--distress);
+  mask-image: var(--distress);
+  -webkit-mask-size: 110px 110px;
+  mask-size: 110px 110px;
+}
+.lp-class-guest .lp-stamp { color: var(--hold); }
+.lp-class-verified .lp-stamp { color: var(--post); }
+
+.lp-class .lp-amount {
   font-family: var(--mono);
   font-size: 34px;
   font-weight: 600;
@@ -479,13 +721,14 @@ body:has(.lp)::before {
 }
 .lp-class-guest .lp-amount { color: var(--hold); }
 .lp-class-verified .lp-amount { color: var(--post); }
-.lp-amount small {
+.lp-class .lp-amount small {
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0;
   color: var(--mut);
   margin-left: 8px;
 }
+.lp-num { position: relative; }
 .lp-meter {
   height: 6px;
   margin: 20px 0 18px;
@@ -504,23 +747,41 @@ body:has(.lp)::before {
 @keyframes lp-fill { from { transform: scaleX(0); } }
 .lp-class p { font-size: 15px; line-height: 1.62; color: var(--ink-soft); }
 .lp-class p + p { margin-top: 12px; }
-.lp-class-foot {
+.lp-class .lp-class-foot {
   margin-top: auto;
   padding-top: 22px;
+  /* keep the footnote clear of the struck stamp in the same corner */
+  padding-right: 128px;
   font-size: 12.5px;
   color: var(--mut);
 }
 
-/* ---------- fare rules: the money controls, as a statement ---------- */
+/* ---------- fare rules: the money controls, printed on the back ---------- */
 
-.lp-rules { border-top: 1px solid var(--line); }
+.lp-rules {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--stock);
+  overflow: hidden;
+  box-shadow: 0 1px 0 #fff inset, 0 1px 2px rgba(26, 23, 18, 0.04);
+}
 .lp-rule {
+  position: relative;
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr) 190px;
+  grid-template-columns: 220px minmax(0, 1fr) 190px;
   gap: 24px;
   align-items: baseline;
-  padding: 24px 4px;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 26px 30px;
+  transition: background 0.24s ease;
+}
+.lp-rule:hover { background: color-mix(in srgb, var(--stock-2) 60%, transparent); }
+.lp-rule + .lp-rule::before {
+  content: "";
+  position: absolute;
+  inset: 0 22px auto 22px;
+  height: 2px;
+  background: repeating-linear-gradient(to right, var(--line) 0 5px, transparent 5px 11px);
 }
 .lp-rule dt {
   font-size: 14.5px;
@@ -535,17 +796,18 @@ body:has(.lp)::before {
   line-height: 1.6;
   color: var(--ink-soft);
 }
-/* --mut is only 4.15:1 on the buff ground; these two sit on it */
 .lp-rule-val {
   font-family: var(--mono);
   font-size: 12.5px;
-  color: var(--ink-soft);
+  color: var(--mut);
   text-align: right;
+  transition: color 0.2s ease;
 }
+.lp-rule:hover .lp-rule-val { color: var(--press); }
 
 /* ---------- close ---------- */
 
-.lp-close { padding: 100px 0 0; }
+.lp-close { padding: 108px 0 0; }
 .lp-close-pass { display: grid; grid-template-columns: minmax(0, 1fr) 30px 300px; }
 .lp-close-main { padding: 46px 42px; }
 .lp-close-stub {
@@ -558,7 +820,7 @@ body:has(.lp)::before {
 .lp-close-stub p { font-size: 14px; line-height: 1.6; color: var(--ink-soft); }
 
 .lp-foot {
-  margin-top: 84px;
+  margin-top: 92px;
   padding: 24px 0 40px;
   border-top: 1px solid var(--line);
   display: flex;
@@ -571,32 +833,171 @@ body:has(.lp)::before {
 }
 .lp-foot a { color: var(--ink-soft); font-weight: 500; }
 .lp-foot a:hover { color: var(--press); }
+.lp-foot-press {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
 
-/* ---------- scroll-linked arrival, where supported ---------- */
+/* ============================================================
+   MOTION
+   Everything below is additive to a page that is already fully
+   legible without it. Nothing here hides content by default.
+   ============================================================ */
 
-/* the page's one scroll-authored move: the strip deals itself out coupon by coupon,
-   and the two fare meters draw to the amounts they argue about */
+@media (prefers-reduced-motion: no-preference) {
+  /* --- the authored moment: the pass comes off the press ---
+     The card lands, the routing fields stamp, the display line is struck,
+     the validation rule is ruled under it, and the stub prints last. */
+
+  .lp .lp-pass,
+  .lp .lp-board {
+    animation: lp-press-land 0.78s var(--ease) both;
+  }
+  .lp .lp-board { animation-delay: 0.34s; }
+  @keyframes lp-press-land {
+    from { opacity: 0; transform: translateY(20px) scale(0.992); filter: blur(7px); }
+  }
+
+  .lp .lp-routing .lp-field { animation: lp-strike 0.34s var(--ease) both; }
+  .lp .lp-routing .lp-field:nth-child(1) { animation-delay: 0.3s; }
+  .lp .lp-routing .lp-field:nth-child(2) { animation-delay: 0.37s; }
+  .lp .lp-routing .lp-field:nth-child(3) { animation-delay: 0.44s; }
+  @keyframes lp-strike {
+    from { opacity: 0; transform: scale(1.06); }
+  }
+
+  /* the headline is struck line by line: a wipe, not a fade */
+  .lp .lp-h1 {
+    animation: lp-struck 0.72s var(--ease) 0.42s both;
+    clip-path: inset(0 0 0 0);
+  }
+  @keyframes lp-struck {
+    from { opacity: 0; clip-path: inset(0 0 108% 0); transform: translateY(8px); }
+  }
+
+  /* the second plate of the press run lands on the word the page turns on */
+  .lp .lp-h1 em { animation: lp-second-plate 0.42s var(--ease) 1.02s both; }
+  @keyframes lp-second-plate { from { color: var(--ink); } }
+
+  .lp .lp-lede { animation: lp-rise 0.6s var(--ease) 0.72s both; }
+  .lp .lp-cta { animation: lp-rise 0.6s var(--ease) 0.82s both; }
+  .lp .lp-cta-note { animation: lp-rise 0.6s var(--ease) 0.9s both; }
+  @keyframes lp-rise { from { opacity: 0; transform: translateY(10px); } }
+
+  /* the stub prints downward, the way a thermal head lays a code */
+  .lp .lp-code { animation: lp-print 0.66s var(--ease) 0.62s both; }
+  @keyframes lp-print { from { clip-path: inset(0 0 100% 0); } }
+  .lp .lp-stub-fields .lp-field { animation: lp-rise 0.5s var(--ease) both; }
+  .lp .lp-stub-fields .lp-field:nth-child(1) { animation-delay: 0.86s; }
+  .lp .lp-stub-fields .lp-field:nth-child(2) { animation-delay: 0.92s; }
+  .lp .lp-stub-fields .lp-field:nth-child(3) { animation-delay: 0.98s; }
+  .lp .lp-stub-fields .lp-field:nth-child(4) { animation-delay: 1.04s; }
+  .lp .lp-serial { animation: lp-rise 0.5s var(--ease) 1.12s both; }
+
+  /* --- the recurring validation loop, only while the stub is on screen --- */
+  .lp-stub[data-run] .lp-scan {
+    animation: lp-sweep 5.2s cubic-bezier(0.45, 0, 0.2, 1) 1.6s infinite;
+  }
+  .lp-stub[data-run] .lp-code-ring {
+    animation: lp-ring 5.2s linear 1.6s infinite;
+  }
+  .lp-stub[data-run] .lp-status-idle {
+    animation: lp-flip-a 5.2s steps(1, end) 1.6s infinite;
+  }
+  .lp-stub[data-run] .lp-status-done {
+    animation: lp-flip-b 5.2s steps(1, end) 1.6s infinite;
+  }
+}
+
+/* --- scroll-linked moves: only where the scroll itself is the mechanism --- */
+
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* the sheet feeding through */
+    .lp .lp-nav-progress {
+      animation: lp-feed linear both;
+      animation-timeline: scroll(root block);
+    }
+    @keyframes lp-feed { to { transform: scaleX(1); } }
+
+    /* the nav lifts off the page once the reader has left the top */
+    .lp .lp-nav {
+      animation: lp-nav-set linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 130px;
+    }
+    @keyframes lp-nav-set {
+      to { box-shadow: 0 14px 26px -24px rgba(26, 23, 18, 0.75); }
+    }
+  }
+}
+
 @supports (animation-timeline: view()) {
   @media (prefers-reduced-motion: no-preference) {
-    @keyframes lp-arrive { from { opacity: 0; transform: translateY(24px); } }
-    .lp-leg {
+    /* the strip deals itself out, coupon by coupon, from the tear line */
+    @keyframes lp-arrive {
+      from { opacity: 0; transform: translate(-14px, 26px); filter: blur(4px); }
+    }
+    .lp .lp-leg {
       animation: lp-arrive linear both;
       animation-timeline: view();
       animation-range: entry 5% entry 55%;
     }
-    .lp-leg:nth-child(2) { animation-range: entry 8% entry 58%; }
-    .lp-leg:nth-child(3) { animation-range: entry 11% entry 61%; }
-    .lp-leg:nth-child(4) { animation-range: entry 14% entry 64%; }
+    .lp .lp-leg:nth-child(2) { animation-range: entry 9% entry 59%; }
+    .lp .lp-leg:nth-child(3) { animation-range: entry 13% entry 63%; }
+    .lp .lp-leg:nth-child(4) { animation-range: entry 17% entry 67%; }
 
-    .lp-meter i {
+    /* the two fares draw to the amounts they argue about */
+    .lp .lp-meter i {
       animation: lp-fill linear both;
       animation-timeline: view();
       animation-range: entry 20% entry 70%;
+    }
+
+    /* and their figures count up to meet the meters */
+    @property --n {
+      syntax: "<integer>";
+      inherits: false;
+      initial-value: 0;
+    }
+    .lp .lp-num { color: transparent; }
+    .lp .lp-num::after {
+      content: counter(n);
+      counter-reset: n var(--n);
+      position: absolute;
+      inset: 0;
+      color: var(--fig);
+      --n: var(--to);
+      animation: lp-count linear both;
+      animation-timeline: view();
+      animation-range: entry 20% entry 70%;
+    }
+    @keyframes lp-count { from { --n: 0; } }
+    .lp .lp-class-guest { --fig: var(--hold); }
+    .lp .lp-class-verified { --fig: var(--post); }
+
+    /* the stamp lands once the fare it marks is on screen */
+    .lp .lp-stamp {
+      animation: lp-struck-stamp linear both;
+      animation-timeline: view();
+      animation-range: entry 28% entry 52%;
+    }
+    @keyframes lp-struck-stamp {
+      from { opacity: 0; rotate: -22deg; scale: 1.5; }
+      to { opacity: 0.34; rotate: -11deg; scale: 1; }
     }
   }
 }
 
 /* ---------- responsive ---------- */
+
+@media (max-width: 1180px) {
+  /* crop marks need bleed room; below the measure there is none */
+  .lp-cropped::after { display: none; }
+}
 
 @media (max-width: 1000px) {
   .lp-pass, .lp-close-pass { grid-template-columns: minmax(0, 1fr); }
@@ -616,35 +1017,45 @@ body:has(.lp)::before {
   }
   .lp-notch { left: auto; right: -11px; }
   .lp-stub, .lp-close-stub { padding: 4px 32px 36px; }
-  .lp-stub { flex-direction: row; align-items: center; gap: 28px; }
-  .lp-code { flex: 0 0 190px; }
-  .lp-stub-fields { flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lp-stub {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px 28px;
+  }
+  .lp-stub-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lp-serial { grid-column: 1 / -1; margin-top: 4px; }
   .lp-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lp-leg:nth-child(3), .lp-leg:nth-child(4) { border-top: 1px solid var(--line-soft); }
-  .lp-rule { grid-template-columns: 190px minmax(0, 1fr); }
+  .lp-rule { grid-template-columns: 200px minmax(0, 1fr); padding: 24px 24px; }
   .lp-rule-val { grid-column: 2; text-align: left; }
 }
 
 @media (max-width: 720px) {
   .lp-wrap, .lp-nav-inner { width: calc(100% - 32px); }
-  .lp-hero { padding-top: 22px; }
+  .lp-hero { padding-top: 26px; }
   /* keeps "Pay for signups," on one line so the authored break still lands */
   .lp-h1 { font-size: 34px; }
   .lp-coupon, .lp-close-main { padding: 32px 22px 28px; }
   .lp-routing { gap: 10px 20px; padding-bottom: 20px; margin-bottom: 24px; }
-  .lp-stub, .lp-close-stub { flex-direction: column; align-items: stretch; padding: 4px 22px 28px; }
-  .lp-code { flex: 0 0 auto; max-width: 210px; }
-  .lp-section, .lp-close { padding-top: 72px; }
+  .lp-stub { grid-template-columns: minmax(0, 1fr); padding: 4px 22px 28px; }
+  .lp-close-stub { padding: 4px 22px 28px; }
+  .lp-code { max-width: 210px; }
+  .lp-section, .lp-close { padding-top: 76px; }
+  .lp-rule-head { margin-bottom: 26px; }
   .lp-strip, .lp-classes { grid-template-columns: minmax(0, 1fr); }
   .lp-classes { gap: 16px; }
   .lp-leg + .lp-leg { border-top: 1px solid var(--line-soft); }
   .lp-leg + .lp-leg::before { content: none; }
-  .lp-rule { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 20px 2px; }
+  .lp-rule { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 22px 20px; }
+  .lp-rule + .lp-rule::before { inset: 0 16px auto 16px; }
   .lp-rule-val { grid-column: 1; text-align: left; }
   .lp-board-row { grid-template-columns: 70px minmax(0, 1fr); gap: 8px 12px; }
   .lp-board-coins { grid-column: 2; grid-row: 1; justify-self: end; }
   .lp-board-meta { grid-column: 1 / -1; }
   .lp-cta .lp-btn { flex: 1 1 100%; }
+  .lp-stamp { bottom: 18px; right: 18px; font-size: 13px; }
+  .lp-class .lp-class-foot { padding-right: 104px; }
 }
 
 @media (max-width: 480px) {

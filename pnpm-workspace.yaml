@@ -13,3 +13,5 @@ allowBuilds:
   '@prisma/client': false
   # opencollective funding banner, nothing functional.
   '@nestjs/core': false
+  # telemetry ping bundled with swagger-ui-dist's postinstall — not needed to render docs.
+  '@scarf/scarf': false

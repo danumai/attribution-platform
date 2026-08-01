@@ -44,7 +44,7 @@ export default function ActivityBoard() {
   }, []);
 
   return (
-    <div className="lp-board">
+    <div className="lp-board lp-stocked">
       <div className="lp-board-head">
         <span className="lp-board-title">Redemptions posting</span>
         <span className="lp-tag">Example data</span>
@@ -68,6 +68,10 @@ export default function ActivityBoard() {
           </li>
         ))}
       </ul>
+      <div className="lp-board-foot">
+        <span>Debited from campaign budgets · this view</span>
+        <b>{events.reduce((n, e) => n + e.coins, 0)} coins</b>
+      </div>
     </div>
   );
 }

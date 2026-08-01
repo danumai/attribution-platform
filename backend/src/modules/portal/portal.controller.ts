@@ -10,6 +10,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BASE_URL } from '../../config';
 import { QrStyle, validateStyle } from '../../common/qr';
 import { sha256, validateLandingUrl } from '../../common/security';
@@ -18,6 +19,8 @@ import { prisma } from '../../database/prisma';
 import { AuthGuard, Session } from '../auth/auth.guard';
 import { SessionClaims, newApiKey, newShortCode } from '../auth/tokens';
 
+@ApiTags('Portal')
+@ApiBearerAuth('session')
 @Controller('v1')
 @UseGuards(AuthGuard)
 export class PortalController {

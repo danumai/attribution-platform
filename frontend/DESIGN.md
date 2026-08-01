@@ -12,6 +12,7 @@ colors:
   rule-soft: "#e6dcc7"
   press-blue: "#1c39bb"
   press-blue-lit: "#2a4ae0"
+  press-blue-deep: "#142a8c"
   held-ochre: "#a35c00"
   held-ochre-strong: "#8a4e00"
   held-wash: "#f6ecd8"
@@ -168,6 +169,7 @@ The palette does the product's accounting. Process blue is validation — the ac
 The rejected alternative was the category default: a dark SaaS gradient hero, a row of identical icon cards, and a logo strip of customers this product does not yet have. That page would have claimed trust. This one demonstrates a mechanism instead.
 
 **Key Characteristics:**
+- The stock is a material, not a colour: laid fibre in the card, an uneven wash on the desk, letterpress relief in the display line
 - Printed, not rendered — the artifact is a physical ticket, so no gradients, no glass, no glow
 - Three inks with fixed jobs: validation, held, posted
 - Monospace for every printed field; caps labels stamped above their values
@@ -179,6 +181,7 @@ The rejected alternative was the category default: a dark SaaS gradient hero, a 
 Warm buff stock under thermal-black ink, with three saturated inks that each carry one financial meaning and never trade jobs.
 
 ### Primary
+- **Press Blue Deep** (`{colors.press-blue-deep}`): the printed edge under a press-blue control. It exists only as the 1px bottom edge and contact shade of the primary button, so the button reads as a key seated in the card; it is never a fill or a text colour.
 - **Press Blue** (`{colors.press-blue}`): validation ink. The scan sweep across the code, the coupon numerals, the primary action, and any border marking a verified state. It is the ink of "this was checked and accepted."
 
 ### Secondary
@@ -233,12 +236,28 @@ The recurring structure is the pass: a CSS grid of `minmax(0, 1fr) 30px 320px` �
 
 Multi-item runs are one bordered container subdivided by perforations (four coupons at desktop, two at 1000px, one at 720px), never a grid of separate cards.
 
+## Materials
+
+The world is printed, so its surfaces carry the properties of print rather than of screens. Four materials do that work, and each is tied to a fact about the product.
+
+- **Laid fibre** (`--fibre`): a fractal-noise tile at 5.5% opacity, multiplied, on every surface cut from stock — passes, strips, fare cards, the posting board. It sits on a `z-index: -1` pseudo-element inside an isolated stacking context so it tints the card and never the type. Card only; the desk has its own grain.
+- **Letterpress relief**: display and section headings carry a white 1px shadow below and a thermal-ink 1px shadow above, so the type reads as struck into the stock under a light from above. It is a relief, never a glow, and never coloured.
+- **Guilloché security tint**: two fine repeating-radial rosettes in press blue at 13% opacity, radially masked, under the stub only. It marks the stub as the part of the instrument that carries value, the way a real ticket prints a ground a photocopier cannot hold. It never appears on a coupon.
+- **Distressed stamp** (`--distress`): a turbulence alpha mask over a 2px outlined, rotated caps word, at 34% opacity. Reserved for the two financial states — `Held` in ochre, `Posted` in green — struck into the card's own whitespace, never over reading text.
+
+**Press furniture.** Registration crop marks (13px hairline brackets, `rule`, 21px outside the trim) frame a full pass at desktop and are dropped below 1180px where there is no bleed room. Every section opens on a trim rule: a 1px line at 26% thermal ink with its first 26px struck in press blue as the registration tick. The trim rule carries no text — a label above a heading is an eyebrow, and this world does not have those.
+
+### Named Rules
+
+**The Rule-on-Ground Rule.** `rule` is 1.19:1 on the buff ground. Any hairline that must be seen on `paper` rather than on `stock` is drawn at 26% thermal ink instead.
+
 ## Elevation & Depth
 
 Paper does not float. Depth comes from the ground being darker than the card, from the punched notch showing ground through the card, and from a single tight cast shadow that reads as a ticket lying on a desk. There is no elevation ramp and no hover lift.
 
 ### Shadow Vocabulary
-- **Lying on the desk** (`0 1px 0 #fff inset, 0 2px 1px rgba(26,23,18,.04), 0 24px 50px -30px rgba(26,23,18,.45)`): the pass and the coupon strip. The inset white is the lit top edge of stock; the wide, heavily negative-spread shadow is contact, not lift.
+- **Lying on the desk** (`0 1px 0 #fff inset, 0 -1px 0 rgba(26,23,18,.05) inset, 0 1px 2px rgba(26,23,18,.05), 0 10px 18px -14px rgba(26,23,18,.3), 0 44px 64px -42px rgba(26,23,18,.55)`): the pass and the coupon strip. Two inset hairlines give the card a lit top edge and a shaded bottom one; the tight pair is contact and the long, heavily negative-spread cast is the card's shadow on the desk. Never a lift.
+- **Seated key** (`0 1px 0 {colors.press-blue-deep}` plus a tinted contact shade): the primary button only. On press the printed edge collapses to zero and the button translates down 1px.
 
 ### Named Rules
 
@@ -275,6 +294,16 @@ The system's signature component: a coupon and a stub joined by a perforation, w
 ### The Posting Board
 A bordered panel whose rows each carry a tier chip, a two-line description and a monospace amount. New rows arrive at the top with a short blurred rise (0.5s). Synthetic rows must be labeled in the panel header.
 
+## Motion
+
+**The authored moment: the pass comes off the press.** On load the hero card lands out of a short blur, the three routing fields are stamped in sequence, the display line is struck by a bottom-up wipe, the word the argument turns on arrives as the second plate of the press run (thermal ink to press blue), and the stub prints downward last. One rehearsed sequence, ~1.4s end to end, exponential ease-out, and nothing in it is hidden by default — every element is fully legible with animation off.
+
+**The validation loop.** The scan sweep, the reader's ring on the code plate, and the `awaiting scan → redeemed` flip are one 5.2s cycle. It runs only while the stub is intersecting the viewport, gated by an observer that toggles a `data-run` attribute and never gates content.
+
+**Scroll-linked, where scroll is the mechanism.** Reading progress feeds a press-blue rule through the nav. The coupon strip deals itself out from the tear line. The two fare meters draw to their amounts and their figures count up to meet them, via a registered `<integer>` custom property; the true figures are in the DOM, so browsers without `animation-timeline` show them outright. The tier stamps land on the fare they mark.
+
+Everything above lives inside `prefers-reduced-motion: no-preference`. Sections do not have entrances.
+
 ## Do's and Don'ts
 
 ### Do:
@@ -283,7 +312,8 @@ A bordered panel whose rows each carry a tier chip, a two-line description and a
 - **Do** subdivide a run of related items with perforations inside one container.
 - **Do** set `color-scheme: light` and restate inherited tokens on any surface built in this world.
 - **Do** step muted text up to `ink-soft` whenever it sits on the buff ground.
-- **Do** give a surface exactly one authored motion event, tied to the mechanism it explains.
+- **Do** give a surface exactly one authored motion event, tied to the mechanism it explains, and let everything else be feedback or scroll-linked to a real relationship.
+- **Do** stop a looping animation when the element it belongs to leaves the viewport.
 - **Do** label synthetic or illustrative data in the container that holds it.
 
 ### Don't:
@@ -294,3 +324,5 @@ A bordered panel whose rows each carry a tier chip, a two-line description and a
 - **Don't** animate something the reader will never see running — a scroll-linked effect below the fold needs `animation-timeline: view()`, not a load-time duration.
 - **Don't** claim customers, logos, testimonials or traction. There are none to show yet.
 - **Don't** use a pill radius for a printed field or state chip.
+- **Don't** rule under a word for emphasis. At display size a full-width rule reads as a hyperlink; emphasis is the second ink.
+- **Don't** let a stamp fall across reading text or clip off the card edge — it is struck into whitespace the layout reserves for it.

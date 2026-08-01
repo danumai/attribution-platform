@@ -10,6 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BASE_URL } from '../../config';
 import { sha256, validateLandingUrl } from '../../common/security';
 import { audit, balance, balances, ledger } from '../../database/ledger';
@@ -21,6 +22,8 @@ const capped = (limit?: string) => Math.min(+(limit ?? 200) || 200, 1000);
 
 // Super admin: reads everything across all orgs, and can act on anything.
 // No org scoping here — that is the whole point of the role.
+@ApiTags('Admin')
+@ApiBearerAuth('session')
 @Controller('v1/admin')
 @UseGuards(AdminGuard)
 export class AdminController {

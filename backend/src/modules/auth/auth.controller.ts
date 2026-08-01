@@ -6,12 +6,14 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import * as bcrypt from 'bcryptjs';
 import { Request } from 'express';
 import { clientIp, rateLimited, sha256, validateLandingUrl } from '../../common/security';
 import { prisma } from '../../database/prisma';
 import { newApiKey, signSession } from './tokens';
 
+@ApiTags('Auth')
 @Controller('v1/auth')
 export class AuthController {
   @Post('signup')

@@ -1,21 +1,25 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   NotFoundException,
   Param,
+  Post,
   Query,
   Req,
   Res,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { BASE_URL, FRONTEND_URL } from '../../config';
-import { QrStyle, renderPng, renderSvg, validateStyle } from '../../common/qr';
+import { QrStyle, isAdvanced, renderPng, renderSvg, validateStyle } from '../../common/qr';
 import { clientIp, rateLimited, sha256 } from '../../common/security';
 import { balance } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
 import { signScanToken } from '../auth/tokens';
 
+@ApiTags('Public')
 @Controller()
 export class PublicController {
   // Liveness + readiness for the load balancer. Hits the DB on purpose: a process that
@@ -113,12 +117,32 @@ export class PublicController {
       style = validateStyle(style);
     }
     const url = `${BASE_URL}/r/${qr.code}`;
-    if (format === 'png' && !style.logo) {
+    // The flat PNG encoder cannot express shapes, gradients, logos or frames — those
+    // styles are SVG-only here, and the studio rasterises them in the browser instead.
+    if (format === 'png' && !isAdvanced(style)) {
       res.setHeader('Content-Type', 'image/png');
       res.send(await renderPng(url, style));
     } else {
       res.setHeader('Content-Type', 'image/svg+xml');
       res.send(await renderSvg(url, style));
     }
+  }
+
+  // Style preview. A logo data URL is far past what a query string can carry, so the
+  // live editor posts the style instead of encoding it into the image URL.
+  @Post('v1/qr-codes/:id/preview')
+  async qrPreview(
+    @Param('id') id: string,
+    @Body() body: { style?: QrStyle },
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    if (rateLimited(`qr-image:${clientIp(req)}`, 120))
+      throw new BadRequestException('too many image requests, try again shortly');
+    const qr = await prisma.qrCode.findUnique({ where: { id }, select: { code: true } });
+    if (!qr) throw new NotFoundException();
+    const style = validateStyle(body?.style ?? {});
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.send(await renderSvg(`${BASE_URL}/r/${qr.code}`, style));
   }
 }

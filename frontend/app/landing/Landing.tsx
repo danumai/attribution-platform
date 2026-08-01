@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import ActivityBoard from './ActivityBoard';
-import CodeMark from './CodeMark';
+import ScanStub from './ScanStub';
 import './landing.css';
 
 const SIGNUP_PROMOTER = '/login?mode=signup&type=promoter';
@@ -92,11 +92,12 @@ export default function Landing() {
             </Link>
           </div>
         </div>
+        <span className="lp-nav-progress" aria-hidden="true" />
       </nav>
 
       <main>
       <header className="lp-hero lp-wrap">
-        <div className="lp-pass lp-pass-shell">
+        <div className="lp-pass lp-pass-shell lp-stocked lp-cropped">
           <div className="lp-coupon">
             <dl className="lp-routing">
               <div className="lp-field">
@@ -143,39 +144,14 @@ export default function Landing() {
             <span className="lp-notch" />
           </div>
 
-          <aside className="lp-stub">
-            <div className="lp-code">
-              <CodeMark />
-              <span className="lp-scan" aria-hidden="true" />
-            </div>
-            <dl className="lp-stub-fields">
-              <div className="lp-field">
-                <dt>Code</dt>
-                <dd>7f3a·c19e·4b02</dd>
-              </div>
-              <div className="lp-field">
-                <dt>Expires</dt>
-                <dd>30 days</dd>
-              </div>
-              <div className="lp-field">
-                <dt>Uses</dt>
-                <dd>Unlimited</dd>
-              </div>
-              <div className="lp-field">
-                <dt>Status</dt>
-                <dd className="lp-status">
-                  <span className="lp-status-idle">awaiting scan</span>
-                  <span className="lp-status-done">redeemed</span>
-                </dd>
-              </div>
-            </dl>
-          </aside>
+          <ScanStub />
         </div>
 
         <ActivityBoard />
       </header>
 
       <section className="lp-section lp-wrap">
+        <hr className="lp-trim" />
         <div className="lp-section-head">
           <h2 className="lp-h2">One scan, four coupons.</h2>
           <p className="lp-sub">
@@ -183,7 +159,7 @@ export default function Landing() {
             clear, and the money only moves at the end of the strip.
           </p>
         </div>
-        <div className="lp-strip">
+        <div className="lp-strip lp-stocked">
           {LEGS.map((l) => (
             <article className="lp-leg" key={l.no}>
               <span className="lp-leg-no">{l.no}</span>
@@ -196,6 +172,7 @@ export default function Landing() {
       </section>
 
       <section className="lp-section lp-wrap">
+        <hr className="lp-trim" />
         <div className="lp-section-head">
           <h2 className="lp-h2">Two fares for the same seat.</h2>
           <p className="lp-sub">
@@ -205,13 +182,17 @@ export default function Landing() {
           </p>
         </div>
         <div className="lp-classes">
-          <article className="lp-class lp-class-guest">
+          <article className="lp-class lp-class-guest lp-stocked">
             <div className="lp-class-top">
               <h3>Guest</h3>
               <span className="lp-tier lp-tier-guest">held</span>
             </div>
+            <span className="lp-stamp" aria-hidden="true">Held</span>
             <p className="lp-amount">
-              10 <small>of 50 coins</small>
+              <span className="lp-num" style={{ '--to': 10 } as React.CSSProperties}>
+                10
+              </span>{' '}
+              <small>of 50 coins</small>
             </p>
             <div className="lp-meter">
               <i />
@@ -226,13 +207,17 @@ export default function Landing() {
             </p>
           </article>
 
-          <article className="lp-class lp-class-verified">
+          <article className="lp-class lp-class-verified lp-stocked">
             <div className="lp-class-top">
               <h3>Verified</h3>
               <span className="lp-tier lp-tier-verified">posted</span>
             </div>
+            <span className="lp-stamp" aria-hidden="true">Posted</span>
             <p className="lp-amount">
-              50 <small>of 50 coins</small>
+              <span className="lp-num" style={{ '--to': 50 } as React.CSSProperties}>
+                50
+              </span>{' '}
+              <small>of 50 coins</small>
             </p>
             <div className="lp-meter">
               <i />
@@ -250,6 +235,7 @@ export default function Landing() {
       </section>
 
       <section className="lp-section lp-wrap">
+        <hr className="lp-trim" />
         <div className="lp-section-head">
           <h2 className="lp-h2">Fare rules, printed on the back.</h2>
           <p className="lp-sub">
@@ -257,7 +243,7 @@ export default function Landing() {
             that keep a lost print run from becoming a lost budget.
           </p>
         </div>
-        <dl className="lp-rules">
+        <dl className="lp-rules lp-stocked">
           {RULES.map((r) => (
             <div className="lp-rule" key={r.term}>
               <dt>{r.term}</dt>
@@ -269,7 +255,8 @@ export default function Landing() {
       </section>
 
       <section className="lp-close lp-wrap">
-        <div className="lp-close-pass lp-pass-shell">
+        <hr className="lp-trim" />
+        <div className="lp-close-pass lp-pass-shell lp-stocked lp-cropped">
           <div className="lp-close-main">
             <h2 className="lp-h2">Ready to print?</h2>
             <p className="lp-sub">
@@ -305,7 +292,7 @@ export default function Landing() {
       </main>
 
       <footer className="lp-foot lp-wrap">
-        <span>QR Reward Platform</span>
+        <span className="lp-foot-press">QR Reward Platform · Stock 04 · Press 01</span>
         <span>
           Activity shown on this page is example data, not live traffic. ·{' '}
           <Link href="/login">Sign in</Link>

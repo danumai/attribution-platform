@@ -69,7 +69,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  token: { type: string, description: Session JWT, 12h expiry }
+                  token: { type: string, description: 'Session JWT, 12h expiry' }
                   org: { $ref: '#/components/schemas/OrgSummary' }
                   api_key:
                     type: string

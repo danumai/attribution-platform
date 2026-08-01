@@ -11,6 +11,7 @@ import {
   UnauthorizedException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import * as jwt from 'jsonwebtoken';
 import { sha256 } from '../../common/security';
 import { ledger } from '../../database/ledger';
@@ -35,6 +36,8 @@ async function lockedBalance(tx: Tx, account: string): Promise<number> {
   return rows[0]?.balance ?? 0;
 }
 
+@ApiTags('Partner API')
+@ApiBearerAuth('apiKey')
 @Controller('v1/redemptions')
 export class PartnerController {
   @Post('verify')
