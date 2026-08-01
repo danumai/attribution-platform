@@ -1,0 +1,15 @@
+packages:
+  - backend
+  - frontend
+
+# pnpm does not hoist, so a package only sees what it declares, and dependency install
+# scripts are blocked until listed here.
+allowBuilds:
+  # Places the schema-engine binary that `prisma migrate` shells out to. Without it,
+  # migrations fail at deploy time rather than at install time.
+  '@prisma/engines': true
+  prisma: true
+  # Its postinstall runs `prisma generate`, which backend's own postinstall already does.
+  '@prisma/client': false
+  # opencollective funding banner, nothing functional.
+  '@nestjs/core': false

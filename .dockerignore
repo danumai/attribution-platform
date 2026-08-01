@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+*.tsbuildinfo
+.env
+.git
+.vscode
+*.md
+!backend/src/**/*.md

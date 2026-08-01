@@ -1,0 +1,9 @@
+node_modules/
+.next/
+dist/
+*.tsbuildinfo
+.env
+.DS_Store
+
+# Prisma client is generated from prisma/schema.prisma at install/build time
+backend/src/generated/

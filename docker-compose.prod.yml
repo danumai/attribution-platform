@@ -1,0 +1,70 @@
+# Whole stack, production mode. Reads secrets from the shell environment — nothing
+# sensitive is committed here.
+#
+#   export JWT_SECRET=$(openssl rand -hex 32)
+#   export ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='...12+ chars...'
+#   export POSTGRES_PASSWORD=$(openssl rand -hex 16)
+#   export BASE_URL=https://api.example.com FRONTEND_URL=https://app.example.com
+#   docker compose -f docker-compose.prod.yml up --build -d
+#
+# Both services expect to sit behind a TLS-terminating proxy: the app refuses to boot with
+# http:// URLs in production because scan tokens travel over those origins in the clear.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: qrreward
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: qrreward
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U qrreward']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://qrreward:${POSTGRES_PASSWORD}@db:5432/qrreward
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      BASE_URL: ${BASE_URL:?set BASE_URL}
+      FRONTEND_URL: ${FRONTEND_URL:?set FRONTEND_URL}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+      # the reverse proxy in front of this container sets X-Forwarded-For
+      TRUST_PROXY: '1'
+    ports:
+      - '4000:4000'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${BASE_URL:?set BASE_URL}
+    restart: unless-stopped
+    depends_on: [api]
+    environment:
+      NODE_ENV: production
+      API_URL: http://api:4000 # server-side calls skip the public internet
+    ports:
+      - '3000:3000'
+
+volumes:
+  dbdata:

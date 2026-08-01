@@ -1,0 +1,23 @@
+{
+  "name": "qrreward",
+  "private": true,
+  "packageManager": "pnpm@11.4.0",
+  "scripts": {
+    "db": "docker compose up -d && docker compose exec -T db sh -c 'until pg_isready -U qrreward -q; do sleep 1; done' && pnpm -C backend run db:deploy",
+    "dev": "pnpm run db && concurrently -n api,web -c cyan,magenta \"pnpm run dev:api\" \"pnpm run dev:web\"",
+    "dev:api": "pnpm -C backend start",
+    "dev:web": "pnpm -C frontend dev",
+    "test": "pnpm -C backend run test:unit && ./e2e-test.sh",
+    "seed": "./seed.sh",
+    "db:reset": "docker compose down -v && pnpm run db",
+    "db:migrate": "pnpm -C backend run db:migrate",
+    "db:studio": "pnpm -C backend run db:studio",
+    "build": "pnpm -C backend run build && pnpm -C frontend run build",
+    "start": "concurrently -n api,web -c cyan,magenta \"pnpm run start:api\" \"pnpm run start:web\"",
+    "start:api": "pnpm -C backend run start:prod",
+    "start:web": "pnpm -C frontend start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

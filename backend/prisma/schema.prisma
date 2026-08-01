@@ -1,0 +1,177 @@
+// Field names are deliberately snake_case and identical to the column names: the API returns
+// rows straight to the frontend, so camelCasing here would rename every JSON key.
+//
+// CHECK constraints (org type, campaign/partnership status, guest_rate <= coin_rate, ...) are
+// not expressible in the Prisma schema. They live in the migration SQL instead. Prisma's
+// differ ignores them, so they persist across `migrate dev` rather than being dropped as drift.
+
+generator client {
+  provider = "prisma-client"
+  // Inside src/ so `tsc` compiles it with everything else — Prisma 7 emits TypeScript, not JS.
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// A tenant. Login is the org (single-user); split out a users table when teams matter.
+model Org {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  /// promoter | publisher | admin — enforced by CHECK
+  type          String
+  email         String   @unique
+  password_hash String
+  /// publishers only; sha256 of the partner API key
+  api_key_hash  String?
+  /// publishers only; where scans redirect
+  landing_url   String?
+  suspended     Boolean  @default(false)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  promoter_partnerships  Partnership[] @relation("promoter")
+  publisher_partnerships Partnership[] @relation("publisher")
+  audit_entries          AuditLog[]
+
+  @@index([api_key_hash])
+  @@map("orgs")
+}
+
+model Partnership {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  promoter_org_id   String   @db.Uuid
+  publisher_org_id  String   @db.Uuid
+  /// coins paid for an identified redemption
+  coin_rate         Int      @default(50)
+  /// coins paid up front for an unidentified one; the delta is held back until upgrade
+  guest_rate        Int      @default(10)
+  /// how long after a guest redemption the delta can still be claimed
+  grace_days        Int      @default(7)
+  /// pending | active — enforced by CHECK
+  status            String   @default("pending")
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+
+  promoter  Org        @relation("promoter", fields: [promoter_org_id], references: [id])
+  publisher Org        @relation("publisher", fields: [publisher_org_id], references: [id])
+  campaigns Campaign[]
+
+  @@unique([promoter_org_id, publisher_org_id])
+  @@index([promoter_org_id])
+  @@index([publisher_org_id])
+  @@map("partnerships")
+}
+
+model Campaign {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partnership_id String   @db.Uuid
+  name           String
+  /// active | paused | ended — enforced by CHECK
+  status         String   @default("active")
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+
+  partnership Partnership  @relation(fields: [partnership_id], references: [id])
+  qr_codes    QrCode[]
+  scans       Scan[]
+  redemptions Redemption[]
+
+  @@index([partnership_id])
+  @@map("campaigns")
+}
+
+model QrCode {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign_id String    @db.Uuid
+  code        String    @unique
+  /// colors, size, margin, ecc, logo (data URL)
+  style       Json      @default("{}")
+  /// NULL = never expires (admin override only)
+  expires_at  DateTime? @db.Timestamptz(6)
+  /// NULL = unlimited uses (admin override only)
+  max_uses    Int?
+  uses        Int       @default(0)
+  voided      Boolean   @default(false)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+
+  campaign Campaign @relation(fields: [campaign_id], references: [id])
+  scans    Scan[]
+
+  @@index([campaign_id])
+  @@map("qr_codes")
+}
+
+model Scan {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  qr_code_id  String   @db.Uuid
+  campaign_id String   @db.Uuid
+  /// truncated sha256 of the client IP, never the IP itself
+  ip          String?
+  user_agent  String?
+  /// true once the scan token has been spent on a redemption
+  consumed    Boolean  @default(false)
+  scanned_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  qr_code    QrCode      @relation(fields: [qr_code_id], references: [id])
+  campaign   Campaign    @relation(fields: [campaign_id], references: [id])
+  redemption Redemption?
+
+  @@index([campaign_id])
+  @@index([scanned_at(sort: Desc)])
+  @@map("scans")
+}
+
+model Redemption {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign_id         String    @db.Uuid
+  scan_id             String    @unique @db.Uuid
+  publisher_user_ref  String
+  coins               Int
+  identified          Boolean   @default(true)
+  upgraded_at         DateTime? @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  campaign Campaign @relation(fields: [campaign_id], references: [id])
+  scan     Scan     @relation(fields: [scan_id], references: [id])
+
+  /// one reward per user per campaign, race-proof
+  @@unique([campaign_id, publisher_user_ref])
+  @@index([created_at(sort: Desc)])
+  @@map("redemptions")
+}
+
+/// Append-only double-entry ledger: positive = credit, negative = debit; entries per ref sum to zero.
+model LedgerEntry {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// campaign:{id} | publisher:{org_id} | external:funding
+  account    String
+  amount     Int
+  ref        String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([account])
+  @@index([ref])
+  @@map("ledger_entries")
+}
+
+/// Materialised sum of ledger_entries per account. Locked FOR UPDATE on every money path.
+model AccountBalance {
+  account String @id
+  balance Int    @default(0)
+
+  @@map("account_balances")
+}
+
+/// Every privileged override lands here, so rule changes are explainable after the fact.
+model AuditLog {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_org_id  String?  @db.Uuid
+  action        String
+  target        String
+  detail        Json     @default("{}")
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  actor Org? @relation(fields: [actor_org_id], references: [id])
+
+  @@index([created_at(sort: Desc)])
+  @@map("audit_log")
+}

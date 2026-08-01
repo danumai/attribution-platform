@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "[ ! -f \"/Users/abdullahalnoman/.cursor/skills/impeccable/scripts/hook-before-edit.mjs\" ] || node \"/Users/abdullahalnoman/.cursor/skills/impeccable/scripts/hook-before-edit.mjs\"",
+        "timeout": 5
+      }
+    ]
+  }
+}
