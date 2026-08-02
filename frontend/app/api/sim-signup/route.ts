@@ -1,5 +1,9 @@
-// Stand-in for a publisher's own backend: it holds the API key and calls the
-// Partner API server-side after creating the new user in its own system.
+// Stand-in for a publisher's own backend: it holds the API key and calls the Partner API
+// server-side when a new user finishes signing up inside the publisher's app.
+//
+// Note what is NOT here: nothing from the device is spendable, and nothing this route
+// receives back is an instruction to grant currency. It asks "was this install attributed?"
+// and the publisher's own new-user policy does the rest.
 // Server-side, so it can use the internal service address; falls back to the public one.
 const API = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -13,16 +17,23 @@ async function proxy(path: string, apiKey: string, body?: unknown) {
 }
 
 export async function POST(req: Request) {
-  const { scan_token, publisher_user_ref, api_key, identified, upgrade_id } = await req.json();
+  const { install_referrer, publisher_user_ref, api_key, identified, confirm_id, platform } =
+    await req.json();
   if (!api_key) return Response.json({ message: 'publisher API key required' }, { status: 400 });
 
-  // Second leg: the user finished verification, so claim the held-back delta.
-  if (upgrade_id) return proxy(`/v1/redemptions/${upgrade_id}/upgrade`, api_key);
+  // Second leg: the user cleared verification, so claim the held-back part of the fee.
+  if (confirm_id) return proxy(`/v1/attribution/${confirm_id}/confirm`, api_key);
 
-  // `identified` is the publisher asserting this user cleared its own verification bar.
-  return proxy('/v1/redemptions/verify', api_key, {
-    scan_token,
+  // A real backend reads these from the request it is already serving. The referrer comes
+  // from Play's Install Referrer API on Android; on iOS there is none, so the IP and UA of
+  // the first-open request are all there is to match on.
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? '127.0.0.1';
+  return proxy('/v1/attribution/claim', api_key, {
     publisher_user_ref,
+    install_referrer: install_referrer || undefined,
+    ip,
+    user_agent: req.headers.get('user-agent') ?? '',
+    platform,
     identified: identified === true,
   });
 }

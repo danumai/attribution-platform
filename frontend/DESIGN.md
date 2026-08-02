@@ -288,6 +288,20 @@ Corners are printed-stock radii: 14px on a full pass, 12px on panels and strips,
 ### Navigation
 - Solid `paper` band, sticky, closed by a 1px `rule` bottom edge — never translucent or blurred. Wordmark with a drawn ticket glyph on the left, actions on the right. Below 480px only the primary action survives.
 
+### The Console Shell
+Every signed-in portal — promoter, publisher, admin — wears the same two-column shell: a 248px
+rail on the left, the section body on the right. The rail is a stub torn off the page: `card`
+ground, a perforated inner edge, the org identity stamped at the top, sections grouped under
+caps labels, sign-out sitting alone at the bottom. The active item is the only `accent` surface
+on the rail. Counts that need acting on ride the item as an ochre badge.
+
+One section is on screen at a time. A portal is never a single scroll of every panel stacked
+top to bottom — that is the shape this shell exists to replace. Below 900px the rail becomes a
+drawer behind a menu button, over a dimmed ground.
+
+The section body opens with a solid page header: the section title, one line saying what the
+section is for, and its actions on the right. Everything below is the section's own content.
+
 ### The Pass
 The system's signature component: a coupon and a stub joined by a perforation, with notches punched top and bottom. The coupon carries routing fields, the display line and the actions; the stub carries the printed code and its fields. It is used for the opening statement and the closing call, and it is the shape any new full-width surface should reach for first.
 

@@ -1,7 +1,14 @@
 # QR Reward Platform
 
-Promoters (airlines, brands) run QR campaigns; end users scan, sign up with a publisher
-(BanglaReels, DramaBox), and get coins for premium content.
+Promoters (airlines, brands) run QR campaigns; end users scan, land on a publisher's store
+listing (BanglaReels, DramaBox), install and sign up — and the promoter pays the publisher a
+per-acquisition marketing fee.
+
+The QR carries nothing redeemable. It opens a store listing, and the install is tied back to
+the scan server-to-server afterwards — by Play's install referrer on Android, by a
+short-window device match on iOS. That keeps it a measurement artifact rather than an unlock
+mechanism, which is what App Store 3.1.1 forbids. See
+[Figure 8](SYSTEM_FLOW.md#figure-8-why-the-qr-unlocks-nothing).
 
 - **[openapi.yaml](openapi.yaml)** — full API reference (OpenAPI 3.0); paste into
   [editor.swagger.io](https://editor.swagger.io) for an interactive view
@@ -79,7 +86,9 @@ unrecoverable mistake — see below.
 |---|---|
 | `BASE_URL` | Encoded into every QR as `${BASE_URL}/r/{code}`. Wrong value = reprint, not a redeploy. Set it before printing anything. |
 | `FRONTEND_URL` | CORS allowlist, comma-separated; the first entry is used for scan redirects. |
-| `JWT_SECRET` | Signs sessions and scan tokens. `openssl rand -hex 32`. |
+| `JWT_SECRET` | Signs session tokens. `openssl rand -hex 32`. |
+| `REFERRER_WINDOW_DAYS` | How long a Play install referrer stays claimable. Default 30, max 90. |
+| `FINGERPRINT_WINDOW_MIN` | How long an iOS install can be device-matched to a scan. Default 60. Shorter = fewer false matches under carrier NAT. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seeded on **first boot only** in production — rotating the password in-app is not reverted by the next deploy. |
 | `DATABASE_URL` | Append `?sslmode=require` for managed Postgres. |
 | `TRUST_PROXY` | Set to `1` behind a load balancer, or `req.ip` is the proxy and every per-IP rate limit collapses into one bucket. |
@@ -89,7 +98,7 @@ Demo promoter/publisher tenants are skipped entirely when `NODE_ENV=production`.
 
 Operational notes: `GET /healthz` checks the database and is what the load balancer should
 poll. `SIGTERM` drains in-flight requests and closes the pool before exit, so a redeploy
-cannot tear down a half-written redemption. The rate limiter is per-process — running more
+cannot tear down a half-written attribution. The rate limiter is per-process — running more
 than one instance needs the Redis swap noted in `common/security.ts`.
 
 ## Database
@@ -130,8 +139,8 @@ old script used different index and constraint names.
 | `backend/src/config.ts` | Externally-visible URLs + production config guards, validated at boot |
 | `backend/src/database/` | Prisma client + pool, ledger/audit helpers, boot-time account seeding |
 | `backend/src/common/` | Cross-cutting: rate limiting, security headers, URL validation, QR render |
-| `backend/src/modules/auth/` | Signup/login, JWT + scan tokens, `AuthGuard` / `AdminGuard` |
-| `backend/src/modules/partner/` | `POST /v1/redemptions/verify` — the money path, one DB transaction |
+| `backend/src/modules/auth/` | Signup/login, session JWT, API keys, claim ids, `AuthGuard` / `AdminGuard` |
+| `backend/src/modules/partner/` | `POST /v1/attribution/claim` — the money path, one DB transaction |
 | `backend/src/modules/public/` | `GET /r/:code` scan redirect + QR image render |
 | `backend/src/modules/portal/` | Portal API — partnerships, campaigns, funding, QR CRUD |
 | `backend/src/modules/admin/` | Admin API — cross-tenant reads + overrides, `AdminGuard` |
@@ -144,12 +153,14 @@ old script used different index and constraint names.
 Everyone can redeem; only an identified subscriber gets full value. A partnership carries a
 `guest_rate`, a `coin_rate` (full tier), and `grace_days`.
 
-- `POST /v1/redemptions/verify` takes `identified: boolean` — the publisher asserting the
+- `POST /v1/attribution/claim` takes `identified: boolean` — the publisher asserting the
   user cleared *its own* verification bar. Omitted means guest tier: the promoter never pays
-  full price for an unverified scan.
-- A guest redemption returns `pending_coins` and an `upgrade_deadline`.
-- `POST /v1/redemptions/:id/upgrade` releases the held-back delta once the user verifies.
+  full price for an unverified install.
+- A guest attribution returns `pending_fee` and a `confirm_deadline`.
+- `POST /v1/attribution/:id/confirm` releases the held-back delta once the user verifies.
   It is idempotent and refuses after the grace window, so nobody is paid twice.
+
+Publishers integrating against this: see **[PUBLISHER_INTEGRATION.md](PUBLISHER_INTEGRATION.md)**.
 
 ## Code time and usage bounds
 

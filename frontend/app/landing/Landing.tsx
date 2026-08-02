@@ -24,19 +24,19 @@ const LEGS = [
   {
     no: 'Coupon 02',
     title: 'Someone scans it',
-    body: 'The platform checks the code is live, unexpired, under its use cap and inside budget, then hands the scanner to your partner publisher. A blocked scan says which rule stopped it.',
-    meta: 'GET /r/{code}',
+    body: 'The platform checks the code is live, unexpired, under its use cap and inside budget, then sends the phone straight to the publisher’s store listing. Nothing redeemable travels with it. A blocked scan says which rule stopped it.',
+    meta: 'GET /r/{code} → App Store · Play',
   },
   {
     no: 'Coupon 03',
-    title: 'The publisher vouches',
-    body: 'They sign the user up on their own side and call the Partner API, declaring whether that user cleared their verification bar. Their word, not yours and not ours.',
-    meta: 'POST /v1/redemptions/verify',
+    title: 'The install is matched',
+    body: 'After the user signs up in the app, the publisher’s server asks whether that install traces back to a scan — by Play install referrer on Android, by a short-window device match on iOS. Server to server, no code ever touches the app.',
+    meta: 'POST /v1/attribution/claim',
   },
   {
     no: 'Coupon 04',
-    title: 'Coins post from budget',
-    body: 'One database transaction moves coins out of your campaign budget and into that user. Double-entry, append-only. Your dashboard and theirs agree because they read the same ledger.',
+    title: 'The fee posts from budget',
+    body: 'One database transaction moves the agreed marketing fee out of your campaign budget and into the publisher’s account. Double-entry, append-only. Whatever the publisher gives its new user is its own bonus, on its own terms.',
     meta: 'Ledger · double-entry',
   },
 ];
@@ -45,7 +45,12 @@ const RULES = [
   {
     term: 'Budget is the ceiling',
     val: 'Hard stop',
-    body: 'A campaign spends only what you funded. When the budget runs dry, scans stop granting coins instead of quietly overdrawing.',
+    body: 'A campaign spends only what you funded. When the budget runs dry, scans stop earning fees instead of quietly overdrawing.',
+  },
+  {
+    term: 'The QR unlocks nothing',
+    val: 'By design',
+    body: 'A scan carries no token, key or code into the app — it opens a store listing, and the install is matched afterwards server-to-server. There is no path here that could unlock in-app content, which is what keeps it clear of App Store 3.1.1.',
   },
   {
     term: 'Codes expire',

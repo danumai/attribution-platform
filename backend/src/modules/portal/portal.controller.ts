@@ -12,6 +12,11 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BASE_URL } from '../../config';
+import {
+  validateAndroidPackage,
+  validateBonusLabel,
+  validateIosAppId,
+} from '../../common/attribution';
 import { QrStyle, validateStyle } from '../../common/qr';
 import { sha256, validateLandingUrl } from '../../common/security';
 import { balance, balances, ledger } from '../../database/ledger';
@@ -201,7 +206,7 @@ export class PortalController {
 
   @Get('campaigns/:id/stats')
   async stats(@Session() s: SessionClaims, @Param('id') id: string) {
-    await this.ownedCampaign(s.org_id, id);
+    const c = await this.ownedCampaign(s.org_id, id);
     const [scans, reds, budget_remaining] = await Promise.all([
       prisma.scan.count({ where: { campaign_id: id } }),
       prisma.redemption.aggregate({
@@ -212,6 +217,8 @@ export class PortalController {
       balance(`campaign:${id}`),
     ]);
     return {
+      name: c.name,
+      status: c.status,
       scans,
       redemptions: reds._count,
       coins_granted: reds._sum.coins ?? 0,
@@ -303,18 +310,50 @@ export class PortalController {
   async me(@Session() s: SessionClaims) {
     return prisma.org.findUniqueOrThrow({
       where: { id: s.org_id },
-      select: { id: true, name: true, type: true, email: true, landing_url: true, suspended: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        email: true,
+        landing_url: true,
+        android_package: true,
+        ios_app_id: true,
+        bonus_label: true,
+        suspended: true,
+      },
     });
   }
 
+  /** Where scans go, and what the publisher says it gives new users. Absent = leave unchanged. */
   @Patch('orgs/me')
-  async patchOrg(@Session() s: SessionClaims, @Body() b: { landing_url?: string }) {
-    const landing_url = validateLandingUrl(b.landing_url);
+  async patchOrg(
+    @Session() s: SessionClaims,
+    @Body()
+    b: {
+      landing_url?: string;
+      android_package?: string;
+      ios_app_id?: string;
+      bonus_label?: string;
+    },
+  ) {
+    const fields = {
+      landing_url: validateLandingUrl(b.landing_url),
+      android_package: validateAndroidPackage(b.android_package),
+      ios_app_id: validateIosAppId(b.ios_app_id),
+      bonus_label: validateBonusLabel(b.bonus_label),
+    };
     return prisma.org.update({
       where: { id: s.org_id },
-      // absent means "leave unchanged"
-      data: landing_url === null ? {} : { landing_url },
-      select: { id: true, name: true, type: true, landing_url: true },
+      data: Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null)),
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        landing_url: true,
+        android_package: true,
+        ios_app_id: true,
+        bonus_label: true,
+      },
     });
   }
 

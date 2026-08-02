@@ -46,38 +46,77 @@ BAD=$(curl -s -o /dev/null -w '%{http_code}' "$API/v1/qr-codes/$QR_ID/image?styl
 XSS=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/campaigns/$CAMP_ID/qr-codes -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"style":{"logo":"javascript:alert(1)"}}')
 [ "$XSS" = "400" ] && pass "non-data-URL logo rejected (400)" || fail "logo guard returned $XSS"
 
-echo "5. Scan → redirect"
-LOC=$(curl -s -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
-echo "$LOC" | grep -q 'publisher-sim?st=' && pass "scan redirects to publisher with scan token" || fail "redirect: $LOC"
-ST=$(echo "$LOC" | sed 's/.*st=//')
+echo "5. Scan → store listing (nothing redeemable reaches the device)"
+# Register the publisher's apps, so scans go to a store rather than the web fallback.
+curl -s -XPATCH $API/v1/orgs/me -H "Authorization: Bearer $PUB_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"android_package":"com.dramabox.app","ios_app_id":"123456789","bonus_label":"100 free coins"}' >/dev/null
+ANDROID='Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36'
+IOS='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1'
 
-echo "6. Redemption (the money path) — guest tier, then upgrade"
-RED=$(curl -s -XPOST $API/v1/redemptions/verify -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d "{\"scan_token\":\"$ST\",\"publisher_user_ref\":\"viewer$S@x.com\"}")
-COINS=$(echo "$RED" | j .coins); RED_ID=$(echo "$RED" | j .redemption_id)
-[ "$COINS" = "10" ] && pass "unverified scan pays guest tier only (10 coins)" || fail "verify: $RED"
-[ "$(echo "$RED" | j .pending_coins)" = "40" ] && pass "40-coin delta held back pending identification" || fail "pending: $RED"
+LOC=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+echo "$LOC" | grep -q '^https://play.google.com/store/apps/details?id=com.dramabox.app' \
+  && pass "Android scan redirects to the Play listing" || fail "redirect: $LOC"
+echo "$LOC" | grep -q 'qrm_claim%3D' && pass "claim id rides only in the Play install referrer" || fail "no referrer: $LOC"
+# The negative that matters most: no bearer token, key or spendable code in the URL.
+echo "$LOC" | grep -qE '(^|[?&])(st|token|jwt|code)=' && fail "redirect leaks a redeemable token: $LOC" \
+  || pass "redirect carries no token the app could spend"
+REFERRER=$(printf '%s' "$LOC" | sed 's/.*&referrer=//' | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(decodeURIComponent(d.trim())))")
+
+LOC_IOS=$(curl -s -A "$IOS" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+echo "$LOC_IOS" | grep -q '^https://apps.apple.com/app/id123456789$' \
+  && pass "iPhone scan redirects to the App Store listing, payload-free" || fail "ios redirect: $LOC_IOS"
+
+echo "6. Attribution (the money path) — guest tier, then confirm"
+# Deterministic path: the publisher's server replays the Play install referrer.
+RED=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"$REFERRER\",\"publisher_user_ref\":\"viewer$S@x.com\"}")
+COINS=$(echo "$RED" | j .fee); RED_ID=$(echo "$RED" | j .attribution_id)
+[ "$(echo "$RED" | j .attributed)" = "true" ] && pass "install matched to the scan by referrer" || fail "claim: $RED"
+[ "$(echo "$RED" | j .match_method)" = "referrer" ] && pass "match recorded as deterministic" || fail "method: $RED"
+[ "$COINS" = "10" ] && pass "unverified install pays guest tier only (10 credits)" || fail "fee: $RED"
+[ "$(echo "$RED" | j .pending_fee)" = "40" ] && pass "40-credit delta held back pending identification" || fail "pending: $RED"
+[ "$(echo "$RED" | j .bonus_label)" = "100 free coins" ] && pass "publisher's own bonus echoed back as a label" || fail "bonus: $RED"
 REM=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 [ "$REM" = "90" ] && pass "budget debited 100→90 (guest tier only)" || fail "budget_remaining=$REM"
 
-UP=$(curl -s -XPOST $API/v1/redemptions/$RED_ID/upgrade -H "Authorization: Bearer $API_KEY")
-[ "$(echo "$UP" | j .coins)" = "50" ] && pass "verifying releases the delta (10→50 coins)" || fail "upgrade: $UP"
-UP2=$(curl -s -XPOST $API/v1/redemptions/$RED_ID/upgrade -H "Authorization: Bearer $API_KEY" | j .status)
-[ "$UP2" = "already_full" ] && pass "upgrade is idempotent (no double payout)" || fail "re-upgrade: $UP2"
+UP=$(curl -s -XPOST $API/v1/attribution/$RED_ID/confirm -H "Authorization: Bearer $API_KEY")
+[ "$(echo "$UP" | j .fee)" = "50" ] && pass "confirming releases the delta (10→50 credits)" || fail "confirm: $UP"
+UP2=$(curl -s -XPOST $API/v1/attribution/$RED_ID/confirm -H "Authorization: Bearer $API_KEY" | j .status)
+[ "$UP2" = "already_full" ] && pass "confirm is idempotent (no double payout)" || fail "re-confirm: $UP2"
 REM=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 [ "$REM" = "50" ] && pass "budget charged the delta exactly once (90→50)" || fail "budget_remaining=$REM"
 
+echo "6b. iOS path — no referrer exists, so the install is fingerprint-matched"
+curl -s -A "$IOS" -o /dev/null "$API/r/$CODE"
+FP=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"publisher_user_ref\":\"ios$S@x.com\",\"ip\":\"::1\",\"platform\":\"ios\"}")
+[ "$(echo "$FP" | j .match_method)" = "fingerprint" ] && pass "iOS install matched on device fingerprint" || fail "fingerprint: $FP"
+MISS=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"publisher_user_ref\":\"organic$S@x.com\",\"ip\":\"203.0.113.99\",\"platform\":\"ios\"}")
+[ "$(echo "$MISS" | j .attributed)" = "false" ] && pass "an organic install is unattributed, not an error" || fail "organic: $MISS"
+[ "$(echo "$MISS" | j .reason)" = "no_match" ] && pass "unattributed answer names its reason" || fail "reason: $MISS"
+
 echo "7. Security & fraud guards"
-DUP=$(curl -s -XPOST $API/v1/redemptions/verify -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d "{\"scan_token\":\"$ST\",\"publisher_user_ref\":\"viewer$S@x.com\"}" | j .message)
-[ "$DUP" = "scan token already used" ] && pass "scan token is single-use" || fail "replay: $DUP"
+REPLAY=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"$REFERRER\",\"publisher_user_ref\":\"replay$S@x.com\"}" | j .reason)
+[ "$REPLAY" = "no_match" ] && pass "a claim id is single-use (replay attributes nothing)" || fail "replay: $REPLAY"
 
-LOC2=$(curl -s -o /dev/null -w '%{redirect_url}' "$API/r/$CODE"); ST2=$(echo "$LOC2" | sed 's/.*st=//')
-DUP2=$(curl -s -XPOST $API/v1/redemptions/verify -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d "{\"scan_token\":\"$ST2\",\"publisher_user_ref\":\"viewer$S@x.com\"}" | j .message)
-[ "$DUP2" = "duplicate_user" ] && pass "same user can't claim twice (DB constraint)" || fail "dedupe: $DUP2"
+curl -s -A "$ANDROID" -o /dev/null "$API/r/$CODE"
+LOC2=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+REFERRER2=$(printf '%s' "$LOC2" | sed 's/.*&referrer=//' | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(decodeURIComponent(d.trim())))")
+BUDGET_BEFORE=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+DUP2=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"$REFERRER2\",\"publisher_user_ref\":\"viewer$S@x.com\"}")
+[ "$(echo "$DUP2" | j .attribution_id)" = "$RED_ID" ] && pass "re-claiming one user replays the original attribution" || fail "dedupe: $DUP2"
+[ "$(echo "$DUP2" | j .replay)" = "true" ] && pass "the replay is flagged, not disguised as a fresh match" || fail "replay flag: $DUP2"
+BUDGET_AFTER=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+[ "$BUDGET_AFTER" = "$BUDGET_BEFORE" ] && pass "same user can't be counted twice (budget untouched)" || fail "double-charged: $BUDGET_BEFORE -> $BUDGET_AFTER"
 
-BADKEY=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/redemptions/verify -H "Authorization: Bearer pk_wrong" -H 'Content-Type: application/json' -d "{\"scan_token\":\"$ST2\",\"publisher_user_ref\":\"x@x.com\"}")
+FORGE=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"qrm_claim=AAAAAAAAAAAAAAAAAAAAAA\",\"publisher_user_ref\":\"forge$S@x.com\"}" | j .attributed)
+[ "$FORGE" = "false" ] && pass "a guessed claim id attributes nothing" || fail "forged claim: $FORGE"
+
+BADKEY=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/attribution/claim -H "Authorization: Bearer pk_wrong" -H 'Content-Type: application/json' -d "{\"publisher_user_ref\":\"x@x.com\",\"ip\":\"127.0.0.1\"}")
 [ "$BADKEY" = "401" ] && pass "invalid API key rejected (401)" || fail "auth: $BADKEY"
 NOAUTH=$(curl -s -o /dev/null -w '%{http_code}' $API/v1/campaigns)
 [ "$NOAUTH" = "401" ] && pass "portal API requires auth (401)" || fail "guard: $NOAUTH"
@@ -108,11 +147,23 @@ VOIDED=$(curl -s -o /dev/null -w '%{redirect_url}' "$API/r/$DEAD")
 echo "$VOIDED" | grep -q 'reason=voided' && pass "voided code stops redeeming (lost print run)" || fail "void: $VOIDED"
 
 echo "9. Budget exhaustion fails closed"
-LOC3=$(curl -s -o /dev/null -w '%{redirect_url}' "$API/r/$CODE"); ST3=$(echo "$LOC3" | sed 's/.*st=//')
-curl -s -XPOST $API/v1/redemptions/verify -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d "{\"scan_token\":\"$ST3\",\"publisher_user_ref\":\"other$S@x.com\",\"identified\":true}" >/dev/null
-ENDED=$(curl -s -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+# Top up to exactly one full-rate install, then spend it, so the drain is unambiguous.
+NEED=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+curl -s -XPOST $API/v1/campaigns/$CAMP_ID/fund -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"coins\":$((50 - NEED))}" >/dev/null
+LOC3=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+REFERRER3=$(printf '%s' "$LOC3" | sed 's/.*&referrer=//' | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(decodeURIComponent(d.trim())))")
+curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"$REFERRER3\",\"publisher_user_ref\":\"other$S@x.com\",\"identified\":true}" >/dev/null
+ENDED=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
 echo "$ENDED" | grep -q 'campaign-ended' && pass "exhausted budget stops serving scans" || fail "expected campaign-ended, got $ENDED"
+
+# A publisher whose store listing isn't configured must not burn print-run uses on a dead end.
+NOAPP=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
+  -d "{\"name\":\"NoApp $S\",\"email\":\"noapp$S@t.com\",\"password\":\"password123\",\"type\":\"publisher\"}" | j .token)
+BADPKG=$(curl -s -o /dev/null -w '%{http_code}' -XPATCH $API/v1/orgs/me -H "Authorization: Bearer $NOAPP" -H 'Content-Type: application/json' \
+  -d '{"android_package":"com.evil&id=other.app"}')
+[ "$BADPKG" = "400" ] && pass "malformed package name rejected (no store-URL injection)" || fail "package guard: $BADPKG"
 
 echo "10. Ledger integrity"
 SUM=$(docker exec qrreward-db psql -U qrreward -tAc "SELECT sum(amount) FROM ledger_entries")
@@ -159,8 +210,8 @@ OVER=$(A -XPOST $API/v1/admin/campaigns/$CAMP_ID/adjust -H 'Content-Type: applic
 OVR=$(A -XPATCH $API/v1/admin/qr-codes/$ONCE_ID -H 'Content-Type: application/json' \
   -d '{"max_uses":null,"expires_at":null,"voided":false,"reason":"permanent store signage"}')
 [ "$(echo "$OVR" | j .max_uses)" = "" ] && pass "admin can lift a code's single-use limit" || fail "override: $OVR"
-REOPENED=$(curl -s -o /dev/null -w '%{redirect_url}' "$API/r/$ONCE_CODE")
-echo "$REOPENED" | grep -q 'st=' && pass "overridden code scans again" || fail "override not applied: $REOPENED"
+REOPENED=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$ONCE_CODE")
+echo "$REOPENED" | grep -q 'play.google.com' && pass "overridden code scans again" || fail "override not applied: $REOPENED"
 A $API/v1/admin/audit-log | grep -q 'permanent store signage' && pass "every override lands in the audit log" || fail "no audit entry"
 
 echo "12. Kill switch & offboarding"
@@ -171,8 +222,8 @@ echo "$DEADSCAN" | grep -q 'campaign-ended' && pass "killed campaign voids every
 
 OFF=$(A -XPOST $API/v1/admin/orgs/$PUB_ID/offboard -H 'Content-Type: application/json' -d '{"reason":"contract ended"}')
 [ "$(echo "$OFF" | j .api_key_revoked)" = "true" ] && pass "offboarding revokes the publisher API key" || fail "offboard: $OFF"
-GONE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/redemptions/verify -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' -d '{"scan_token":"x","publisher_user_ref":"y@z.com"}')
-[ "$GONE" = "401" ] && pass "departed tenant's API key no longer grants coins (401)" || fail "revoked key still works: $GONE"
+GONE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' -d '{"publisher_user_ref":"y@z.com","ip":"127.0.0.1"}')
+[ "$GONE" = "401" ] && pass "departed tenant's API key no longer earns fees (401)" || fail "revoked key still works: $GONE"
 
 echo "13. Ledger integrity after admin actions"
 SUM2=$(docker exec qrreward-db psql -U qrreward -tAc "SELECT sum(amount) FROM ledger_entries")

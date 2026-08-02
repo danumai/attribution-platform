@@ -9,6 +9,11 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import * as bcrypt from 'bcryptjs';
 import { Request } from 'express';
+import {
+  validateAndroidPackage,
+  validateBonusLabel,
+  validateIosAppId,
+} from '../../common/attribution';
 import { clientIp, rateLimited, sha256, validateLandingUrl } from '../../common/security';
 import { prisma } from '../../database/prisma';
 import { newApiKey, signSession } from './tokens';
@@ -20,7 +25,16 @@ export class AuthController {
   async signup(
     @Req() req: Request,
     @Body()
-    b: { name: string; email: string; password: string; type: string; landing_url?: string },
+    b: {
+      name: string;
+      email: string;
+      password: string;
+      type: string;
+      landing_url?: string;
+      android_package?: string;
+      ios_app_id?: string;
+      bonus_label?: string;
+    },
   ) {
     if (rateLimited(`signup:${clientIp(req)}`, 10))
       throw new BadRequestException('too many signups, try again shortly');
@@ -28,6 +42,9 @@ export class AuthController {
       throw new BadRequestException('name, email, password, type(promoter|publisher) required');
     if (b.password.length < 8) throw new BadRequestException('password min 8 chars');
     const landing_url = validateLandingUrl(b.landing_url);
+    const android_package = validateAndroidPackage(b.android_package);
+    const ios_app_id = validateIosAppId(b.ios_app_id);
+    const bonus_label = validateBonusLabel(b.bonus_label);
     const apiKey = b.type === 'publisher' ? newApiKey() : null;
     let org;
     try {
@@ -39,6 +56,9 @@ export class AuthController {
           password_hash: await bcrypt.hash(b.password, 10),
           api_key_hash: apiKey ? sha256(apiKey) : null,
           landing_url,
+          android_package,
+          ios_app_id,
+          bonus_label,
         },
         select: { id: true, name: true, type: true },
       });

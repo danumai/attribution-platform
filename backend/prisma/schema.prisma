@@ -25,8 +25,15 @@ model Org {
   password_hash String
   /// publishers only; sha256 of the partner API key
   api_key_hash  String?
-  /// publishers only; where scans redirect
+  /// publishers only; web fallback for desktop scans and publishers with no app yet
   landing_url   String?
+  /// publishers only; Play listing a scan sends Android phones to (com.example.app)
+  android_package String?
+  /// publishers only; numeric App Store id a scan sends iPhones to
+  ios_app_id      String?
+  /// publishers only; describes the publisher's OWN joining bonus. A label for reporting
+  /// and QR artwork — never an instruction this platform issues or fulfils.
+  bonus_label     String?
   suspended     Boolean  @default(false)
   created_at    DateTime @default(now()) @db.Timestamptz(6)
 
@@ -100,14 +107,21 @@ model QrCode {
   @@map("qr_codes")
 }
 
+/// A scan is an attribution claim waiting to be matched. Nothing here is redeemable by the
+/// device: `claim_id` travels only through Play's install-referrer channel, and the iOS path
+/// carries nothing at all.
 model Scan {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   qr_code_id  String   @db.Uuid
   campaign_id String   @db.Uuid
-  /// truncated sha256 of the client IP, never the IP itself
+  /// opaque id placed in the Play install referrer; the deterministic match key
+  claim_id    String   @unique
+  /// android | ios | other — one half of the fingerprint used when no referrer exists
+  platform    String   @default("other")
+  /// truncated sha256 of the client IP, never the IP itself — the other fingerprint half
   ip          String?
   user_agent  String?
-  /// true once the scan token has been spent on a redemption
+  /// true once this scan has been matched to an install
   consumed    Boolean  @default(false)
   scanned_at  DateTime @default(now()) @db.Timestamptz(6)
 
@@ -117,6 +131,8 @@ model Scan {
 
   @@index([campaign_id])
   @@index([scanned_at(sort: Desc)])
+  /// the fingerprint lookup: unmatched scans for one device shape, newest first
+  @@index([ip, platform, consumed, scanned_at(sort: Desc)])
   @@map("scans")
 }
 
@@ -127,6 +143,9 @@ model Redemption {
   publisher_user_ref  String
   coins               Int
   identified          Boolean   @default(true)
+  /// referrer | fingerprint — how the install was tied back to the scan. Deterministic
+  /// matches are auditable; probabilistic ones are the ones to sample for fraud.
+  match_method        String    @default("referrer")
   upgraded_at         DateTime? @db.Timestamptz(6)
   created_at          DateTime  @default(now()) @db.Timestamptz(6)
 

@@ -29,7 +29,7 @@ export const FRONTEND_URL = FRONTEND_URLS[0];
 if (PROD)
   for (const u of [BASE_URL, ...FRONTEND_URLS])
     if (!u.startsWith('https://'))
-      throw new Error(`${u} must use https in production — scan tokens travel over these origins`);
+      throw new Error(`${u} must use https in production — scans are redirected over these origins`);
 
 /**
  * Postgres connection string. Unset in production, the dev fallback below would send a
@@ -40,6 +40,28 @@ export const DATABASE_URL = required(
   'DATABASE_URL',
   'postgres://qrreward:qrreward@localhost:5436/qrreward',
 );
+
+/**
+ * How long a scan stays claimable, per match path.
+ *
+ * The referrer path is deterministic — Play hands the app the exact claim id — so it can
+ * afford a window as long as a real install-then-open gap (people scan a poster, install on
+ * wifi that evening, open it the next day). Play itself retains the referrer ~90 days.
+ *
+ * The fingerprint path is probabilistic: it matches on hashed IP + platform, and in markets
+ * where a whole neighbourhood shares one carrier NAT address those collide fast. The window
+ * is the main control on how often it mis-attributes, so it is deliberately short and
+ * tunable per deployment rather than baked in.
+ */
+const int = (name: string, fallback: number, min: number, max: number) => {
+  const v = Number(process.env[name] ?? fallback);
+  if (!Number.isInteger(v) || v < min || v > max)
+    throw new Error(`${name} must be an integer ${min}–${max}`);
+  return v;
+};
+
+export const REFERRER_WINDOW_DAYS = int('REFERRER_WINDOW_DAYS', 30, 1, 90);
+export const FINGERPRINT_WINDOW_MIN = int('FINGERPRINT_WINDOW_MIN', 60, 1, 1440);
 
 /** Super admin, seeded on first boot. Validated here so a bad value fails before the DB is touched. */
 export const ADMIN_EMAIL = required('ADMIN_EMAIL', 'admin@qrreward.local');

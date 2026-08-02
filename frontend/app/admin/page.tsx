@@ -2,20 +2,35 @@
 import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
+import { Shell } from '@/lib/shell';
 import { confirmDialog, promptDialog, toast } from '@/lib/ui';
 
+/** The rail: nine sections, grouped by what an operator is doing when they open them. */
 const TABS = [
-  'Overview',
-  'Organizations',
-  'Partnerships',
-  'Campaigns',
-  'Scans',
-  'Redemptions',
-  'QR codes',
-  'Ledger',
-  'Audit log',
+  { id: 'Overview', icon: 'overview', group: '' },
+  { id: 'Organizations', icon: 'orgs', group: 'Accounts' },
+  { id: 'Partnerships', icon: 'partnerships', group: 'Accounts' },
+  { id: 'Campaigns', icon: 'campaigns', group: 'Accounts' },
+  { id: 'Scans', icon: 'scans', group: 'Traffic' },
+  { id: 'Redemptions', icon: 'redemptions', group: 'Traffic' },
+  { id: 'QR codes', icon: 'qr', group: 'Traffic' },
+  { id: 'Ledger', icon: 'ledger', group: 'Money' },
+  { id: 'Audit log', icon: 'audit', group: 'Money' },
 ] as const;
-type Tab = (typeof TABS)[number];
+type Tab = (typeof TABS)[number]['id'];
+
+const HEAD: Record<Tab, string> = {
+  Overview: 'Does the money add up, and what is waiting on you.',
+  Organizations: 'Every promoter and publisher on the platform.',
+  Partnerships:
+    'Rates are per redemption. Guest rate is paid up front for an unidentified signup; the delta is released if the user identifies within the grace window.',
+  Campaigns: 'Budgets, conversion and the kill switch.',
+  Scans: 'Every QR scan, newest first. IPs are stored as a truncated hash — enough to spot a repeat scanner, not enough to identify a person.',
+  Redemptions: 'Every signup a publisher vouched for.',
+  'QR codes': 'Issued codes, their limits and their state.',
+  Ledger: 'Account balances and the entries behind them.',
+  'Audit log': 'Every privileged override, newest first.',
+};
 
 const when = (t?: string | null) => (t ? new Date(t).toLocaleString() : '—');
 const ago = (t: string) => {
@@ -256,34 +271,30 @@ export default function Admin() {
   const userByScan = new Map<string, any>((d.redemptions ?? []).map((x: any) => [x.scan_id, x]));
 
   return (
-    <main style={{ maxWidth: 1240 }}>
-      <div className="topbar">
-        <div>
-          <b>{me.name}</b> <span className="pill">super admin</span>
+    <Shell
+      org={me}
+      items={TABS.map((t) => ({
+        id: t.id,
+        label: t.id,
+        icon: t.icon,
+        group: t.group || undefined,
+        badge: t.id === 'Partnerships' ? o.pending_partnerships : undefined,
+      }))}
+      active={tab}
+      onSelect={(id) => setTab(id as Tab)}
+      title={tab}
+      lede={HEAD[tab]}
+      actions={
+        <>
           {!o.ledger_balanced && d.overview && (
-            <span className="pill suspended" style={{ marginLeft: 8 }}>
-              ledger off by {o.ledger_sum}
-            </span>
+            <span className="pill suspended">ledger off by {o.ledger_sum}</span>
           )}
-        </div>
-        <div className="row" style={{ gap: 14 }}>
-          {link('Refresh', () => load())}
-          {link('Sign out', () => {
-            localStorage.clear();
-            r.push('/login');
-          })}
-        </div>
-      </div>
-
-      <div className="tabs" role="tablist">
-        {TABS.map((t) => (
-          <button key={t} role="tab" aria-selected={t === tab} onClick={() => setTab(t)}>
-            {t}
-            {t === 'Partnerships' && o.pending_partnerships ? ` (${o.pending_partnerships})` : ''}
+          <button className="ghost" onClick={() => load()}>
+            Refresh
           </button>
-        ))}
-      </div>
-
+        </>
+      }
+    >
       {newKey && (
         <div className="card">
           <b>New API key — shown once. Copy it now.</b>
@@ -404,7 +415,6 @@ export default function Admin() {
 
       {tab === 'Organizations' && (
         <>
-          <h2>Organizations</h2>
           <Table
             loading={loading}
             rows={d.orgs ?? []}
@@ -482,11 +492,6 @@ export default function Admin() {
 
       {tab === 'Partnerships' && (
         <>
-          <h2>Partnerships</h2>
-          <p className="muted">
-            Rates are per redemption. Guest rate is paid up front for an unidentified signup; the delta is
-            released if the user identifies within the grace window.
-          </p>
           <Table
             loading={loading}
             rows={d.partnerships ?? []}
@@ -528,7 +533,6 @@ export default function Admin() {
 
       {tab === 'Campaigns' && (
         <>
-          <h2>Campaigns</h2>
           <Table
             loading={loading}
             rows={campaigns}
@@ -619,11 +623,8 @@ export default function Admin() {
 
       {tab === 'Scans' && (
         <>
-          <h2>Scans</h2>
           <p className="muted">
-            Every QR scan, newest first. IPs are stored as a truncated hash — enough to spot a repeat
-            scanner, not enough to identify a person. The user column fills in once the scan converts and
-            the publisher reports its user reference.
+            The user column fills in once the scan converts and the publisher reports its user reference.
           </p>
           <select value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)} style={{ maxWidth: 340 }}>
             <option value="">All campaigns</option>
@@ -664,7 +665,6 @@ export default function Admin() {
 
       {tab === 'Redemptions' && (
         <>
-          <h2>Redemptions</h2>
           <Table
             loading={loading}
             rows={d.redemptions ?? []}
@@ -693,7 +693,6 @@ export default function Admin() {
 
       {tab === 'QR codes' && (
         <>
-          <h2>QR codes</h2>
           <Table
             loading={loading}
             rows={d.qrCodes ?? []}
@@ -783,8 +782,6 @@ export default function Admin() {
 
       {tab === 'Audit log' && (
         <>
-          <h2>Audit log</h2>
-          <p className="muted">Every privileged override, newest first.</p>
           <Table
             loading={loading}
             rows={d.audit ?? []}
@@ -806,6 +803,6 @@ export default function Admin() {
           />
         </>
       )}
-    </main>
+    </Shell>
   );
 }

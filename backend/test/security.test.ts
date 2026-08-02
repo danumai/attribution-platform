@@ -3,7 +3,19 @@
 import { strict as assert } from 'assert';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
-import { rateLimited, validateLandingUrl } from '../src/common/security';
+import { ipHash, rateLimited, validateLandingUrl } from '../src/common/security';
+
+// The iOS match only works if the socket-derived address and the string the publisher's
+// server reports hash identically. Every case below is a real spelling mismatch that would
+// otherwise silently drop the attribution rate to zero.
+assert.equal(ipHash('::ffff:203.0.113.7'), ipHash('203.0.113.7'), 'IPv4-mapped IPv6 must match plain IPv4');
+assert.equal(ipHash('2001:0db8:0000:0000:0000:0000:0000:0001'), ipHash('2001:db8::1'), 'IPv6 must be canonicalised');
+assert.equal(ipHash('2001:DB8::1'), ipHash('2001:db8::1'), 'IPv6 is case-insensitive');
+assert.equal(ipHash(' 203.0.113.7 '), ipHash('203.0.113.7'), 'surrounding whitespace must not matter');
+// ...and distinct addresses must still be distinct, loopback included.
+assert.notEqual(ipHash('::1'), ipHash('127.0.0.1'));
+assert.notEqual(ipHash('203.0.113.7'), ipHash('203.0.113.8'));
+assert.equal(ipHash('garbage').length, 16, 'an unparseable address is still hashed, not dropped');
 
 // --- landing URL: the one place we hand a scan token to an outside origin ---
 for (const bad of [

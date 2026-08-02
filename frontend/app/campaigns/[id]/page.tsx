@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { API, api, org as getOrg, token } from '@/lib/api';
+import { Shell } from '@/lib/shell';
 import { confirmDialog, toast } from '@/lib/ui';
 import {
   DEFAULT_STYLE,
@@ -466,12 +467,26 @@ export default function CampaignPage() {
   const gradient = style.gradient ?? null;
 
   return (
-    <main className="wide">
-      <div className="topbar">
-        <Link href="/dashboard">← Dashboard</Link>
-        <span className="muted">{me.name}</span>
-      </div>
-
+    <Shell
+      org={me}
+      active="campaigns"
+      items={[
+        { id: 'overview', label: 'Overview', icon: 'overview', href: '/dashboard' },
+        { id: 'partnerships', label: 'Partnerships', icon: 'partnerships', href: '/dashboard?s=partnerships' },
+        { id: 'campaigns', label: 'Campaigns', icon: 'campaigns', href: '/dashboard?s=campaigns' },
+        { id: 'redemptions', label: 'Redemptions', icon: 'redemptions', href: '/dashboard?s=redemptions' },
+        ...(me.type === 'promoter'
+          ? []
+          : [{ id: 'settings', label: 'Settings', icon: 'settings' as const, href: '/dashboard?s=settings' }]),
+      ]}
+      title={stats.name ?? 'Campaign'}
+      lede={isPromoter ? 'Its numbers, its codes and how they print.' : 'How this campaign is performing.'}
+      actions={
+        <Link href="/dashboard?s=campaigns">
+          ← All campaigns
+        </Link>
+      }
+    >
       <h2>Performance</h2>
       <div className="card row statrow">
         {[
@@ -891,6 +906,6 @@ export default function CampaignPage() {
           )}
         </>
       )}
-    </main>
+    </Shell>
   );
 }

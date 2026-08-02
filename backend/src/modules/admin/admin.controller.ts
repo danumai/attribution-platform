@@ -12,6 +12,11 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BASE_URL } from '../../config';
+import {
+  validateAndroidPackage,
+  validateBonusLabel,
+  validateIosAppId,
+} from '../../common/attribution';
 import { sha256, validateLandingUrl } from '../../common/security';
 import { audit, balance, balances, ledger } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
@@ -108,22 +113,46 @@ export class AdminController {
   async patchOrg(
     @Session() s: SessionClaims,
     @Param('id') id: string,
-    @Body() b: { suspended?: boolean; name?: string; landing_url?: string; reason?: string },
+    @Body()
+    b: {
+      suspended?: boolean;
+      name?: string;
+      landing_url?: string;
+      android_package?: string;
+      ios_app_id?: string;
+      bonus_label?: string;
+      reason?: string;
+    },
   ) {
-    const landing_url = validateLandingUrl(b.landing_url);
+    const fields = {
+      landing_url: validateLandingUrl(b.landing_url),
+      android_package: validateAndroidPackage(b.android_package),
+      ios_app_id: validateIosAppId(b.ios_app_id),
+      bonus_label: validateBonusLabel(b.bonus_label),
+    };
     const updated = await prisma.org.updateMany({
       where: { id, type: { not: 'admin' } },
       data: {
         ...(b.suspended === undefined ? {} : { suspended: b.suspended }),
         ...(b.name === undefined ? {} : { name: b.name }),
-        ...(landing_url === null ? {} : { landing_url }),
+        ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null)),
       },
     });
     if (!updated.count) throw new NotFoundException('org not found');
     await audit(s.org_id, 'org.patch', `org:${id}`, b);
     return prisma.org.findUnique({
       where: { id },
-      select: { id: true, name: true, type: true, email: true, landing_url: true, suspended: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        email: true,
+        landing_url: true,
+        android_package: true,
+        ios_app_id: true,
+        bonus_label: true,
+        suspended: true,
+      },
     });
   }
 
@@ -381,9 +410,10 @@ export class AdminController {
         scanned_at: true,
         ip: true,
         user_agent: true,
+        platform: true,
         consumed: true,
         qr_code: { select: { code: true } },
-        redemption: { select: { coins: true } },
+        redemption: { select: { coins: true, match_method: true } },
         campaign: {
           select: {
             id: true,
@@ -402,6 +432,7 @@ export class AdminController {
       scanned_at: s.scanned_at,
       ip_hash: s.ip,
       user_agent: s.user_agent,
+      platform: s.platform,
       consumed: s.consumed,
       qr_code: s.qr_code.code,
       campaign_id: s.campaign.id,
@@ -410,6 +441,8 @@ export class AdminController {
       publisher_name: s.campaign.partnership.publisher.name,
       redeemed: s.redemption !== null,
       coins: s.redemption?.coins ?? null,
+      // fingerprint matches are the probabilistic ones — the set worth sampling for fraud
+      match_method: s.redemption?.match_method ?? null,
     }));
   }
 

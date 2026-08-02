@@ -14,10 +14,11 @@ import { ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { BASE_URL, FRONTEND_URL } from '../../config';
 import { QrStyle, isAdvanced, renderPng, renderSvg, validateStyle } from '../../common/qr';
-import { clientIp, rateLimited, sha256 } from '../../common/security';
+import { detectPlatform, storeUrl } from '../../common/attribution';
+import { clientIp, ipHash, rateLimited } from '../../common/security';
 import { balance } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
-import { signScanToken } from '../auth/tokens';
+import { newClaimId } from '../auth/tokens';
 
 @ApiTags('Public')
 @Controller()
@@ -53,7 +54,17 @@ export class PublicController {
           select: {
             id: true,
             status: true,
-            partnership: { select: { publisher: { select: { landing_url: true } } } },
+            partnership: {
+              select: {
+                publisher: {
+                  select: {
+                    landing_url: true,
+                    android_package: true,
+                    ios_app_id: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -64,6 +75,13 @@ export class PublicController {
     if (campaign.status !== 'active')
       return end(campaign.status === 'paused' ? 'paused' : 'ended');
     if ((await balance(`campaign:${campaign.id}`)) <= 0) return end('budget');
+
+    // Resolve the destination *before* burning a use: a publisher who has registered no app
+    // and no web fallback would otherwise eat the print run's uses redirecting nobody.
+    const platform = detectPlatform(req.headers['user-agent'] ?? '');
+    const claim_id = newClaimId();
+    const destination = storeUrl(platform, campaign.partnership.publisher, claim_id);
+    if (!destination) return end('no_destination');
 
     // Claim one use atomically — this is both the expiry check and the single/multi-use check,
     // so two simultaneous scans can never both take the last use of a code. Raw because
@@ -77,20 +95,24 @@ export class PublicController {
     if (!claimed.length)
       return end(qr.expires_at && qr.expires_at <= new Date() ? 'expired' : 'used_up');
 
-    const scan = await prisma.scan.create({
+    // The pending attribution claim. It holds the fingerprint the app's first open will be
+    // matched against; the phone is handed none of it.
+    await prisma.scan.create({
       data: {
         qr_code_id: qr.id,
         campaign_id: campaign.id,
-        ip: sha256(ip).slice(0, 16),
+        claim_id,
+        platform,
+        ip: ipHash(ip),
         user_agent: (req.headers['user-agent'] ?? '').slice(0, 300),
       },
       select: { id: true },
     });
-    const token = signScanToken({ scan_id: scan.id, campaign_id: campaign.id });
-    const landing =
-      campaign.partnership.publisher.landing_url || `${FRONTEND_URL}/publisher-sim`;
-    const sep = landing.includes('?') ? '&' : '?';
-    res.redirect(`${landing}${sep}st=${token}`);
+
+    // Straight to the store listing. No token, no code, no query the app can read and spend —
+    // on Android the claim id travels only inside Play's install-referrer channel, which is
+    // install attribution, not app content.
+    res.redirect(destination);
   }
 
   // QR image render — public (the QR only encodes a public URL); supports live style preview

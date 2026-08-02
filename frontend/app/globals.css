@@ -933,6 +933,194 @@ a.menu-item:hover { background: var(--card-alt); text-decoration: none; color: v
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 .modal-actions button { margin-top: 0; }
 
+/* ============ console shell ============ */
+/* A signed-in portal is a filing rail plus one section at a time — never a single
+   scroll of every panel. The rail is a ticket stub: perforated inner edge, stamped
+   group labels. See lib/shell.tsx. */
+
+.shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100dvh;
+}
+
+.rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: 20px 14px 16px;
+  background: var(--card);
+  border-right: 1px solid var(--line);
+}
+/* the perforation, so the rail tears off the page like a stub */
+.rail::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -1px;
+  width: 1px;
+  background-image: var(--perf-v);
+  background-size: 1px 11px;
+}
+
+.rail-id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.rail-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: var(--card);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.rail-who { min-width: 0; line-height: 1.25; }
+.rail-who b {
+  display: block;
+  font-weight: 650;
+  font-size: 14px;
+  letter-spacing: -0.015em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-who .muted { font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+
+.rail-nav { flex: 1; overflow-y: auto; padding: 12px 0; margin: 0 -4px; }
+.rail-group {
+  display: block;
+  padding: 14px 12px 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+.rail-slot:first-child .rail-group { padding-top: 2px; }
+
+.rail-item {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--card-alt);
+  --btn-ink: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 1px 0;
+  padding: 8px 11px;
+  border-radius: var(--r);
+  border-color: transparent;
+  box-shadow: none;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.rail-item:hover { text-decoration: none; --btn-ink: var(--ink); }
+.rail-item svg { flex: 0 0 auto; width: 17px; height: 17px; color: var(--mut); }
+.rail-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-item[aria-current="page"] {
+  --btn-bg: var(--accent-soft);
+  --btn-ink: var(--accent);
+  border-color: var(--accent-line);
+  font-weight: 600;
+}
+.rail-item[aria-current="page"] svg { color: var(--accent); }
+.rail-badge {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  color: var(--warn);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.rail-out { margin-top: 8px; border-top: 1px solid var(--line-soft); border-radius: 0; padding-top: 12px; }
+.rail-out:hover { --btn-ink: var(--bad); }
+.rail-out:hover svg { color: var(--bad); }
+.rail-scrim { display: none; }
+.rail-toggle { display: none; }
+
+.shell-body { min-width: 0; display: flex; flex-direction: column; }
+
+.pagehead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 30px 16px;
+  /* solid band, never translucent or blurred — see DESIGN.md, Navigation */
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+.pagehead-text { min-width: 0; flex: 1; }
+.pagehead h1 { margin-bottom: 0; }
+.pagehead .muted { margin-top: 2px; max-width: 70ch; }
+.pagehead-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.pagehead-actions button { margin-top: 0; }
+
+.shell main { max-width: 1180px; width: 100%; padding: 4px 30px 96px; }
+/* the first section head sits right under the page header, so it needs no top rule */
+.shell main > h2:first-child { margin-top: 18px; }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .rail {
+    position: fixed;
+    z-index: 60;
+    left: 0;
+    width: 264px;
+    transform: translateX(-101%);
+    transition: transform .24s var(--ease);
+    box-shadow: var(--contact);
+  }
+  .shell.open .rail { transform: none; }
+  .shell.open .rail-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: color-mix(in srgb, #2a2113 45%, transparent);
+  }
+  .rail-toggle {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+  }
+  .rail-toggle svg { width: 18px; height: 18px; }
+  .pagehead { padding: 14px 16px; }
+  .shell main { padding: 4px 16px 80px; }
+}
+
 @media (max-width: 600px) {
   main { padding: 16px 14px 72px; }
   .topbar { margin: -16px -14px 16px; padding: 12px 14px; }
