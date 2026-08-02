@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const STEPS = [
   { key: 'print', label: 'Print', body: 'Design and export a print-ready QR code.' },
@@ -12,6 +12,7 @@ const STEP_MS = 1800;
 
 export default function JourneyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [active, setActive] = useState(0);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -32,6 +33,19 @@ export default function JourneyModal({ open, onClose }: { open: boolean; onClose
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  // Minimal focus management: move focus into the dialog on open, restore it
+  // to whatever had focus before (the trigger button) on close. Not a full
+  // focus trap -- the dialog has exactly two interactive elements (close
+  // button, scrim) and Escape/scrim-click already cover exit.
+  useEffect(() => {
+    if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+    return () => {
+      previouslyFocused?.focus();
+    };
+  }, [open]);
+
   if (!open) return null;
 
   return (
@@ -43,7 +57,7 @@ export default function JourneyModal({ open, onClose }: { open: boolean; onClose
         aria-label="The scan-to-payout journey"
         onClick={(e) => e.stopPropagation()}
       >
-        <button className="lp-journey-modal-close" onClick={onClose} aria-label="Close">
+        <button className="lp-journey-modal-close" ref={closeRef} onClick={onClose} aria-label="Close">
           &times;
         </button>
         <div className="lp-journey lp-journey-modal-inner">

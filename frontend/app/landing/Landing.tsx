@@ -3,6 +3,7 @@ import ActivityBoard from './ActivityBoard';
 import ScanStub from './ScanStub';
 import JourneyFlow from './JourneyFlow';
 import JourneyTrigger from './JourneyTrigger';
+import HeroGlow from './HeroGlow';
 import './landing.css';
 
 const SIGNUP_PROMOTER = '/login?mode=signup&type=promoter';
@@ -104,7 +105,7 @@ export default function Landing() {
 
       <main>
       <header className="lp-hero lp-wrap">
-        <div className="lp-hero-glow" aria-hidden="true" />
+        <HeroGlow />
         <div className="lp-pass lp-pass-shell lp-stocked lp-cropped">
           <div className="lp-coupon">
             <dl className="lp-routing">

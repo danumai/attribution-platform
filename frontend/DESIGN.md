@@ -349,11 +349,15 @@ a working portal screen:
 
 - An ambient gradient glow behind the hero (`.lp-hero-glow`) is permitted — restricted to the
   hero only, built from the system's own three inks at low opacity, never on text.
-- `backdrop-filter` glass is permitted in exactly two places: the sticky nav once scrolled, and
-  a light-catch highlight on the activity board — never as a wholesale glassmorphism treatment.
+- `backdrop-filter` glass is permitted in exactly one place: the sticky nav once scrolled. The
+  activity board's top-edge highlight (`.lp-board::after`) reads as a similar light-catch but is
+  a plain `linear-gradient`, not glass — no `backdrop-filter` there.
 - Section entrance motion (`.lp-enter`, reusing the `.lp-leg` view-timeline idiom) is permitted
   on the fare cards, fare-rule rows, and closing pass, in addition to the strip's existing
   per-leg entrance — still one shared idiom, not a different animation per section.
+- The scroll-driven journey diagram and its modal replay, and the hero's scroll parallax, are
+  also part of this exception (motion standing in for a product video, and depth on the hero
+  artifact) — same restraint: gated behind reduced-motion and view()/scroll() support.
 
 This exception is landing-page-only. The console shell (promoter, publisher, admin portals)
 keeps the rules above exactly as written: printed, not rendered; one authored motion event; no

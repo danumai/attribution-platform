@@ -300,11 +300,10 @@ body:has(.lp)::before {
 
 /* ---------- hero ---------- */
 
-.lp-hero { padding: 46px 0 12px; }
-
 /* ambient gradient backdrop, low-saturation, using the system's own three inks
    at low opacity so it reads as this product's colors, not a generic SaaS wash */
 .lp-hero {
+  padding: 46px 0 12px;
   position: relative;
   isolation: isolate;
 }
@@ -322,7 +321,7 @@ body:has(.lp)::before {
   opacity: 0.9;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .lp-hero-glow {
+  .lp-hero-glow[data-run] {
     animation: lp-glow-drift 22s ease-in-out infinite alternate;
   }
 }
@@ -333,11 +332,17 @@ body:has(.lp)::before {
 
 @supports (animation-timeline: scroll()) {
   @media (prefers-reduced-motion: no-preference) {
-    /* the pass drifts slower than the page, reading as sitting above the desk */
+    /* The hero pass needs BOTH its entrance (lp-press-land, from the shared
+       .lp-pass/.lp-board rule below) and this parallax drift. Both use the
+       `animation` shorthand, and this selector is more specific than
+       `.lp .lp-pass`, so declaring it separately would reset animation-name
+       and silently drop the entrance in any browser supporting
+       animation-timeline: scroll(). List both animations here instead, so
+       this rule is the single source of truth for the hero pass. */
     .lp .lp-hero .lp-pass {
-      animation: lp-parallax-pass linear both;
-      animation-timeline: scroll(root block);
-      animation-range: 0 640px;
+      animation: lp-press-land 0.78s var(--ease) both, lp-parallax-pass linear both;
+      animation-timeline: auto, scroll(root block);
+      animation-range: normal, 0 640px;
     }
     @keyframes lp-parallax-pass {
       to { transform: translateY(-24px); }
@@ -694,8 +699,10 @@ body:has(.lp)::before {
   /* line's viewBox is "0 0 400 4", so its actual path length is 400 user units
      (matches x1=0/x2=400) -- dasharray/offset must be scaled to that, not 100. */
   stroke-dasharray: 400;
-  stroke-dashoffset: calc(400 - (var(--reached, 0) * 100));
-  transition: stroke-dashoffset 0.6s var(--ease);
+  /* Fully drawn by default -- the scroll-linked draw-in below is additive
+     motion, not something content depends on (browsers without view()
+     support, or reduced motion, just see a complete line). */
+  stroke-dashoffset: 0;
 }
 
 .lp-journey-point {
@@ -751,12 +758,19 @@ body:has(.lp)::before {
   to { opacity: 0; transform: translate(0, 0) scale(1); }
 }
 
+/* These two rules were written for the scroll diagram (which loses its
+   spatial meaning under 1000px, once .lp-strip stops being 4 columns) —
+   not for the modal's track, which is a fixed-size floating panel that
+   should always show all 4 labeled waypoints regardless of viewport. */
 @media (max-width: 1000px) {
   .lp-journey { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .lp-journey-label { display: none; }
+  .lp-journey.lp-journey-modal-inner { display: grid; }
+  .lp-journey-modal-inner .lp-journey-label { display: block; }
 }
 @media (max-width: 720px) {
   .lp-journey { display: none; }
+  .lp-journey.lp-journey-modal-inner { display: grid; }
 }
 
 .lp-journey-trigger {
@@ -1161,6 +1175,63 @@ body:has(.lp)::before {
     .lp .lp-leg:nth-child(2) { animation-range: entry 9% entry 59%; }
     .lp .lp-leg:nth-child(3) { animation-range: entry 13% entry 63%; }
     .lp .lp-leg:nth-child(4) { animation-range: entry 17% entry 67%; }
+
+    /* the journey diagram's waypoints light up one by one, on the same
+       stagger as the coupon strip below them so the two read as one motion.
+       Scoped to :not(.lp-journey-modal-inner) -- the modal reuses these same
+       classes for its own, independently time-driven (setInterval) waypoint
+       activation via [data-active], which must keep working unaffected. */
+    @keyframes lp-journey-dot-active {
+      to { border-color: var(--press); background: var(--press); transform: scale(1.15); }
+    }
+    @keyframes lp-journey-label-active {
+      to { color: var(--press); }
+    }
+    @keyframes lp-journey-token-active {
+      0%, 40% { opacity: 0; transform: translate(-16px, -6px) scale(0.6); }
+      60% { opacity: 1; transform: translate(0, 0) scale(1); }
+      100% { opacity: 0; transform: translate(0, 0) scale(1); }
+    }
+    @keyframes lp-journey-draw-fill {
+      from { stroke-dashoffset: 400; }
+      to { stroke-dashoffset: 0; }
+    }
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-dot {
+      animation: lp-journey-dot-active linear both;
+      animation-timeline: view();
+      animation-range: entry 5% entry 55%;
+    }
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-label {
+      animation: lp-journey-label-active linear both;
+      animation-timeline: view();
+      animation-range: entry 5% entry 55%;
+    }
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-token {
+      animation: lp-journey-token-active linear both;
+      animation-timeline: view();
+      animation-range: entry 5% entry 55%;
+    }
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(2) .lp-journey-dot,
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(2) .lp-journey-label,
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(2) .lp-journey-token {
+      animation-range: entry 9% entry 59%;
+    }
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(3) .lp-journey-dot,
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(3) .lp-journey-label,
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(3) .lp-journey-token {
+      animation-range: entry 13% entry 63%;
+    }
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(4) .lp-journey-dot,
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(4) .lp-journey-label,
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(4) .lp-journey-token {
+      animation-range: entry 17% entry 67%;
+    }
+    /* the connecting line fills across the same span the 4 waypoints activate over */
+    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-draw {
+      animation: lp-journey-draw-fill linear both;
+      animation-timeline: view();
+      animation-range: entry 5% entry 67%;
+    }
 
     /* the two fares draw to the amounts they argue about */
     .lp .lp-meter i {
