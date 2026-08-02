@@ -674,6 +674,232 @@ git commit -m "docs: scope the no-gradient/no-glass/one-motion-event rules to th
 
 ---
 
+## Task 8: `JourneyModal` — click-to-play PiP replay of the journey
+
+**Added mid-implementation** at the user's explicit request for a click-to-play element
+("a pip type in landing page where the video will be played on click if anyone wants to know
+the journey"). No real video asset exists in this repo (confirmed: no `.mp4`/`.webm`/etc.
+anywhere in the tree), consistent with the spec's original decision to replace "promo video"
+with an animated sequence rather than fabricate or source real footage. This task builds a
+click-to-open, picture-in-picture-style floating panel that autoplays the same four-step
+journey (print → scan → signup → ledger) `JourneyFlow` (Task 4) already visualizes on scroll —
+here, time-driven instead of scroll-driven, so a visitor can watch it on demand without
+scrolling.
+
+**Files:**
+- Create: `frontend/app/landing/JourneyModal.tsx`
+- Modify: `frontend/app/landing/Landing.tsx` (add a trigger button in the four-coupon section
+  head, mount the modal)
+- Modify: `frontend/app/landing/landing.css` (new `.lp-journey-modal*` and `.lp-journey-trigger`
+  rules — reuses `.lp-journey-point`/`.lp-journey-dot`/`.lp-journey-label`/`.lp-journey-track`/
+  `.lp-journey-draw`/`.lp-journey-token` styling from Task 4 rather than duplicating it)
+
+**Interfaces:**
+- Produces: `JourneyModal` — a client component, props `{ open: boolean; onClose: () => void }`.
+  Self-contained autoplay: while `open`, cycles an `active` index 0→3 on a fixed interval, then
+  holds on step 4 briefly before looping back to 0 (matches the "one rehearsed sequence" motion
+  philosophy already established for the hero press-run — an authored loop, not raw video).
+- Consumes: nothing from Task 4's `JourneyFlow.tsx` at the code level (no shared component —
+  the two are visually consistent because they share CSS classes, not because one imports the
+  other), avoiding coupling a scroll-gated component to a time-gated one.
+
+- [ ] **Step 1: Write `JourneyModal.tsx`**
+
+```tsx
+'use client';
+import { useEffect, useState } from 'react';
+
+const STEPS = [
+  { key: 'print', label: 'Print', body: 'Design and export a print-ready QR code.' },
+  { key: 'scan', label: 'Scan', body: 'A phone scans it and opens the publisher’s store listing.' },
+  { key: 'signup', label: 'Signup', body: 'The user signs up; the install is matched server-to-server.' },
+  { key: 'ledger', label: 'Ledger', body: 'The fee posts from campaign budget to the publisher, atomically.' },
+] as const;
+
+const STEP_MS = 1800;
+
+export default function JourneyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    if (!open) return;
+    setActive(0);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = setInterval(() => {
+      setActive((i) => (i + 1) % STEPS.length);
+    }, STEP_MS);
+    return () => clearInterval(id);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="lp-journey-modal-scrim" onClick={onClose}>
+      <div
+        className="lp-journey-modal lp-pass-shell lp-stocked"
+        role="dialog"
+        aria-modal="true"
+        aria-label="The scan-to-payout journey"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button className="lp-journey-modal-close" onClick={onClose} aria-label="Close">
+          &times;
+        </button>
+        <div className="lp-journey lp-journey-modal-inner">
+          {STEPS.map((s, i) => (
+            <div className="lp-journey-point" key={s.key} data-active={i === active ? '' : undefined}>
+              <span className="lp-journey-dot" />
+              <span className="lp-journey-label">{s.label}</span>
+            </div>
+          ))}
+        </div>
+        <p className="lp-journey-modal-body">{STEPS[active].body}</p>
+      </div>
+    </div>
+  );
+}
+```
+
+Note: this component does not import `.lp-journey-line`'s SVG path-draw (that math is specific
+to the scroll-gated `JourneyFlow`); the modal shows the four dots/labels stepping through their
+active state on a timer, which is simpler and appropriate for a fixed-size floating panel. If
+you want the connecting line too, you may add it following the same SVG pattern Task 4 used
+(`viewBox="0 0 400 4"`, `stroke-dasharray: 400`, offset driven by `active` instead of
+`--reached`) — but it is not required; keep the modal simple unless it's trivial to add
+consistently with Task 4's (already-fixed) math.
+
+- [ ] **Step 2: Add the trigger button and mount the modal in `Landing.tsx`**
+
+Add `'use client'` is not needed in `Landing.tsx` itself unless it wasn't already a client
+component — check: `Landing.tsx` currently has no `'use client'` directive and is a server
+component that composes client components (`ActivityBoard`, `ScanStub`, `JourneyFlow`). The
+modal's open/close state must live in a client component. Two options: (a) add
+`'use client'` to `Landing.tsx` (simplest, but makes the whole page a client component), or
+(b) create a tiny wrapper client component that owns just the trigger button + modal state.
+Prefer (b) to keep `Landing.tsx` a server component, consistent with the existing pattern of
+isolating client interactivity into small dedicated files (`ScanStub.tsx`, `ActivityBoard.tsx`,
+`JourneyFlow.tsx` are all `'use client'`, `Landing.tsx` is not).
+
+Create `frontend/app/landing/JourneyTrigger.tsx`:
+
+```tsx
+'use client';
+import { useState } from 'react';
+import JourneyModal from './JourneyModal';
+
+export default function JourneyTrigger() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button className="lp-btn lp-btn-ghost lp-journey-trigger" onClick={() => setOpen(true)}>
+        <span aria-hidden="true">&#9654;</span> Watch the journey
+      </button>
+      <JourneyModal open={open} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+```
+
+In `frontend/app/landing/Landing.tsx`, import it:
+
+```tsx
+import JourneyTrigger from './JourneyTrigger';
+```
+
+Add the button next to the section sub-copy in the four-coupon section (immediately after the
+existing `<p className="lp-sub">...</p>` inside `.lp-section-head`, before the closing
+`</div>`):
+
+```tsx
+          <p className="lp-sub">
+            Nothing is charged to you until the fourth. Every stage is a checkpoint the scan has to
+            clear, and the money only moves at the end of the strip.
+          </p>
+          <JourneyTrigger />
+        </div>
+```
+
+- [ ] **Step 3: Style the modal in `landing.css`**
+
+Add near the end of the `.lp-journey*` block from Task 4 (after the `@media (max-width: 720px)`
+rule that hides `.lp-journey`):
+
+```css
+.lp-journey-trigger {
+  margin-top: 18px;
+}
+.lp-journey-trigger span { font-size: 11px; }
+
+.lp-journey-modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.lp-journey-modal {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 34px 28px 28px;
+}
+.lp-journey-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--stock);
+  color: var(--ink-soft);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lp-journey-modal-close:hover { background: var(--stock-2); color: var(--ink); }
+.lp-journey-modal-inner {
+  margin-bottom: 20px;
+}
+.lp-journey-modal-body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  min-height: 44px;
+}
+```
+
+- [ ] **Step 4: Verify in browser**
+
+Run: `pnpm -C frontend dev`. Expected: a "Watch the journey" ghost button appears below the
+four-coupon section's intro copy. Clicking it opens a centered floating panel (picture-in-
+picture style) over a dimmed backdrop; the four waypoints step through their active state
+automatically every ~1.8s, looping; the body text below changes to match the active step.
+Clicking the close button, clicking the dimmed backdrop, or pressing Escape closes it. With OS
+reduced-motion on, the panel still opens and the steps are all visible, but they don't
+auto-advance (matching `ActivityBoard.tsx`'s existing `matchMedia` reduced-motion pattern for
+timer-driven effects — confirm this task's `setInterval` guard follows that same precedent).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/app/landing/JourneyModal.tsx frontend/app/landing/JourneyTrigger.tsx frontend/app/landing/Landing.tsx frontend/app/landing/landing.css
+git commit -m "feat: add click-to-play journey modal (PiP-style) as an on-demand alternative to scrolling"
+```
+
+---
+
 ## Final Verification
 
 - [ ] **Full manual pass**
@@ -687,6 +913,7 @@ Run: `pnpm -C frontend dev`, then walk the entire landing page top to bottom:
 6. Close section: closing pass fades/rises in.
 7. Toggle OS "reduce motion" (macOS: System Settings → Accessibility → Display → Reduce Motion) and reload: page is fully readable, no animation plays, no layout is broken or content hidden.
 8. Resize to ~1000px, ~720px, ~480px: journey diagram hides at 720px, everything else reflows per the existing responsive rules untouched by this plan.
+9. "Watch the journey" button opens the PiP modal, auto-advances through all 4 steps and loops, and closes via button/backdrop/Escape.
 
 - [ ] **No new dependencies check**
 
