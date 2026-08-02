@@ -102,6 +102,7 @@ export default function Landing() {
 
       <main>
       <header className="lp-hero lp-wrap">
+        <div className="lp-hero-glow" aria-hidden="true" />
         <div className="lp-pass lp-pass-shell lp-stocked lp-cropped">
           <div className="lp-coupon">
             <dl className="lp-routing">

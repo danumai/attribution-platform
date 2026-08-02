@@ -302,6 +302,49 @@ body:has(.lp)::before {
 
 .lp-hero { padding: 46px 0 12px; }
 
+/* ambient gradient backdrop, low-saturation, using the system's own three inks
+   at low opacity so it reads as this product's colors, not a generic SaaS wash */
+.lp-hero {
+  position: relative;
+  isolation: isolate;
+}
+.lp-hero-glow {
+  position: absolute;
+  inset: -80px -10% auto -10%;
+  height: 620px;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(45% 55% at 18% 20%, color-mix(in srgb, var(--press) 16%, transparent), transparent 70%),
+    radial-gradient(38% 48% at 82% 10%, color-mix(in srgb, var(--hold) 14%, transparent), transparent 72%),
+    radial-gradient(40% 50% at 55% 60%, color-mix(in srgb, var(--post) 10%, transparent), transparent 74%);
+  filter: blur(6px);
+  opacity: 0.9;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lp-hero-glow {
+    animation: lp-glow-drift 22s ease-in-out infinite alternate;
+  }
+}
+@keyframes lp-glow-drift {
+  from { background-position: 0 0, 0 0, 0 0; transform: translateY(0); }
+  to { background-position: 30px 20px, -24px 16px, 14px -18px; transform: translateY(6px); }
+}
+
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* the pass drifts slower than the page, reading as sitting above the desk */
+    .lp .lp-hero .lp-pass {
+      animation: lp-parallax-pass linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 640px;
+    }
+    @keyframes lp-parallax-pass {
+      to { transform: translateY(-24px); }
+    }
+  }
+}
+
 .lp-pass {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 30px 320px;
