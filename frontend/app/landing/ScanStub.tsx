@@ -1,24 +1,15 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
 import CodeMark from './CodeMark';
+import { useInView } from './useInView';
 
 // The validation loop is a looping animation, so it only runs while the stub is
 // actually on screen. Nothing here gates content — the stub renders complete on
 // the server and the observer only toggles motion.
 export default function ScanStub() {
-  const ref = useRef<HTMLElement>(null);
-  const [run, setRun] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(([e]) => setRun(e.isIntersecting));
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
+  const { ref, inView } = useInView<HTMLElement>();
 
   return (
-    <aside className="lp-stub" ref={ref} data-run={run ? '' : undefined}>
+    <aside className="lp-stub" ref={ref} data-run={inView ? '' : undefined}>
       <div className="lp-code">
         <CodeMark />
         <span className="lp-scan" aria-hidden="true" />
