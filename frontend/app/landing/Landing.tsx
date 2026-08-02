@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import ActivityBoard from './ActivityBoard';
 import ScanStub from './ScanStub';
+import JourneyFlow from './JourneyFlow';
 import './landing.css';
 
 const SIGNUP_PROMOTER = '/login?mode=signup&type=promoter';
@@ -165,6 +166,7 @@ export default function Landing() {
             clear, and the money only moves at the end of the strip.
           </p>
         </div>
+        <JourneyFlow />
         <div className="lp-strip lp-stocked">
           {LEGS.map((l) => (
             <article className="lp-leg" key={l.no}>

@@ -659,6 +659,98 @@ body:has(.lp)::before {
   max-width: 60ch;
 }
 
+/* ---------- the journey: a scroll-activated flow diagram standing in for a
+   promo video. Four waypoints on one line, each lighting up (and sending a
+   token traveling to it) as its matching coupon below scrolls into view. ---------- */
+
+.lp-journey {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 22px;
+  padding: 0 6px;
+}
+.lp-journey-line {
+  position: absolute;
+  inset: 15px 6px auto 6px;
+  width: calc(100% - 12px);
+  height: 4px;
+  overflow: visible;
+}
+.lp-journey-track,
+.lp-journey-draw {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.lp-journey-track { stroke: var(--line); }
+.lp-journey-draw {
+  stroke: var(--press);
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - (var(--reached, 0) * 25));
+  transition: stroke-dashoffset 0.6s var(--ease);
+}
+
+.lp-journey-point {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+}
+.lp-journey-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--stock);
+  border: 2px solid var(--line);
+  transition: border-color 0.3s var(--ease), background 0.3s var(--ease), transform 0.3s var(--ease);
+}
+.lp-journey-point[data-active] .lp-journey-dot {
+  border-color: var(--press);
+  background: var(--press);
+  transform: scale(1.15);
+}
+.lp-journey-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mut);
+  transition: color 0.3s var(--ease);
+}
+.lp-journey-point[data-active] .lp-journey-label { color: var(--press); }
+
+/* the token that travels to a waypoint the instant it activates */
+.lp-journey-token {
+  position: absolute;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--post);
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lp-journey-point[data-active] .lp-journey-token {
+    animation: lp-token-arrive 0.5s var(--ease) both;
+  }
+}
+@keyframes lp-token-arrive {
+  from { opacity: 0; transform: translate(-16px, -6px) scale(0.6); }
+  60% { opacity: 1; }
+  to { opacity: 0; transform: translate(0, 0) scale(1); }
+}
+
+@media (max-width: 1000px) {
+  .lp-journey { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .lp-journey-label { display: none; }
+}
+@media (max-width: 720px) {
+  .lp-journey { display: none; }
+}
+
 /* ---------- the route: four coupons on one strip ---------- */
 
 .lp-strip {
