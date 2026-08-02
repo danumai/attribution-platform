@@ -2,6 +2,7 @@ import Link from 'next/link';
 import ActivityBoard from './ActivityBoard';
 import ScanStub from './ScanStub';
 import JourneyFlow from './JourneyFlow';
+import JourneyTrigger from './JourneyTrigger';
 import './landing.css';
 
 const SIGNUP_PROMOTER = '/login?mode=signup&type=promoter';
@@ -165,6 +166,7 @@ export default function Landing() {
             Nothing is charged to you until the fourth. Every stage is a checkpoint the scan has to
             clear, and the money only moves at the end of the strip.
           </p>
+          <JourneyTrigger />
         </div>
         <JourneyFlow />
         <div className="lp-strip lp-stocked">

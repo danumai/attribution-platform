@@ -759,6 +759,51 @@ body:has(.lp)::before {
   .lp-journey { display: none; }
 }
 
+.lp-journey-trigger {
+  margin-top: 18px;
+}
+.lp-journey-trigger span { font-size: 11px; }
+
+.lp-journey-modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.lp-journey-modal {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 34px 28px 28px;
+}
+.lp-journey-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--stock);
+  color: var(--ink-soft);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lp-journey-modal-close:hover { background: var(--stock-2); color: var(--ink); }
+.lp-journey-modal-inner {
+  margin-bottom: 20px;
+}
+.lp-journey-modal-body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  min-height: 44px;
+}
+
 /* ---------- the route: four coupons on one strip ---------- */
 
 .lp-strip {
