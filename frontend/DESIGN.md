@@ -340,3 +340,21 @@ Everything above lives inside `prefers-reduced-motion: no-preference`. Sections 
 - **Don't** use a pill radius for a printed field or state chip.
 - **Don't** rule under a word for emphasis. At display size a full-width rule reads as a hyperlink; emphasis is the second ink.
 - **Don't** let a stamp fall across reading text or clip off the card edge — it is struck into whitespace the layout reserves for it.
+
+### Landing-Page Exception
+
+The public landing page (`frontend/app/landing/`) is allowed a small, deliberate exception to
+three rules above, in service of the page's job as the product's first impression rather than
+a working portal screen:
+
+- An ambient gradient glow behind the hero (`.lp-hero-glow`) is permitted — restricted to the
+  hero only, built from the system's own three inks at low opacity, never on text.
+- `backdrop-filter` glass is permitted in exactly two places: the sticky nav once scrolled, and
+  a light-catch highlight on the activity board — never as a wholesale glassmorphism treatment.
+- Section entrance motion (`.lp-enter`, reusing the `.lp-leg` view-timeline idiom) is permitted
+  on the fare cards, fare-rule rows, and closing pass, in addition to the strip's existing
+  per-leg entrance — still one shared idiom, not a different animation per section.
+
+This exception is landing-page-only. The console shell (promoter, publisher, admin portals)
+keeps the rules above exactly as written: printed, not rendered; one authored motion event; no
+gradients or glass.
