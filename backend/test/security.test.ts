@@ -3,7 +3,18 @@
 import { strict as assert } from 'assert';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
-import { ipHash, rateLimited, validateLandingUrl } from '../src/common/security';
+import { ipHash, rateLimited, str, validateLandingUrl } from '../src/common/security';
+
+// Bounded untrusted strings. Rejecting must be loud — a silently truncated
+// publisher_user_ref would collide with another user's and misroute an attribution.
+assert.equal(str('user_42', 'ref', 200), 'user_42');
+assert.throws(() => str('x'.repeat(201), 'ref', 200), /200 characters or fewer/);
+assert.throws(() => str('ok\0hidden', 'ref', 200), /null bytes/, 'NUL breaks Postgres text');
+assert.throws(() => str(undefined, 'ref', 200), /required/);
+assert.throws(() => str('', 'ref', 200), /required/);
+assert.throws(() => str(42 as unknown as string, 'ref', 200), /must be a string/);
+assert.equal(str(undefined, 'ref', 200, false), null, 'optional absent is null, not a throw');
+assert.equal(str('x'.repeat(200), 'ref', 200), 'x'.repeat(200), 'the boundary itself is allowed');
 
 // The iOS match only works if the socket-derived address and the string the publisher's
 // server reports hash identically. Every case below is a real spelling mismatch that would

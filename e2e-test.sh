@@ -229,4 +229,32 @@ echo "13. Ledger integrity after admin actions"
 SUM2=$(docker exec qrreward-db psql -U qrreward -tAc "SELECT sum(amount) FROM ledger_entries")
 [ "$SUM2" = "0" ] && pass "ledger still balances after admin actions" || fail "ledger sum=$SUM2"
 
+echo "14. Input bounds & abuse ceilings"
+# Runs last on purpose: the flood below burns this IP's global budget for the minute.
+# A fresh publisher, because the one used above was offboarded and its key revoked.
+KEY2=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Bounds $S\",\"email\":\"bounds$S@t.com\",\"password\":\"password123\",\"type\":\"publisher\"}" | j .api_key)
+LONGREF=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $KEY2" -H 'Content-Type: application/json' \
+  -d "{\"publisher_user_ref\":\"$(printf 'x%.0s' $(seq 1 201))\",\"ip\":\"203.0.113.5\"}")
+[ "$LONGREF" = "400" ] && pass "oversized publisher_user_ref rejected (400)" || fail "unbounded ref: $LONGREF"
+NULREF=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $KEY2" -H 'Content-Type: application/json' \
+  -d '{"publisher_user_ref":"bad\u0000ref","ip":"203.0.113.5"}' | j .message)
+case "$NULREF" in *"null bytes"*) pass "null byte in publisher_user_ref rejected" ;; *) fail "NUL accepted: $NULREF" ;; esac
+LONGPW=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
+  -d "{\"name\":\"x\",\"email\":\"long$S@t.com\",\"password\":\"$(printf 'p%.0s' $(seq 1 73))\",\"type\":\"promoter\"}")
+[ "$LONGPW" = "400" ] && pass "over-72-byte password rejected (bcrypt truncation trap)" || fail "long password: $LONGPW"
+
+# The global per-IP ceiling under every route, including authenticated ones.
+# Flood as a synthetic client rather than as ourselves: dev TRUST_PROXY is `loopback`, so
+# X-Forwarded-For from localhost is honoured. That keeps this run's own budget intact (the
+# suite stays re-runnable) and additionally proves the limiter keys on the forwarded client.
+FAKE='198.51.100.77'
+for i in $(seq 1 310); do curl -s -o /dev/null "$API/v1/publishers" -H "X-Forwarded-For: $FAKE" -H "Authorization: Bearer $PRO_TOKEN"; done
+FLOOD=$(curl -s -o /dev/null -w '%{http_code}' "$API/v1/publishers" -H "X-Forwarded-For: $FAKE" -H "Authorization: Bearer $PRO_TOKEN")
+[ "$FLOOD" = "429" ] && pass "global per-IP ceiling throttles authenticated routes (429)" || fail "no global limit: $FLOOD"
+MINE=$(curl -s -o /dev/null -w '%{http_code}' "$API/v1/publishers" -H "Authorization: Bearer $PRO_TOKEN")
+[ "$MINE" = "200" ] && pass "one flooding client is throttled without affecting others" || fail "limiter not per-IP: $MINE"
+HEALTH=$(curl -s -o /dev/null -w '%{http_code}' "$API/healthz")
+[ "$HEALTH" = "200" ] && pass "health probe stays exempt, so a flood can't cause an outage" || fail "healthz throttled: $HEALTH"
+
 echo; echo "ALL CHECKS PASSED"

@@ -10,10 +10,11 @@ short-window device match on iOS. That keeps it a measurement artifact rather th
 mechanism, which is what App Store 3.1.1 forbids. See
 [Figure 8](SYSTEM_FLOW.md#figure-8-why-the-qr-unlocks-nothing).
 
-- **[openapi.yaml](openapi.yaml)** — full API reference (OpenAPI 3.0); paste into
-  [editor.swagger.io](https://editor.swagger.io) for an interactive view
-- **[SYSTEM_FLOW.md](SYSTEM_FLOW.md)** — how it works, plus every role's end-to-end flow with endpoints
-- [qr-reward-platform-design.md](qr-reward-platform-design.md) — architecture doc
+- **Swagger UI at `/docs`** — full API reference, generated from the live controllers
+- **[SYSTEM_FLOW.md](SYSTEM_FLOW.md)** — the whole system in one document:
+  Part I how it works and every role's end-to-end flow,
+  [Part II](SYSTEM_FLOW.md#part-ii--publisher-integration) the publisher integration guide,
+  [Part III](SYSTEM_FLOW.md#part-iii--security-model) the security model and its accepted risks
 
 ## Run
 
@@ -91,7 +92,7 @@ unrecoverable mistake — see below.
 | `FINGERPRINT_WINDOW_MIN` | How long an iOS install can be device-matched to a scan. Default 60. Shorter = fewer false matches under carrier NAT. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seeded on **first boot only** in production — rotating the password in-app is not reverted by the next deploy. |
 | `DATABASE_URL` | Append `?sslmode=require` for managed Postgres. |
-| `TRUST_PROXY` | Set to `1` behind a load balancer, or `req.ip` is the proxy and every per-IP rate limit collapses into one bucket. |
+| `TRUST_PROXY` | Set to `1` behind a load balancer, or `req.ip` is the proxy and every per-IP rate limit collapses into one bucket. `true` is **refused at boot** — it trusts `X-Forwarded-For` from any client, letting one attacker present as unlimited IPs. |
 | `NEXT_PUBLIC_API_URL` | Baked into the browser bundle at **build** time; setting it at runtime does nothing. |
 
 Demo promoter/publisher tenants are skipped entirely when `NODE_ENV=production`.
@@ -160,7 +161,8 @@ Everyone can redeem; only an identified subscriber gets full value. A partnershi
 - `POST /v1/attribution/:id/confirm` releases the held-back delta once the user verifies.
   It is idempotent and refuses after the grace window, so nobody is paid twice.
 
-Publishers integrating against this: see **[PUBLISHER_INTEGRATION.md](PUBLISHER_INTEGRATION.md)**.
+Publishers integrating against this: see
+**[SYSTEM_FLOW.md Part II](SYSTEM_FLOW.md#part-ii--publisher-integration)**.
 
 ## Code time and usage bounds
 

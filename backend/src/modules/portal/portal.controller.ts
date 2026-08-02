@@ -18,7 +18,7 @@ import {
   validateIosAppId,
 } from '../../common/attribution';
 import { QrStyle, validateStyle } from '../../common/qr';
-import { sha256, validateLandingUrl } from '../../common/security';
+import { sha256, str, validateLandingUrl } from '../../common/security';
 import { balance, balances, ledger } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
 import { AuthGuard, Session } from '../auth/auth.guard';
@@ -113,13 +113,13 @@ export class PortalController {
     @Session() s: SessionClaims,
     @Body() b: { partnership_id: string; name: string },
   ) {
-    if (!b.name) throw new BadRequestException('name required');
+    const name = str(b.name, 'name', 120)!;
     const partnership = await prisma.partnership.findFirst({
       where: { id: b.partnership_id, promoter_org_id: s.org_id, status: 'active' },
       select: { id: true },
     });
     if (!partnership) throw new BadRequestException('no active partnership with that id');
-    return prisma.campaign.create({ data: { partnership_id: b.partnership_id, name: b.name } });
+    return prisma.campaign.create({ data: { partnership_id: b.partnership_id, name } });
   }
 
   @Get('campaigns')

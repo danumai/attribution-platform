@@ -26,7 +26,7 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { FINGERPRINT_WINDOW_MIN, REFERRER_WINDOW_DAYS } from '../../config';
 import { Platform, claimIdFromReferrer, detectPlatform } from '../../common/attribution';
-import { ipHash, rateLimited, sha256 } from '../../common/security';
+import { ipHash, rateLimited, sha256, str } from '../../common/security';
 import { ledger } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
 
@@ -143,16 +143,20 @@ export class PartnerController {
     },
   ) {
     const publisher = await publisherFromKey(auth);
-    if (!b.publisher_user_ref) throw new BadRequestException('publisher_user_ref required');
+    // Bounded before anything is parsed or stored: `publisher_user_ref` becomes a unique-index
+    // entry, and the rest are attacker-shaped strings from another company's server.
+    const publisher_user_ref = str(b.publisher_user_ref, 'publisher_user_ref', 200)!;
+    const install_referrer = str(b.install_referrer, 'install_referrer', 1000, false);
+    const rawIp = str(b.ip, 'ip', 45, false); // 45 = longest possible IPv6 text form
 
-    const claimId = claimIdFromReferrer(b.install_referrer);
+    const claimId = claimIdFromReferrer(install_referrer);
     // The publisher reports its own client's signals; we hash the IP the same way the scan
     // path did so the two are comparable and neither side ever stores a raw address.
-    const fingerprint = b.ip ? ipHash(b.ip) : null;
+    const fingerprint = rawIp ? ipHash(rawIp) : null;
     const platform = (
       b.platform && ['android', 'ios', 'other'].includes(b.platform)
         ? b.platform
-        : detectPlatform(b.user_agent ?? '')
+        : detectPlatform(str(b.user_agent, 'user_agent', 500, false) ?? '')
     ) as Platform;
 
     if (!claimId && !fingerprint)
@@ -198,7 +202,7 @@ export class PartnerController {
           data: {
             campaign_id: scan.campaign_id,
             scan_id: scan.id,
-            publisher_user_ref: b.publisher_user_ref,
+            publisher_user_ref,
             coins: fee,
             identified,
             match_method: claimId ? 'referrer' : 'fingerprint',
@@ -257,7 +261,7 @@ export class PartnerController {
      * fee was only ever paid once.
      */
     const prior = await prisma.redemption.findFirst({
-      where: { campaign_id: replayCampaignId!, publisher_user_ref: b.publisher_user_ref },
+      where: { campaign_id: replayCampaignId!, publisher_user_ref },
       include: { campaign: { select: { name: true, partnership: { select: { coin_rate: true, grace_days: true } } } } },
     });
     // Gone only if the campaign was deleted between the two calls; nothing left to replay.

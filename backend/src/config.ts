@@ -63,6 +63,24 @@ const int = (name: string, fallback: number, min: number, max: number) => {
 export const REFERRER_WINDOW_DAYS = int('REFERRER_WINDOW_DAYS', 30, 1, 90);
 export const FINGERPRINT_WINDOW_MIN = int('FINGERPRINT_WINDOW_MIN', 60, 1, 1440);
 
+/**
+ * Which upstream hops may set `X-Forwarded-For`. Every per-IP control in this system —
+ * login throttling, scan limits, the global ceiling, and the iOS fingerprint itself — reads
+ * `req.ip`, and `req.ip` is whatever this setting says to believe.
+ *
+ * `true` means "trust the header from anyone", which lets any client name its own address:
+ * one attacker becomes unlimited distinct IPs and every limit above evaporates. Express
+ * accepts it happily, so this is refused here instead. Name the real hops (`1` for a single
+ * load balancer, or the proxy subnet) — never the wildcard.
+ */
+const rawTrustProxy = process.env.TRUST_PROXY ?? 'loopback';
+if (rawTrustProxy === 'true')
+  throw new Error(
+    "TRUST_PROXY must not be 'true' — that trusts X-Forwarded-For from any client and " +
+      'defeats every per-IP rate limit. Use the hop count (e.g. 1) or the proxy subnet.',
+  );
+export const TRUST_PROXY = /^\d+$/.test(rawTrustProxy) ? Number(rawTrustProxy) : rawTrustProxy;
+
 /** Super admin, seeded on first boot. Validated here so a bad value fails before the DB is touched. */
 export const ADMIN_EMAIL = required('ADMIN_EMAIL', 'admin@qrreward.local');
 export const ADMIN_PASSWORD = required('ADMIN_PASSWORD', 'admin12345');

@@ -3,8 +3,8 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { json } from 'express';
 import { AppModule } from './app.module';
-import { securityHeaders } from './common/security';
-import { FRONTEND_URLS } from './config';
+import { globalRateLimit, securityHeaders } from './common/security';
+import { FRONTEND_URLS, TRUST_PROXY } from './config';
 import { prisma } from './database/prisma';
 import { seedAccounts } from './database/seed';
 
@@ -15,7 +15,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
   // req.ip must reflect the real client, or per-IP rate limits collapse to one bucket
-  app.getHttpAdapter().getInstance().set('trust proxy', process.env.TRUST_PROXY ?? 'loopback');
+  app.getHttpAdapter().getInstance().set('trust proxy', TRUST_PROXY);
 
   // Generated straight from the live controllers — a new route shows up here with no extra
   // step. Mounted before securityHeaders: that middleware's `default-src 'none'` CSP would
@@ -40,6 +40,9 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, swaggerDoc);
 
   app.use(securityHeaders);
+  // Before the body parser: a flood should be turned away without first buying it 1mb of
+  // JSON parsing per request.
+  app.use(globalRateLimit);
   app.use(json({ limit: '1mb' })); // room for logo data URLs
   app.enableCors({ origin: FRONTEND_URLS });
 

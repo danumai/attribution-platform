@@ -26,6 +26,49 @@ export function rateLimited(key: string, max: number, windowMs = 60_000): boolea
 export const clientIp = (req: Request) => req.ip ?? req.socket.remoteAddress ?? 'unknown';
 
 /**
+ * A blanket per-IP ceiling under every route, including the authenticated ones.
+ *
+ * The specific limits (login, signup, scan, partner key) are the ones tuned to their path;
+ * this is the floor beneath all of them, so a route added later is never accidentally
+ * unlimited. It sits high enough that a dashboard loading a dozen panels never notices, and
+ * low enough that scraping or credential stuffing from one address runs out of room.
+ *
+ * Deliberately keyed on IP alone rather than on the session: an attacker without a valid
+ * token is exactly the one to slow down, and they have no session to key on.
+ */
+export function globalRateLimit(req: Request, res: Response, next: NextFunction) {
+  // Health checks are what the load balancer uses to decide this process is alive. Throttling
+  // them would turn a traffic spike into a pulled-from-rotation outage.
+  if (req.path === '/healthz') return next();
+  if (rateLimited(`global:${clientIp(req)}`, 300)) {
+    res.setHeader('Retry-After', '60');
+    return res.status(429).json({ statusCode: 429, message: 'too many requests' });
+  }
+  next();
+}
+
+/**
+ * A bounded string from an untrusted body.
+ *
+ * Every free-text field crossing a trust boundary needs a ceiling, or it becomes a cheap way
+ * to bloat a row, a log line and an index entry at once. Rejecting loudly beats truncating
+ * silently: a `publisher_user_ref` quietly cut to 200 chars would collide with a different
+ * user's ref and hand one user's attribution to another.
+ */
+export function str(v: unknown, name: string, max: number, required = true): string | null {
+  if (v === undefined || v === null || v === '') {
+    if (required) throw new BadRequestException(`${name} is required`);
+    return null;
+  }
+  if (typeof v !== 'string') throw new BadRequestException(`${name} must be a string`);
+  // Reject NUL outright — Postgres cannot store it in a text column and rejects mid-transaction.
+  if (v.includes('\0')) throw new BadRequestException(`${name} must not contain null bytes`);
+  if (v.length > max)
+    throw new BadRequestException(`${name} must be ${max} characters or fewer`);
+  return v;
+}
+
+/**
  * The fingerprint key for one device, hashed so no raw address is ever stored.
  *
  * Both halves of the iOS match go through here, and that is the whole point: the scan side

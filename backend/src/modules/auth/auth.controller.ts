@@ -14,9 +14,20 @@ import {
   validateBonusLabel,
   validateIosAppId,
 } from '../../common/attribution';
-import { clientIp, rateLimited, sha256, validateLandingUrl } from '../../common/security';
+import { clientIp, rateLimited, sha256, str, validateLandingUrl } from '../../common/security';
 import { prisma } from '../../database/prisma';
 import { newApiKey, signSession } from './tokens';
+
+/** A real bcrypt hash of a value nothing can match, so the no-such-account path costs the
+ *  same as the wrong-password path. Cost 10 to match what `signup` writes. */
+const DUMMY_HASH = bcrypt.hashSync('unmatchable-placeholder-password', 10);
+
+/**
+ * bcrypt silently ignores everything past 72 bytes, so without a ceiling a 200-character
+ * passphrase is only ever its first 72 bytes — and any other string sharing that prefix
+ * would log in. Rejecting is honest; truncating is a trap.
+ */
+const MAX_PASSWORD = 72;
 
 @ApiTags('Auth')
 @Controller('v1/auth')
@@ -40,7 +51,14 @@ export class AuthController {
       throw new BadRequestException('too many signups, try again shortly');
     if (!b.name || !b.email || !b.password || !['promoter', 'publisher'].includes(b.type))
       throw new BadRequestException('name, email, password, type(promoter|publisher) required');
+    const name = str(b.name, 'name', 120)!;
+    const email = str(b.email, 'email', 254)!.toLowerCase();
+    // Shape check only — the address is proven by nothing here, so it stays a display field.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      throw new BadRequestException('email must be a valid address');
     if (b.password.length < 8) throw new BadRequestException('password min 8 chars');
+    if (Buffer.byteLength(b.password) > MAX_PASSWORD)
+      throw new BadRequestException(`password must be ${MAX_PASSWORD} bytes or fewer`);
     const landing_url = validateLandingUrl(b.landing_url);
     const android_package = validateAndroidPackage(b.android_package);
     const ios_app_id = validateIosAppId(b.ios_app_id);
@@ -50,9 +68,9 @@ export class AuthController {
     try {
       org = await prisma.org.create({
         data: {
-          name: b.name,
+          name,
           type: b.type,
-          email: b.email.toLowerCase(),
+          email,
           password_hash: await bcrypt.hash(b.password, 10),
           api_key_hash: apiKey ? sha256(apiKey) : null,
           landing_url,
@@ -82,8 +100,11 @@ export class AuthController {
     if (rateLimited(`login-ip:${clientIp(req)}`, 20) || rateLimited(`login-acct:${email}`, 10))
       throw new UnauthorizedException('too many attempts, try again shortly');
     const org = await prisma.org.findUnique({ where: { email } });
-    if (!org || !(await bcrypt.compare(b.password ?? '', org.password_hash)))
-      throw new UnauthorizedException('invalid credentials');
+    // Hash even when the account does not exist. Otherwise an unknown email returns in
+    // microseconds and a known one takes bcrypt's ~100ms, which is a reliable oracle for
+    // enumerating exactly which addresses are registered on this platform.
+    const ok = await bcrypt.compare(b.password ?? '', org?.password_hash ?? DUMMY_HASH);
+    if (!org || !ok) throw new UnauthorizedException('invalid credentials');
     if (org.suspended) throw new UnauthorizedException('account suspended');
     return {
       token: signSession({ org_id: org.id, type: org.type as any }),

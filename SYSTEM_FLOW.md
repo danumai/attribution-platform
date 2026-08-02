@@ -1,8 +1,19 @@
 # QR Reward Platform — How It Works
 
-A guide to the whole system, in plain language, with the exact rules the code enforces.
+The whole system in one document: how it works, how a publisher integrates against it, and
+what it does and does not defend against.
+
+- **[Part I — How It Works](#part-i--how-it-works)** — the model, the flows, the money
+- **[Part II — Publisher Integration](#part-ii--publisher-integration)** — wiring your backend to the Partner API
+- **[Part III — Security Model](#part-iii--security-model)** — threat model, controls, and the accepted risks
+
+Machine-readable API reference: the live **Swagger UI at `/docs`**, generated straight from
+the running controllers — a new route appears there with no extra step.
 
 ---
+---
+
+# Part I — How It Works
 
 ## The Idea in One Sentence
 
@@ -237,7 +248,11 @@ hand. The UNIQUE constraint, not the handler, is what guarantees the fee was pai
 
 ---
 
-## Figure 5: What Makes It Safe
+## Figure 5: What Makes the Money Safe
+
+The invariants below are enforced by the **database**, not by handler logic, so they hold
+under concurrency. The wider security posture — authentication, rate limits, input bounds —
+is [Part III](#part-iii--security-model).
 
 ```
   ✔  Nothing redeemable ever reaches a device
@@ -259,6 +274,11 @@ hand. The UNIQUE constraint, not the handler, is what guarantees the fee was pai
   ✔  Every coin movement is double-entry
       — each transfer writes two rows with a shared ref that sums to zero, so nothing
         appears or vanishes silently
+
+  ✔  A retried claim replays, it never re-pays
+      — a lost response is the normal reason a publisher calls twice, so the same
+        publisher_user_ref returns the original answer with replay: true rather than a
+        409 someone has to reconcile by hand
 
   ✔  Suspension takes effect now
       — every authenticated request re-checks the org, so a suspended tenant loses access
@@ -414,17 +434,16 @@ anything that looks like a spendable token fails the build.
 | `/v1/attribution/*` | `pk_…` API key | The **publisher's server**, never a browser and never the app |
 | `/v1/admin/*` | session JWT + admin role | Super admin console |
 
-Full request/response shapes for every route: **[openapi.yaml](openapi.yaml)** — an
-OpenAPI 3.0 document, viewable interactively by pasting it into
-[editor.swagger.io](https://editor.swagger.io).
+Every route sits under a 300/min per-IP ceiling in addition to the specific limits noted
+above; `/healthz` is exempt so a flood cannot cost the process its place in the load
+balancer.
 
 ---
 
 ## Role Flows, End to End
 
 Every step below names the exact HTTP call. `Bearer <token>` is the session JWT from
-signup/login; `Bearer pk_…` is the publisher's Partner API key. Full shapes are in
-[openapi.yaml](openapi.yaml).
+signup/login; `Bearer pk_…` is the publisher's Partner API key.
 
 ### Promoter journey
 
@@ -470,6 +489,9 @@ signup/login; `Bearer pk_…` is the publisher's Partner API key. Full shapes ar
 
 ### Publisher journey
 
+The API calls in steps 4–6 are the integration; [Part II](#part-ii--publisher-integration)
+walks through them properly, with client code and a production checklist.
+
 ```
 1.  Create an account — this also mints a Partner API key, shown once
     POST /v1/auth/signup            { type: "publisher", name, email, password, landing_url }
@@ -483,30 +505,17 @@ signup/login; `Bearer pk_…` is the publisher's Partner API key. Full shapes ar
 3.  Register where scans should send people
     PATCH /v1/orgs/me   { android_package, ios_app_id, landing_url, bonus_label }
     auth: Bearer <token>
-    (landing_url is the web fallback for desktop scans; bonus_label describes the
-     publisher's OWN joining bonus and is a label for reporting, never an instruction)
 
 4.  --- a user scans, lands on the store listing, installs, and signs up in the app.
         Nothing from the scan reached the app. The publisher's *server* now asks us
         whether that install was attributable ---
 
 5.  Claim the install
-    POST /v1/attribution/claim
-      Android: { install_referrer, publisher_user_ref, identified }
-               (install_referrer is the raw string from Play's Install Referrer API)
-      iOS:     { ip, user_agent, publisher_user_ref, identified }
-               (the first-open request's own signals — iOS has no referrer channel)
-    → 200 { attributed: true, attribution_id, campaign_name, match_method, fee,
-            pending_fee, confirm_deadline, bonus_label, replay }
-      or  { attributed: false, reason }   ← organic install; nothing charged, not an error
-    auth: Bearer pk_<api_key>                                          (server-to-server only)
-
-    The publisher grants its own joining bonus here, under its own policy. This response
-    does not tell it to, and does not say how much.
+    POST /v1/attribution/claim                                  auth: Bearer pk_<api_key>
+    → 200 { attributed: true, attribution_id, fee, ... }  or  { attributed: false, reason }
 
 6.  Later, once the user clears the publisher's own verification bar
-    POST /v1/attribution/:id/confirm
-    → 200 { fee, fee_added, status: "confirmed" }                      auth: Bearer pk_<api_key>
+    POST /v1/attribution/:id/confirm                            auth: Bearer pk_<api_key>
 
 7.  Track earnings
     GET  /v1/redemptions                                                auth: Bearer <token>
@@ -594,23 +603,611 @@ Seeded from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on first boot — never created via
 ```
 
 ---
+---
 
-## What's Not Built Yet (On Purpose)
+# Part II — Publisher Integration
 
-A working system, not a finished product. These are simplified deliberately and flagged in
-the code as `ponytail:` comments so nobody mistakes them for bugs:
+**Audience:** the backend engineer at a publisher (a content app, a game, a wallet) who wants
+promoters to drive real signups and get paid per signup.
 
+**Time to integrate:** ~1 hour on Android, ~30 minutes more for iOS.
+
+## 1. What you are integrating with
+
+This platform tells you **whether a signup traces back to a promoter's QR code** — and if it
+does, moves a marketing fee from the promoter's funded budget to your account.
+
+Two things it deliberately does **not** do:
+
+- **It never tells your app to give a user coins.** You decide what a new user gets, under
+  your own policy, funded by your own free-grant allowance. `bonus_label` is just a label
+  describing *your* bonus, echoed back for your logs. It is never an instruction.
+- **It never puts anything spendable on the device.** A scan hands the phone one thing: a
+  store listing URL. Attribution happens server-to-server afterwards.
+
+That second point is what makes this safe to ship under App Store 3.1.1 — the reasoning is in
+[Figure 8](#figure-8-why-the-qr-unlocks-nothing).
+
+### The money vocabulary
+
+| Term | Means |
+|---|---|
+| **fee** | Platform credits paid **to you** by the promoter, per attributed signup. Your revenue. |
+| **coins / bonus** | Whatever *you* give the end user. This platform never moves these and never sees them. |
+| **coin_rate** | The full fee for an identified signup. Agreed per partnership. |
+| **guest_rate** | The smaller fee paid up front when the signup is not yet identified. |
+| **grace_days** | How long you have to confirm an identification and collect the remainder. |
+
+## 2. One-time setup
+
+### 2.1 Create your publisher account
+
+```bash
+curl -X POST https://api.example.com/v1/auth/signup \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "DramaBox",
+    "email": "eng@dramabox.example",
+    "password": "a-long-random-password",
+    "type": "publisher",
+    "android_package": "com.dramabox.app",
+    "ios_app_id": "123456789",
+    "landing_url": "https://dramabox.example/get",
+    "bonus_label": "100 free coins"
+  }'
+```
+
+```jsonc
+{
+  "token": "eyJhbGci…",              // 12h session JWT, for the dashboard
+  "org": { "id": "…", "type": "publisher" },
+  "api_key": "pk_9f2c…"              // SHOWN ONCE — store it in your secret manager now
+}
+```
+
+> **The API key is shown exactly once.** It is stored only as a SHA-256 hash; we cannot
+> recover it. Lost it? `POST /v1/api-keys/rotate` with your session token issues a new one and
+> invalidates the old one immediately.
+
+### 2.2 What each field controls
+
+| Field | Effect |
+|---|---|
+| `android_package` | Android scans → `play.google.com/store/apps/details?id=<this>`. Required for the deterministic match path. |
+| `ios_app_id` | iOS scans → `apps.apple.com/app/id<this>`. Numeric App Store id only. |
+| `landing_url` | Fallback for desktop scans and platforms you have not registered. HTTPS only. |
+| `bonus_label` | Free text describing *your own* joining bonus. Appears on promoter QR artwork and in your logs. |
+
+Change any of them later with `PATCH /v1/orgs/me` (session token, not API key).
+
+### 2.3 Accept a partnership
+
+A promoter proposes terms; you accept. Nothing runs until you do.
+
+```bash
+# See what's waiting
+curl https://api.example.com/v1/partnerships -H "Authorization: Bearer $SESSION_TOKEN"
+
+# Accept — check coin_rate / guest_rate / grace_days first
+curl -X POST https://api.example.com/v1/partnerships/$ID/accept \
+  -H "Authorization: Bearer $SESSION_TOKEN"
+```
+
+## 3. Android — the deterministic path
+
+Play's Install Referrer survives the install, so the claim id rides along in it and the match
+is exact. **Always prefer this path when a referrer is available.**
+
+### 3.1 In your app: read the referrer at first open
+
+```kotlin
+// build.gradle: implementation "com.android.installreferrer:installreferrer:2.2"
+val client = InstallReferrerClient.newBuilder(context).build()
+client.startConnection(object : InstallReferrerStateListener {
+    override fun onInstallReferrerSetupFinished(responseCode: Int) {
+        if (responseCode == InstallReferrerClient.InstallReferrerResponse.OK) {
+            // Raw string, e.g. "utm_source=qrmarketer&utm_medium=qr&qrm_claim=Xk3nQp7wZs1a"
+            val referrer = client.installReferrer.installReferrer
+            // Send it to YOUR backend and store it against the device/session.
+            // Do NOT call the attribution API from the app — the API key must never ship
+            // in a binary, and a client-controlled call is a client-controlled payout.
+            myBackend.saveReferrer(referrer)
+        }
+        client.endConnection()
+    }
+    override fun onInstallReferrerServiceDisconnected() {}
+})
+```
+
+Read it **once, at first open, before signup**, and persist it. The referrer is available from
+the moment the app is installed and does not depend on the user completing signup.
+
+### 3.2 On your server: claim at signup
+
+```bash
+curl -X POST https://api.example.com/v1/attribution/claim \
+  -H "Authorization: Bearer $QRM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "publisher_user_ref": "user_84213",
+    "install_referrer": "utm_source=qrmarketer&utm_medium=qr&qrm_claim=Xk3nQp7wZs1a",
+    "identified": false
+  }'
+```
+
+Pass the referrer string **raw and whole**. We parse `qrm_claim` out of it ourselves; you do
+not need to URL-decode, split, or extract anything.
+
+Window: `REFERRER_WINDOW_DAYS`, default **30 days** from scan. Long on purpose — people scan a
+poster, install that evening on wifi, and open it the next day.
+
+## 4. iOS — the fingerprint fallback
+
+There is no install-referrer channel on iOS. Nothing can survive the App Store transition, so
+the match is necessarily probabilistic.
+
+```bash
+curl -X POST https://api.example.com/v1/attribution/claim \
+  -H "Authorization: Bearer $QRM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "publisher_user_ref": "user_84214",
+    "ip": "203.0.113.7",
+    "platform": "ios",
+    "identified": true
+  }'
+```
+
+**`ip` must be the real client IP your server saw at the app's first open** — not your load
+balancer's address, not a server-side egress IP. If you terminate TLS behind a proxy, read it
+from `X-Forwarded-For` and pass the client entry. Getting this wrong doesn't error; it just
+silently attributes nothing.
+
+IPv4 and IPv6 are both fine, in any spelling — `::ffff:203.0.113.7`, `203.0.113.7`,
+`2001:0db8::0001` and `2001:db8::1` are normalised server-side before hashing, so your
+representation does not have to match ours. Raw addresses are never stored on either side.
+
+Window: `FINGERPRINT_WINDOW_MIN`, default **60 minutes**. Call `/claim` promptly at signup
+rather than batching it overnight.
+
+**Expect a lower match rate on iOS than Android.** That is inherent to the platform, not a bug
+in the integration.
+
+## 5. The response
+
+`200` with `attributed: true`:
+
+```jsonc
+{
+  "attributed": true,
+  "attribution_id": "7c1e…",         // keep this — needed for /confirm
+  "campaign_id": "b93a…",
+  "campaign_name": "Inflight promo",
+  "match_method": "referrer",         // or "fingerprint"
+  "identified": false,
+  "fee": 10,                          // credits paid to you now
+  "pending_fee": 40,                  // still claimable via /confirm
+  "confirm_deadline": "2026-08-09T…", // null when already identified
+  "bonus_label": "100 free coins",    // YOUR label, not an instruction
+  "replay": false
+}
+```
+
+`200` with `attributed: false` — **this is a success, not an error.** Most installs are
+organic. Your signup flow must treat it as a normal outcome and carry on.
+
+```jsonc
+{ "attributed": false, "reason": "no_match", "bonus_label": "100 free coins" }
+```
+
+| `reason` | Means | What to do |
+|---|---|---|
+| `no_match` | Organic install, or the window expired. The common case. | Nothing. Continue signup. |
+| `campaign_not_active` | The campaign was paused or ended after the scan. | Nothing. |
+| `budget_exhausted` | The promoter's budget ran out. | Nothing. We fail closed rather than go negative. |
+| `already_claimed` | That scan was already matched to a different user. | Nothing. |
+
+**`attributed: false` never means "reject this signup".** The user signed up; that happened
+regardless of who gets paid for it.
+
+## 6. The two-tier payout
+
+Split the fee so fraud has less to eat: pay a small amount at signup, the rest once the user
+proves real.
+
+```
+  signup ──► /claim  { identified: false }  ──►  fee: 10   (guest_rate)
+                                                 pending: 40
+                       … user verifies phone / completes KYC / makes a purchase …
+
+  verified ─► /attribution/{id}/confirm     ──►  fee_added: 40  → total 50 (coin_rate)
+```
+
+If a user is already verified at signup, send `identified: true` on the first call and collect
+the full `coin_rate` immediately — no `/confirm` needed.
+
+```bash
+curl -X POST https://api.example.com/v1/attribution/$ATTRIBUTION_ID/confirm \
+  -H "Authorization: Bearer $QRM_API_KEY"
+```
+
+```jsonc
+{ "attribution_id": "7c1e…", "fee": 50, "fee_added": 40,
+  "identified": true, "status": "confirmed" }
+```
+
+`/confirm` is idempotent — a second call returns `status: "already_full"` and moves no money.
+After `grace_days` it returns `409 grace_period_expired` and the remainder is released back to
+the promoter's budget.
+
+**"Identified" means whatever your own verification bar is.** We do not define it and cannot
+check it — you are asserting it. Pick a bar that is expensive to fake (verified phone number,
+completed purchase, KYC) and apply it consistently.
+
+## 7. Retries and idempotency
+
+`publisher_user_ref` is the idempotency key. **Calling `/claim` twice for the same user is
+safe and expected.**
+
+If the first call succeeded but its response was lost — a timeout, a pod restart, an
+at-least-once queue redelivering — just call again with the same `publisher_user_ref`. You get
+the original answer back verbatim with `replay: true`, and no second fee is charged.
+
+```jsonc
+{ "attributed": true, "attribution_id": "7c1e…", "fee": 50, "replay": true }
+```
+
+The guarantee is a database UNIQUE constraint on `(campaign, publisher_user_ref)`, not
+application logic, so it holds under concurrency: two simultaneous calls for one user pay
+once. You never need to reconcile a double-payout by hand.
+
+Use a **stable, permanent** `publisher_user_ref` — your internal user id. Not an email that
+can change, not a session id, not a device id that resets on reinstall.
+
+## 8. Production checklist
+
+**Never call this API from the app.** The key must live server-side only. A key in a binary is
+a key an attacker extracts and a payout an attacker controls.
+
+- [ ] **API key in a secret manager**, not in source, not in an env file in the repo.
+- [ ] **Rotate on any suspicion** — `POST /v1/api-keys/rotate` invalidates the old key instantly.
+- [ ] **Never block signup on this call.** Wrap it in a try/catch and a short timeout (2–3s).
+      If it fails, the user still signs up; enqueue the claim and retry. Your conversion funnel
+      must not depend on our uptime.
+- [ ] **Retry with backoff** on 5xx and timeouts. Retries are safe (§7).
+- [ ] **Call at signup, not in a nightly batch.** The iOS fingerprint window is 60 minutes.
+- [ ] **Pass the real client IP** on iOS (§4).
+- [ ] **Log `attribution_id` and `match_method`** against your user record. `match_method`
+      is your fraud signal: `referrer` is deterministic and auditable, `fingerprint` is
+      probabilistic and is the population to sample when reconciling with the promoter.
+- [ ] **Alert on the attributed rate dropping to zero.** A misconfigured `ip` or a wrong
+      `android_package` fails silently as "everything is organic" — no errors, no payouts.
+- [ ] **Reconcile daily** against `GET /v1/redemptions` (session token) and your own records.
+- [ ] **Rate limit:** 600 requests/min per API key. One call per signup is far below it; a
+      batch backfill is not.
+- [ ] **Handle 401 as fatal, not retryable** — it means the key is wrong, rotated, or the
+      account is suspended. Retrying will not help; alert a human.
+
+### Suggested server-side shape
+
+```js
+async function attributeSignup(user, signals) {
+  try {
+    const res = await fetch(`${QRM}/v1/attribution/claim`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.QRM_API_KEY}`,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        publisher_user_ref: user.id,          // stable, permanent
+        install_referrer: signals.referrer,   // Android
+        ip: signals.clientIp,                 // iOS fallback
+        platform: signals.platform,
+        identified: user.isVerified,
+      }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.status === 401) return alertOps('QRM key rejected');
+    if (!res.ok) return retryQueue.push({ userId: user.id, signals });
+    const body = await res.json();
+    if (body.attributed) await db.saveAttribution(user.id, body.attribution_id);
+  } catch {
+    retryQueue.push({ userId: user.id, signals });   // never block signup
+  }
+  // Your own new-user bonus is granted here, by your own policy — independent of the above.
+}
+```
+
+## 9. Testing the integration
+
+The scan endpoint honours the `User-Agent`, so you can drive the whole loop with curl. Ask the
+promoter for a test campaign with a small budget, then:
+
+```bash
+# 1. Simulate an Android scan; capture the redirect
+LOC=$(curl -s -o /dev/null -w '%{redirect_url}' \
+  -A 'Mozilla/5.0 (Linux; Android 13; SM-A536E) Mobile Safari/537.36' \
+  https://api.example.com/r/$CODE)
+echo "$LOC"
+# https://play.google.com/store/apps/details?id=com.dramabox.app&referrer=utm_source%3D…
+
+# 2. Pull out the referrer exactly as Play would hand it to your app
+REFERRER=$(printf '%s' "$LOC" | sed 's/.*&referrer=//' | python3 -c \
+  'import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))')
+
+# 3. Claim it
+curl -s -X POST https://api.example.com/v1/attribution/claim \
+  -H "Authorization: Bearer $QRM_API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"publisher_user_ref\":\"test_$RANDOM\",\"install_referrer\":\"$REFERRER\"}"
+```
+
+Worth asserting in your own test suite:
+
+- A second `/claim` with the same `publisher_user_ref` returns `replay: true` and the same
+  `attribution_id`.
+- An unknown referrer returns `attributed: false, reason: "no_match"` — and your signup still
+  completes.
+- A `401` does not break signup.
+
+`e2e-test.sh` in this repo runs the full loop, including both match paths, as a reference.
+
+## 10. Endpoint quick reference
+
+Full request/response schemas: the live Swagger UI at `/docs`.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/attribution/claim` | `pk_` API key | Is this signup attributable? |
+| `POST` | `/v1/attribution/{id}/confirm` | `pk_` API key | Release the held-back fee |
+| `GET` | `/v1/attribution/{id}` | `pk_` API key | Look up one attribution |
+| `POST` | `/v1/auth/signup` · `/login` | none | Create account / get session token |
+| `POST` | `/v1/api-keys/rotate` | session JWT | New API key, old one dies instantly |
+| `GET` · `PATCH` | `/v1/orgs/me` | session JWT | App package, store id, landing URL, bonus label |
+| `GET` | `/v1/partnerships` | session JWT | Proposed and active partnerships |
+| `POST` | `/v1/partnerships/{id}/accept` | session JWT | Accept the terms |
+| `GET` | `/v1/redemptions` | session JWT | Your last 100 attributions, for reconciliation |
+
+**Two credentials, never mixed:**
+
+- `pk_…` **API key** — server-to-server only, for `/v1/attribution/*`. Never in a browser,
+  never in an app binary.
+- **Session JWT** (12h) — the dashboard and settings routes. Never for the Partner API.
+
+---
+---
+
+# Part III — Security Model
+
+What this system defends against, how, and — just as important — what it does **not** defend
+against. Every control below is enforced in code and asserted in `e2e-test.sh` or
+`backend/test/`.
+
+> **A note on "no attack is possible".** No system reaches that, and claiming it is how real
+> gaps get missed. What follows is a specific threat model with specific mitigations, plus an
+> honest list of residual risks in [§9](#9-residual-risks--read-this-part). Read §9 first if
+> you are deciding whether to launch.
+
+## 1. Trust boundaries
+
+```
+  ┌─ END USER'S PHONE ────────── fully untrusted ─────────────────────┐
+  │  Scans a QR. Receives a store URL and nothing else. Cannot        │
+  │  authenticate, cannot spend, cannot address any API but /r/:code. │
+  └───────────────────────────────────────────────────────────────────┘
+  ┌─ PUBLISHER'S SERVER ─────── authenticated, semi-trusted ──────────┐
+  │  Holds a pk_ API key. Asserts "this user signed up" and "this     │
+  │  user is identified". We cannot verify either — see §9.1.         │
+  └───────────────────────────────────────────────────────────────────┘
+  ┌─ PROMOTER / PUBLISHER PORTAL ── authenticated, tenant-scoped ─────┐
+  │  Session JWT. Every query is filtered by org id — no route takes  │
+  │  a tenant id from the client and trusts it.                       │
+  └───────────────────────────────────────────────────────────────────┘
+  ┌─ SUPER ADMIN ─────────────── trusted, fully audited ──────────────┐
+  │  Cross-tenant reads and overrides. Every override writes an       │
+  │  audit_log row naming actor, target and reason.                   │
+  └───────────────────────────────────────────────────────────────────┘
+```
+
+The single most important property: **the untrusted boundary is never on the money path.**
+The phone receives no token, so there is no credential for a user to steal, replay, forge or
+share. Attribution is asserted server-to-server afterwards by an authenticated party.
+
+## 2. Authentication
+
+| Credential | Form | Lifetime | Storage |
+|---|---|---|---|
+| Session | JWT, HS256 | 12h | Not stored; verified by signature |
+| Partner API key | `pk_` + 192 bits random | Until rotated | **SHA-256 hash only** |
+| Claim id | 128 bits base64url | One use | Opaque row key, not a credential |
+
+- **Keys are never recoverable.** Only the SHA-256 hash is stored. Rotation
+  (`POST /v1/api-keys/rotate`) invalidates the previous key on the next request.
+- **Revocation is immediate, not on token expiry.** `AuthGuard` re-reads the org on every
+  request, so suspending a tenant kills live sessions instantly rather than up to 12h later.
+  It also re-reads `type`, so a demotion takes effect at once.
+- **The Partner API checks `suspended` too.** An offboarded publisher's key stops earning
+  fees on the next call, not whenever someone remembers to rotate it.
+- **Default secrets refuse to boot.** `JWT_SECRET` left at its dev value in production is a
+  total auth bypass, so the process exits at startup instead of serving with it.
+
+### Brute force and enumeration
+
+- Login: 20/min per IP **and** 10/min per account — the first stops credential stuffing across
+  many accounts, the second stops a distributed attack on one account.
+- Signup: 10/min per IP. Partner API: 600/min per key. Scan: 30/min per IP.
+- Global floor: 300/min per IP under **every** route, so a route added later is never
+  accidentally unlimited. `/healthz` is exempt so a flood cannot get the process pulled from
+  the load balancer.
+- **User enumeration is closed:** login runs bcrypt against a dummy hash when the account does
+  not exist, so a registered and an unregistered address take the same time to reject.
+- Passwords are capped at 72 bytes because bcrypt silently ignores everything past that — an
+  uncapped 200-character passphrase would be only its first 72 bytes, and any other string
+  sharing that prefix would authenticate.
+
+## 3. The money path
+
+Enforced by the **database**, not by application logic, so the invariants hold under
+concurrency and cannot be bypassed by a bug in a handler.
+
+| Invariant | Enforced by |
+|---|---|
+| One payout per user per campaign | `UNIQUE (campaign_id, publisher_user_ref)` |
+| One payout per scan | `UNIQUE (scan_id)` + `consumed` flag under a row lock |
+| Ledger always balances to zero | Append-only double entry; asserted in the suite |
+| Budget can never go negative | `SELECT … FOR UPDATE` on the balance row before every debit |
+| `guest_rate <= coin_rate` | `CHECK` constraint in the migration |
+
+The behavioural consequences are spelled out in
+[Figure 5](#figure-5-what-makes-the-money-safe).
+
+## 4. Tenant isolation
+
+Every portal and partner query is scoped by the caller's org id **inside the WHERE clause**,
+never by a filter applied after fetching:
+
+```ts
+// ownership is part of the query, so a wrong id is a 404, not someone else's data
+await prisma.qrCode.updateMany({
+  where: { id, campaign: { partnership: { promoter_org_id: orgId } } }, data,
+});
+```
+
+Reads are open to both sides of a partnership; writes are promoter-only where the promoter
+pays. Looking up another publisher's attribution returns `404`, not `403` — an existence
+oracle is itself a leak.
+
+## 5. Injection and rendering
+
+- **SQL injection: not reachable.** Every raw query uses tagged-template parameters
+  (`$queryRaw\`… ${value} …\``). There is no `queryRawUnsafe` anywhere in `src/`.
+- **Stored XSS via QR styling: closed.** `validateStyle` rebuilds an allowlisted object rather
+  than passing input through — unknown keys are dropped, colors must match a hex pattern,
+  enums must match a fixed list, `frameText` is capped at 40 chars and XML-escaped into the
+  SVG. Logos must be `data:image/...` URLs; `javascript:` is rejected.
+- **SVG execution: blocked at the response.** The QR endpoint serves attacker-influenced SVG
+  from our own origin, so it carries `Content-Security-Policy: default-src 'none'` plus
+  `X-Content-Type-Options: nosniff`.
+- **Open redirect: closed.** `landing_url` is validated to https (http only for localhost),
+  rejecting `javascript:` and `data:` schemes and embedded credentials. `android_package` is
+  anchored to a reverse-DNS pattern so it cannot smuggle a query string into a Play URL.
+- **NUL bytes are rejected**, not passed to Postgres, which cannot store them in a text column
+  and aborts the transaction mid-flight if one arrives.
+
+### Response headers (all routes)
+
+`Content-Security-Policy: default-src 'none'` · `X-Content-Type-Options: nosniff` ·
+`X-Frame-Options: DENY` · `Referrer-Policy: no-referrer` ·
+`Cross-Origin-Resource-Policy: same-site` · `Strict-Transport-Security` (production) ·
+`X-Powered-By` removed.
+
+`no-referrer` matters specifically: it keeps scan URLs out of onward `Referer` headers, so a
+store listing never learns which printed code sent the visitor.
+
+## 6. Input bounds
+
+Every untrusted string has a ceiling, and oversized input is **rejected, never truncated** — a
+silently shortened `publisher_user_ref` would collide with a different user's and hand one
+user's attribution to another.
+
+| Field | Limit |
+|---|---|
+| `publisher_user_ref` | 200 |
+| `install_referrer` | 1000 |
+| `ip` | 45 (longest IPv6 text form) |
+| `user_agent` | 500 |
+| `name`, campaign `name` | 120 |
+| `email` | 254 + shape check |
+| `password` | 8–72 bytes |
+| `bonus_label` | 120 |
+| Request body | 1 MB |
+
+CORS is an allowlist from `FRONTEND_URL`, not `*`. Bearer tokens are used rather than cookies,
+so there is no CSRF surface.
+
+## 7. Privacy
+
+- **Raw IP addresses are never stored.** Both the scan and the claim sides hash through one
+  shared `ipHash()` — truncated SHA-256, normalised first so the same device hashes
+  identically from either side.
+- User agents are truncated to 300 characters and used only for coarse platform detection.
+- This platform never receives an end user's identity. `publisher_user_ref` is the publisher's
+  own opaque id; we neither need nor want the person behind it.
+
+## 8. Operations
+
+- **Config that cannot be wrong silently.** Production refuses to boot on a default
+  `JWT_SECRET`, a missing `BASE_URL`/`FRONTEND_URL`, non-https URLs, or an admin password
+  under 12 characters. `BASE_URL` is printed into physical QR codes — wrong means a reprint.
+- **`TRUST_PROXY=true` is refused.** It would trust `X-Forwarded-For` from any client, letting
+  one attacker present as unlimited distinct IPs and defeating every per-IP control here,
+  including the fingerprint match. Use the hop count (`1`) or the proxy subnet.
+- **Graceful shutdown.** `SIGTERM` drains in-flight requests before exit, so a redeploy cannot
+  tear down a half-written attribution.
+- Schema changes go through `prisma migrate deploy` before the process serves traffic; the app
+  never creates tables at boot.
+
+## 9. Residual risks — read this part
+
+These are **not** mitigated. They are accepted, and each has a stated reason and a lever.
+Deliberate simplifications are also flagged in the code as `ponytail:` comments so nobody
+mistakes them for bugs.
+
+### 9.1 A publisher can over-report signups
+The publisher asserts both "this user signed up" and "`identified: true`". Neither is
+verifiable from here — we cannot see inside their app. A dishonest publisher can inflate
+attributions up to the number of real scans on their campaigns.
+
+*Levers:* the two-tier payout limits exposure until identification; `match_method` separates
+deterministic (`referrer`) from probabilistic (`fingerprint`) attributions so the latter can be
+sampled; campaign budgets cap total loss; every attribution is reconcilable against
+`GET /v1/redemptions`. **Commercially, publishers are counterparties under contract, not
+anonymous users** — this is a contractual control with technical support, not the reverse.
+
+### 9.2 iOS fingerprint false matches
+Matching on hashed IP + platform will occasionally attribute one household's install to a
+neighbour's scan under carrier-grade NAT. This is inherent to iOS having no referrer channel.
+
+*Levers:* `FINGERPRINT_WINDOW_MIN` (default 60) is the main dial. Adding
+SKAdNetwork/AdAttributionKit as a third signal is the real upgrade if measured false-match
+rate starts costing money.
+
+### 9.3 The rate limiter is per-process
+In-process fixed windows. Running N instances multiplies every limit by N, and a restart
+clears all buckets.
+
+*Lever:* swap for a shared Redis sliding window before scaling past one instance. Marked at
+`backend/src/common/security.ts`.
+
+### 9.4 No 2FA, no password rotation policy, no session revocation list
+Single-factor login for portal accounts. A stolen password is a full account takeover until
+the password changes (though an admin can suspend instantly, which cuts live sessions).
+
+*Lever:* TOTP on the org login is the next control worth adding, ahead of anything else here.
+
+### 9.5 No WAF, no bot detection on the scan path
+`/r/:code` is public by necessity. Automated scanning burns QR uses and pollutes scan counts,
+throttled only by the per-IP limit.
+
+*Lever:* `max_uses` and `expires_in_days` bound the damage per code; a CDN or WAF in front is
+the infrastructure answer.
+
+### 9.6 HS256 shared secret
+A leaked `JWT_SECRET` forges any session. Marked at `backend/src/modules/auth/tokens.ts`.
+
+*Lever:* ES256 with a KMS-held private key.
+
+### 9.7 Not built yet, on purpose
 - **Real payment processing** — funding a campaign credits the ledger directly; production
   would put a PSP checkout in front of it
 - **One login per company** — no teams, roles or invitations yet (login *is* the org)
-- **In-process rate limiting** — correct on one instance; needs Redis behind more than one
-- **HS256 shared secret** for tokens — fine here, ES256 + KMS for production
 - **Automated fraud alerts** to a team's Slack or email
-- **SKAdNetwork / AdAttributionKit** as a third iOS signal — today the iOS path is a
-  two-signal fingerprint (hashed IP + platform) inside a short window
 
 None of it touches the core promise: **fees can't be duplicated, lost, or paid out twice —
 and nothing this platform issues can unlock anything inside an app.**
+
+## 10. Reporting a vulnerability
+
+Report privately to the address on the deployment's security page. Please do not open a public
+issue for anything touching the money path in §3.
 
 ---
 
