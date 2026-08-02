@@ -501,6 +501,17 @@ body:has(.lp)::before {
   background: var(--stock);
   overflow: hidden;
   box-shadow: 0 1px 0 #fff inset, 0 18px 40px -34px rgba(26, 23, 18, 0.4);
+  position: relative;
+}
+/* a soft light-catch along the top edge, the one "glass" touch on this card */
+.lp-board::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 40%;
+  background: linear-gradient(to bottom, color-mix(in srgb, #fff 55%, transparent), transparent);
+  pointer-events: none;
+  border-radius: 12px 12px 0 0;
 }
 .lp-board-head {
   display: flex;
@@ -966,14 +977,20 @@ body:has(.lp)::before {
     }
     @keyframes lp-feed { to { transform: scaleX(1); } }
 
-    /* the nav lifts off the page once the reader has left the top */
+    /* the nav lifts off the page once the reader has left the top, and gains a
+       glass tint so it reads as floating over the scrolled content beneath it */
     .lp .lp-nav {
       animation: lp-nav-set linear both;
       animation-timeline: scroll(root block);
       animation-range: 0 130px;
     }
     @keyframes lp-nav-set {
-      to { box-shadow: 0 14px 26px -24px rgba(26, 23, 18, 0.75); }
+      to {
+        box-shadow: 0 14px 26px -24px rgba(26, 23, 18, 0.75);
+        background: color-mix(in srgb, var(--paper) 82%, transparent);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
     }
   }
 }
