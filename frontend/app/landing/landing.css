@@ -1196,6 +1196,17 @@ body:has(.lp)::before {
       from { opacity: 0; rotate: -22deg; scale: 1.5; }
       to { opacity: 0.34; rotate: -11deg; scale: 1; }
     }
+
+    /* generic section entrance: fade + rise, reused everywhere a card or class
+       block scrolls into place — the same idiom .lp-leg already uses */
+    .lp .lp-enter {
+      animation: lp-enter-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 5% entry 55%;
+    }
+    @keyframes lp-enter-rise {
+      from { opacity: 0; transform: translateY(18px); filter: blur(3px); }
+    }
   }
 }
 

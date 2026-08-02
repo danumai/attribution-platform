@@ -192,7 +192,7 @@ export default function Landing() {
           </p>
         </div>
         <div className="lp-classes">
-          <article className="lp-class lp-class-guest lp-stocked">
+          <article className="lp-class lp-class-guest lp-stocked lp-enter">
             <div className="lp-class-top">
               <h3>Guest</h3>
               <span className="lp-tier lp-tier-guest">held</span>
@@ -217,7 +217,7 @@ export default function Landing() {
             </p>
           </article>
 
-          <article className="lp-class lp-class-verified lp-stocked">
+          <article className="lp-class lp-class-verified lp-stocked lp-enter">
             <div className="lp-class-top">
               <h3>Verified</h3>
               <span className="lp-tier lp-tier-verified">posted</span>
@@ -255,7 +255,7 @@ export default function Landing() {
         </div>
         <dl className="lp-rules lp-stocked">
           {RULES.map((r) => (
-            <div className="lp-rule" key={r.term}>
+            <div className="lp-rule lp-enter" key={r.term}>
               <dt>{r.term}</dt>
               <dd>{r.body}</dd>
               <dd className="lp-rule-val">{r.val}</dd>
@@ -266,7 +266,7 @@ export default function Landing() {
 
       <section className="lp-close lp-wrap">
         <hr className="lp-trim" />
-        <div className="lp-close-pass lp-pass-shell lp-stocked lp-cropped">
+        <div className="lp-close-pass lp-pass-shell lp-stocked lp-cropped lp-enter">
           <div className="lp-close-main">
             <h2 className="lp-h2">Ready to print?</h2>
             <p className="lp-sub">
