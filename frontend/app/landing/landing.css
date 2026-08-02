@@ -602,7 +602,7 @@ body:has(.lp)::before {
 }
 .lp-board-foot b {
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
@@ -872,6 +872,11 @@ body:has(.lp)::before {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--stock);
+  transition: border-color 0.24s ease, box-shadow 0.24s ease;
+}
+.lp-class:hover {
+  border-color: color-mix(in srgb, var(--ink) 30%, var(--line));
+  box-shadow: 0 1px 0 #fff inset, 0 18px 34px -28px rgba(26, 23, 18, 0.35);
 }
 .lp-class-verified { border-color: color-mix(in srgb, var(--press) 34%, var(--line)); }
 .lp-class-top {
@@ -914,9 +919,9 @@ body:has(.lp)::before {
 
 .lp-class .lp-amount {
   font-family: var(--mono);
-  font-size: 34px;
+  font-size: 44px;
   font-weight: 600;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums;
   margin: 26px 0 6px;
 }
