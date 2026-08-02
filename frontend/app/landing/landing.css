@@ -680,13 +680,21 @@ body:has(.lp)::before {
 .lp-journey-track,
 .lp-journey-draw {
   stroke-width: 2;
-  vector-effect: non-scaling-stroke;
+  /* No vector-effect: non-scaling-stroke here -- the viewBox is "0 0 400 4" with
+     preserveAspectRatio="none", so x and y scale non-uniformly (width stretches,
+     height doesn't). With non-scaling-stroke, Chromium miscomputes the dash
+     pattern under that non-uniform transform (dasharray/dashoffset land on the
+     wrong segments instead of growing the line from 0). Safe to drop: the line
+     is horizontal, so only the y-scale affects visible stroke width, and the
+     viewBox height (4) already matches the rendered height (4px) 1:1. */
 }
 .lp-journey-track { stroke: var(--line); }
 .lp-journey-draw {
   stroke: var(--press);
-  stroke-dasharray: 100;
-  stroke-dashoffset: calc(100 - (var(--reached, 0) * 25));
+  /* line's viewBox is "0 0 400 4", so its actual path length is 400 user units
+     (matches x1=0/x2=400) -- dasharray/offset must be scaled to that, not 100. */
+  stroke-dasharray: 400;
+  stroke-dashoffset: calc(400 - (var(--reached, 0) * 100));
   transition: stroke-dashoffset 0.6s var(--ease);
 }
 
