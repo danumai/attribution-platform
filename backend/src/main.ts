@@ -1,10 +1,11 @@
 import 'reflect-metadata';
-import { NestFactory } from '@nestjs/core';
+import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { json } from 'express';
 import { AppModule } from './app.module';
+import { PrismaExceptionFilter } from './common/prisma-filter';
 import { globalRateLimit, securityHeaders } from './common/security';
-import { FRONTEND_URLS, TRUST_PROXY } from './config';
+import { ENABLE_DOCS, FRONTEND_URLS, TRUST_PROXY } from './config';
 import { prisma } from './database/prisma';
 import { seedAccounts } from './database/seed';
 
@@ -21,23 +22,33 @@ async function bootstrap() {
   // step. Mounted before securityHeaders: that middleware's `default-src 'none'` CSP would
   // otherwise block Swagger UI's own JS/CSS, and Express never reaches later middleware for
   // a route this already answered.
-  const swaggerDoc = SwaggerModule.createDocument(
-    app,
-    new DocumentBuilder()
-      .setTitle('QR Reward Platform API')
-      .setDescription('See SYSTEM_FLOW.md for the end-to-end role flows behind these routes.')
-      .setVersion('1.0')
-      .addBearerAuth(
-        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'Session token from /v1/auth/signup or /login (12h)' },
-        'session',
-      )
-      .addBearerAuth(
-        { type: 'http', scheme: 'bearer', bearerFormat: 'pk_…', description: "Publisher's Partner API key" },
-        'apiKey',
-      )
-      .build(),
-  );
-  SwaggerModule.setup('docs', app, swaggerDoc);
+  //
+  // Off by default in production. `/docs` is unauthenticated and enumerates every route,
+  // parameter and error shape in the system — free reconnaissance, and it also sits ahead of
+  // both securityHeaders and globalRateLimit for the reason above.
+  if (ENABLE_DOCS) {
+    const swaggerDoc = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder()
+        .setTitle('QR Reward Platform API')
+        .setDescription('See SYSTEM_FLOW.md for the end-to-end role flows behind these routes.')
+        .setVersion('1.0')
+        .addBearerAuth(
+          { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'Session token from /v1/auth/signup or /login (12h)' },
+          'session',
+        )
+        .addBearerAuth(
+          { type: 'http', scheme: 'bearer', bearerFormat: 'pk_…', description: "Publisher's Partner API key" },
+          'apiKey',
+        )
+        .build(),
+    );
+    SwaggerModule.setup('docs', app, swaggerDoc);
+  }
+
+  // Turns a driver-level error (a malformed uuid in the URL, most often) into the 4xx it
+  // actually is, instead of an unhandled 500. See prisma-filter.ts.
+  app.useGlobalFilters(new PrismaExceptionFilter(app.get(HttpAdapterHost).httpAdapter));
 
   app.use(securityHeaders);
   // Before the body parser: a flood should be turned away without first buying it 1mb of

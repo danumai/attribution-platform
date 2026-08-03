@@ -17,13 +17,15 @@ import {
   validateBonusLabel,
   validateIosAppId,
 } from '../../common/attribution';
-import { sha256, validateLandingUrl } from '../../common/security';
+import { sha256, str, validateLandingUrl } from '../../common/security';
 import { audit, balance, balances, ledger } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
 import { AdminGuard, Session } from '../auth/auth.guard';
 import { SessionClaims, newApiKey } from '../auth/tokens';
 
-const capped = (limit?: string) => Math.min(+(limit ?? 200) || 200, 1000);
+// Clamped at both ends: Prisma reads a negative `take` as "last N, reversed", so `?limit=-5`
+// silently returned the oldest rows from a newest-first endpoint.
+const capped = (limit?: string) => Math.min(Math.max(Math.trunc(+(limit ?? 200)) || 200, 1), 1000);
 
 // Super admin: reads everything across all orgs, and can act on anything.
 // No org scoping here — that is the whole point of the role.
@@ -130,12 +132,17 @@ export class AdminController {
       ios_app_id: validateIosAppId(b.ios_app_id),
       bonus_label: validateBonusLabel(b.bonus_label),
     };
+    if (b.suspended !== undefined && typeof b.suspended !== 'boolean')
+      throw new BadRequestException('suspended must be a boolean');
     const updated = await prisma.org.updateMany({
       where: { id, type: { not: 'admin' } },
       data: {
         ...(b.suspended === undefined ? {} : { suspended: b.suspended }),
-        ...(b.name === undefined ? {} : { name: b.name }),
-        ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null)),
+        // Bounded like every other free-text field crossing the boundary — unbounded, one
+        // PATCH bloats the row and every listing that renders it.
+        ...(b.name === undefined ? {} : { name: str(b.name, 'name', 120)! }),
+        // Keyed on what was sent, so `""` clears a field instead of being ignored.
+        ...Object.fromEntries(Object.entries(fields).filter(([k]) => k in b)),
       },
     });
     if (!updated.count) throw new NotFoundException('org not found');

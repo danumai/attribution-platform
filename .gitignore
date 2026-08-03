@@ -2,7 +2,10 @@ node_modules/
 .next/
 dist/
 *.tsbuildinfo
-.env
+# Every .env variant, not just `.env` — a `.env.backup` / `.env.prod` / `.env.local`
+# holds the same live credentials and is exactly what gets committed by accident.
+.env*
+!.env.example
 .DS_Store
 
 # Prisma client is generated from prisma/schema.prisma at install/build time

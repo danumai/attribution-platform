@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { API, api, org as getOrg, token } from '@/lib/api';
-import { Shell } from '@/lib/shell';
+import { NavItem, Shell } from '@/lib/shell';
 import { confirmDialog, toast } from '@/lib/ui';
+import { num } from '@/lib/fmt';
 import {
   DEFAULT_STYLE,
   EYE_BALLS,
@@ -20,6 +21,47 @@ import {
   renderPreview,
   svgToPng,
 } from '@/lib/qr';
+import {
+  btn,
+  btnDanger,
+  btnGhost,
+  btnTinyGhost,
+  card,
+  chip,
+  chipWide,
+  code as codeChip,
+  codeTab,
+  colorwell,
+  cx,
+  field,
+  figure,
+  hint,
+  label as labelClass,
+  link,
+  logoWell,
+  muted,
+  preset,
+  presetProof,
+  presets,
+  previewHead,
+  qrbox,
+  sectionHead,
+  select as selectField,
+  skeleton,
+  stamp,
+  studio,
+  studioPreview,
+  swatches,
+  tab,
+  tabs,
+  tabsSub,
+  alertErr,
+  alertWarn,
+  checkLabel,
+  checkbox,
+  rangeField,
+  colorField,
+} from '@/lib/tw';
 
 /* ---------------- small building blocks ---------------- */
 
@@ -135,7 +177,7 @@ function PresetProof({ style, id }: { style: Style; id: string }) {
 
   return (
     <svg
-      className="preset-proof"
+      className={presetProof}
       viewBox={`-3 -3 ${code + 6} ${code + 6}`}
       aria-hidden="true"
       style={isTransparent(style.light) ? { background: checker(7) } : undefined}
@@ -207,7 +249,7 @@ function Choice({
   render: (v: string) => React.ReactNode;
 }) {
   return (
-    <div className="swatches" role="radiogroup">
+    <div className={swatches} role="radiogroup">
       {options.map((o) => (
         <button
           key={o}
@@ -216,7 +258,7 @@ function Choice({
           aria-checked={o === value}
           aria-label={o}
           title={o}
-          className="chip"
+          className={chip(o === value)}
           onClick={() => onChange(o)}
         >
           {render(o)}
@@ -230,12 +272,12 @@ function Choice({
 function Color({ label, value, onChange, fallback = '#000000' }: { label: string; value?: string; onChange: (v: string) => void; fallback?: string }) {
   const v = value && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
   return (
-    <div className="colorwell">
-      <label>{label}</label>
-      <div className="colorwell-row">
-        <input type="color" value={v} onChange={(e) => onChange(e.target.value)} aria-label={label} />
+    <div className={colorwell}>
+      <label className={cx(labelClass, 'mt-3.5')}>{label}</label>
+      <div className="flex gap-2">
+        <input className={cx(colorField, 'w-13 flex-[0_0_52px]')} type="color" value={v} onChange={(e) => onChange(e.target.value)} aria-label={label} />
         <input
-          className="hex"
+          className={cx(field, 'font-mono text-[13px] lowercase')}
           value={value ?? fallback}
           spellCheck={false}
           onChange={(e) => onChange(e.target.value.trim())}
@@ -263,17 +305,21 @@ function LogoWell({ logo, onPick, onClear }: { logo?: string; onPick: (f: File) 
 
   if (logo)
     return (
-      <div className="logo-well has-logo">
+      <div className={logoWell('filled')}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={logo} alt="Selected logo" />
-        <div className="logo-well-meta">
-          <b>Logo attached</b>
-          <span className="muted">~{Math.round((logo.length * 0.75) / 1024)}KB embedded</span>
-          <div className="row" style={{ gap: 8 }}>
-            <button type="button" className="ghost tiny" onClick={() => input.current?.click()}>
+        <img
+          className="size-[62px] shrink-0 rounded-md border border-line bg-white object-contain p-1.5"
+          src={logo}
+          alt="Selected logo"
+        />
+        <div className="flex min-w-0 flex-col gap-1">
+          <b className="text-sm font-semibold">Logo attached</b>
+          <span className="text-[12.5px] text-mut">~{Math.round((logo.length * 0.75) / 1024)}KB embedded</span>
+          <div className="mt-1 flex gap-2">
+            <button type="button" className={btnTinyGhost} onClick={() => input.current?.click()}>
               Replace
             </button>
-            <button type="button" className="ghost tiny" onClick={onClear}>
+            <button type="button" className={btnTinyGhost} onClick={onClear}>
               Remove
             </button>
           </div>
@@ -290,7 +336,7 @@ function LogoWell({ logo, onPick, onClear }: { logo?: string; onPick: (f: File) 
 
   return (
     <div
-      className={`logo-well${over ? ' over' : ''}`}
+      className={logoWell(over ? 'over' : 'idle')}
       onClick={() => input.current?.click()}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current?.click()}
       onDragOver={(e) => {
@@ -312,8 +358,8 @@ function LogoWell({ logo, onPick, onClear }: { logo?: string; onPick: (f: File) 
         <circle cx="8.5" cy="9.5" r="1.8" />
         <path d="m3.5 17 4.8-4.6a2 2 0 0 1 2.7 0L20.5 21" />
       </svg>
-      <b>Drop a logo, paste, or browse</b>
-      <span className="muted">PNG, JPEG or SVG · large images are resized for you</span>
+      <b className="text-sm font-semibold">Drop a logo, paste, or browse</b>
+      <span className="text-[12.5px] text-mut">PNG, JPEG or SVG · large images are resized for you</span>
       <input
         ref={input}
         type="file"
@@ -332,7 +378,7 @@ type Panel = (typeof PANELS)[number];
 
 /* transparency grid, sized to whatever it sits behind — a backdrop needs a coarser one than
    a 68px swatch, where 18px squares read as content rather than as "nothing here" */
-const checker = (px: number) => `repeating-conic-gradient(#e2e2e2 0 25%, #fff 0 50%) 50%/${px}px ${px}px`;
+const checker = (px: number) => `repeating-conic-gradient(#eeeeee 0 25%, #fff 0 50%) 50%/${px}px ${px}px`;
 const CHECKER = checker(18);
 const BACKDROPS = [
   { name: 'White', css: '#ffffff' },
@@ -462,61 +508,79 @@ export default function CampaignPage() {
     }
   }
 
-  if (!me || !stats) return null;
+  if (!me) return null;
   const isPromoter = me.type === 'promoter';
   const gradient = style.gradient ?? null;
+
+  const items: NavItem[] = [
+    { id: 'overview', label: 'Overview', icon: 'overview', href: '/dashboard' },
+    { id: 'partnerships', label: 'Partnerships', icon: 'partnerships', href: '/dashboard?s=partnerships' },
+    { id: 'campaigns', label: 'Campaigns', icon: 'campaigns', href: '/dashboard?s=campaigns' },
+    { id: 'redemptions', label: 'Redemptions', icon: 'redemptions', href: '/dashboard?s=redemptions' },
+    ...(isPromoter
+      ? []
+      : [{ id: 'settings', label: 'Settings', icon: 'settings' as const, href: '/dashboard?s=settings' }]),
+  ];
+  const backToCampaigns = (
+    <Link className={link} href="/dashboard?s=campaigns">← All campaigns</Link>
+  );
+
+  // The shell arrives with the rail intact while the campaign's numbers are in flight —
+  // a blank page is indistinguishable from a broken one.
+  if (!stats)
+    return (
+      <Shell org={me} active="campaigns" items={items} title="Campaign" actions={backToCampaigns}>
+        <h2 className={sectionHead}>Performance</h2>
+        <div className={cx(card, 'mt-3 grid gap-3')} aria-busy="true" aria-label="Loading">
+          {Array.from({ length: 5 }, (_, i) => (
+            <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
+          ))}
+        </div>
+      </Shell>
+    );
 
   return (
     <Shell
       org={me}
       active="campaigns"
-      items={[
-        { id: 'overview', label: 'Overview', icon: 'overview', href: '/dashboard' },
-        { id: 'partnerships', label: 'Partnerships', icon: 'partnerships', href: '/dashboard?s=partnerships' },
-        { id: 'campaigns', label: 'Campaigns', icon: 'campaigns', href: '/dashboard?s=campaigns' },
-        { id: 'redemptions', label: 'Redemptions', icon: 'redemptions', href: '/dashboard?s=redemptions' },
-        ...(me.type === 'promoter'
-          ? []
-          : [{ id: 'settings', label: 'Settings', icon: 'settings' as const, href: '/dashboard?s=settings' }]),
-      ]}
+      items={items}
       title={stats.name ?? 'Campaign'}
       lede={isPromoter ? 'Its numbers, its codes and how they print.' : 'How this campaign is performing.'}
-      actions={
-        <Link href="/dashboard?s=campaigns">
-          ← All campaigns
-        </Link>
-      }
+      actions={backToCampaigns}
     >
-      <h2>Performance</h2>
-      <div className="card row statrow">
+      <h2 className={sectionHead}>Performance</h2>
+      <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
         {[
           ['scans', stats.scans],
           ['rewards granted', stats.redemptions],
           ['coins granted', stats.coins_granted],
           ['budget left', stats.budget_remaining],
         ].map(([k, v]) => (
-          <div className="stat" key={k as string}>
-            <b>{v as number}</b>
-            <span className="muted">{k as string}</span>
+          <div
+            className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt max-[600px]:px-3 max-[600px]:py-2.5"
+            key={k as string}
+          >
+            <b className={cx(figure, 'max-[600px]:text-[23px]')}>{num(v as number)}</b>
+            <span className={cx(stamp, 'mt-0.5 block')}>{k as string}</span>
           </div>
         ))}
       </div>
 
       {!isPromoter && (
-        <p className="muted" style={{ marginTop: 18 }}>
+        <p className={cx(muted, 'mt-4.5')}>
           QR design is managed by the promoter on this campaign.
         </p>
       )}
 
       {isPromoter && (
         <>
-          <h2>QR codes</h2>
-          <div className="card">
-            <div className="codebar">
+          <h2 className={sectionHead}>QR codes</h2>
+          <div className={cx(card, 'mt-3')}>
+            <div className="flex flex-wrap gap-2">
               {qrs.map((q) => (
                 <button
                   key={q.id}
-                  className={`code-tab${q.id === sel?.id ? ' on' : ''}${q.voided ? ' voided' : ''}`}
+                  className={codeTab(q.id === sel?.id, q.voided)}
                   onClick={() => {
                     setSel(q);
                     const st = { ...DEFAULT_STYLE, ...(q.style ?? {}) };
@@ -524,18 +588,23 @@ export default function CampaignPage() {
                     setSaved(st);
                   }}
                 >
-                  <code>/{q.code}</code>
-                  <span className="muted">{q.voided ? 'voided' : `${q.uses ?? 0} scans`}</span>
+                  <code className={codeChip}>/{q.code}</code>
+                  <span className="text-[10.5px] font-bold tracking-[.1em] uppercase">
+                    {q.voided ? 'voided' : `${q.uses ?? 0} scans`}
+                  </span>
                 </button>
               ))}
             </div>
 
-            <details className="newcode">
-              <summary>+ New QR code</summary>
-              <div className="row" style={{ alignItems: 'flex-end', gap: 14 }}>
-                <div style={{ flex: '1 1 160px' }}>
-                  <label>Expires in (days, 0 = never)</label>
+            <details className="mt-4 border-t-2 border-line-soft pt-1 [&[open]>summary]:text-ink">
+              <summary className="cursor-pointer list-none px-0 pt-2.5 pb-0.5 text-[13.5px] font-semibold text-accent hover:underline hover:underline-offset-[3px] [&::-webkit-details-marker]:hidden">
+                + New QR code
+              </summary>
+              <div className="flex flex-wrap items-end gap-3.5">
+                <div className="flex-[1_1_160px]">
+                  <label className={labelClass}>Expires in (days, 0 = never)</label>
                   <input
+                    className={field}
                     type="number"
                     min={0}
                     max={3650}
@@ -543,9 +612,10 @@ export default function CampaignPage() {
                     onChange={(e) => setNewCode({ ...newCode, expires_in_days: +e.target.value })}
                   />
                 </div>
-                <div style={{ flex: '1 1 160px' }}>
-                  <label>Max scans (blank = unlimited)</label>
+                <div className="flex-[1_1_160px]">
+                  <label className={labelClass}>Max scans (blank = unlimited)</label>
                   <input
+                    className={field}
                     type="number"
                     min={1}
                     placeholder="unlimited"
@@ -554,6 +624,7 @@ export default function CampaignPage() {
                   />
                 </div>
                 <button
+                  className={cx(btn, 'mt-3.5')}
                   disabled={busy}
                   onClick={() =>
                     act(async () => {
@@ -577,19 +648,19 @@ export default function CampaignPage() {
           </div>
 
           {!sel && (
-            <div className="card">
-              <p className="muted">No codes yet — create one above and the design studio opens here.</p>
+            <div className={cx(card, 'mt-3')}>
+              <p className={muted}>No codes yet — create one above and the design studio opens here.</p>
             </div>
           )}
 
           {sel && (
             <>
-              <h2>Design studio</h2>
-              <div className="studio">
-                <div className="card studio-controls">
-                  <div className="tabs" role="tablist">
+              <h2 className={sectionHead}>Design studio</h2>
+              <div className={studio}>
+                <div className={cx(card, 'mt-3')}>
+                  <div className={cx(tabs, 'mb-1')} role="tablist">
                     {PANELS.map((p) => (
-                      <button key={p} role="tab" aria-selected={p === panel} onClick={() => setPanel(p)}>
+                      <button key={p} className={tab(p === panel)} role="tab" aria-selected={p === panel} onClick={() => setPanel(p)}>
                         {p}
                       </button>
                     ))}
@@ -597,13 +668,13 @@ export default function CampaignPage() {
 
                   {panel === 'Style' && (
                     <>
-                      <label>Presets</label>
-                      <div className="presets" role="group" aria-label="Style presets">
+                      <label className={labelClass}>Presets</label>
+                      <div className={presets} role="group" aria-label="Style presets">
                         {PRESETS.map((p) => (
                           <button
                             key={p.name}
                             type="button"
-                            className="preset"
+                            className={preset(samePlate(style, p.style))}
                             aria-pressed={samePlate(style, p.style)}
                             onClick={() => applyPreset(p.style)}
                           >
@@ -612,25 +683,25 @@ export default function CampaignPage() {
                           </button>
                         ))}
                       </div>
-                      <p className="hint">A preset swaps the whole plate. Your logo and export size stay as they are.</p>
+                      <p className={hint}>A preset swaps the whole plate. Your logo and export size stay as they are.</p>
 
-                      <label>Module shape</label>
+                      <label className={labelClass}>Module shape</label>
                       <Choice options={SHAPES} value={style.shape ?? 'square'} onChange={(v) => set({ shape: v })} render={(v) => <ShapeIcon kind={v} />} />
 
-                      <label>Eye frame</label>
+                      <label className={labelClass}>Eye frame</label>
                       <Choice options={EYE_FRAMES} value={style.eyeFrame ?? 'square'} onChange={(v) => set({ eyeFrame: v })} render={(v) => <EyeIcon kind={v} />} />
 
-                      <label>Eye centre</label>
+                      <label className={labelClass}>Eye centre</label>
                       <Choice options={EYE_BALLS} value={style.eyeBall ?? 'square'} onChange={(v) => set({ eyeBall: v })} render={(v) => <EyeIcon kind={v} ball />} />
 
-                      <label>Quiet zone — {style.margin ?? 2} modules</label>
-                      <input type="range" min={0} max={10} value={style.margin ?? 2} onChange={(e) => set({ margin: +e.target.value })} />
-                      <p className="hint">Under 2 modules of white space, some scanners lose the edge of the code.</p>
+                      <label className={labelClass}>Quiet zone — {style.margin ?? 2} modules</label>
+                      <input className={rangeField} type="range" min={0} max={10} value={style.margin ?? 2} onChange={(e) => set({ margin: +e.target.value })} />
+                      <p className={hint}>Under 2 modules of white space, some scanners lose the edge of the code.</p>
 
-                      <label>
+                      <label className={labelClass}>
                         Error correction{style.logo ? ' — held at H while a logo covers the centre' : ''}
                       </label>
-                      <select value={style.ecc ?? 'M'} disabled={!!style.logo} onChange={(e) => set({ ecc: e.target.value as any })}>
+                      <select className={selectField} value={style.ecc ?? 'M'} disabled={!!style.logo} onChange={(e) => set({ ecc: e.target.value as any })}>
                         <option value="L">L — 7% recovery, densest code</option>
                         <option value="M">M — 15% recovery</option>
                         <option value="Q">Q — 25% recovery</option>
@@ -641,12 +712,13 @@ export default function CampaignPage() {
 
                   {panel === 'Colour' && (
                     <>
-                      <label>Fill</label>
-                      <div className="tabs sub" role="tablist">
-                        <button role="tab" aria-selected={!gradient} onClick={() => set({ gradient: null })}>
+                      <label className={labelClass}>Fill</label>
+                      <div className={tabsSub} role="tablist">
+                        <button className={tab(!gradient)} role="tab" aria-selected={!gradient} onClick={() => set({ gradient: null })}>
                           Solid
                         </button>
                         <button
+                          className={tab(!!gradient)}
                           role="tab"
                           aria-selected={!!gradient}
                           onClick={() => set({ gradient: gradient ?? { from: style.dark ?? '#1c39bb', to: '#7c1d6f', type: 'linear', angle: 45 } })}
@@ -659,34 +731,35 @@ export default function CampaignPage() {
                         <Color label="Module colour" value={style.dark} onChange={(dark) => set({ dark })} />
                       ) : (
                         <>
-                          <div className="row">
+                          <div className="flex flex-wrap items-center gap-3">
                             <Color label="Gradient start" value={gradient.from} onChange={(from) => set({ gradient: { ...gradient, from } })} />
                             <Color label="Gradient end" value={gradient.to} onChange={(to) => set({ gradient: { ...gradient, to } })} />
                           </div>
-                          <label>Gradient type</label>
-                          <select value={gradient.type ?? 'linear'} onChange={(e) => set({ gradient: { ...gradient, type: e.target.value as any } })}>
+                          <label className={labelClass}>Gradient type</label>
+                          <select className={selectField} value={gradient.type ?? 'linear'} onChange={(e) => set({ gradient: { ...gradient, type: e.target.value as any } })}>
                             <option value="linear">Linear</option>
                             <option value="radial">Radial</option>
                           </select>
                           {(gradient.type ?? 'linear') === 'linear' && (
                             <>
-                              <label>Angle — {gradient.angle ?? 45}°</label>
-                              <input type="range" min={0} max={360} value={gradient.angle ?? 45} onChange={(e) => set({ gradient: { ...gradient, angle: +e.target.value } })} />
+                              <label className={labelClass}>Angle — {gradient.angle ?? 45}°</label>
+                              <input className={rangeField} type="range" min={0} max={360} value={gradient.angle ?? 45} onChange={(e) => set({ gradient: { ...gradient, angle: +e.target.value } })} />
                             </>
                           )}
                         </>
                       )}
 
-                      <label>Background</label>
+                      <label className={labelClass}>Background</label>
                       <Color label="Background colour" value={isTransparent(style.light) ? '#ffffff' : style.light} fallback="#ffffff" onChange={(light) => set({ light })} />
-                      <label>
-                        <input type="checkbox" checked={isTransparent(style.light)} onChange={(e) => set({ light: e.target.checked ? '#0000' : '#ffffff' })} />
+                      <label className={checkLabel}>
+                        <input className={checkbox} type="checkbox" checked={isTransparent(style.light)} onChange={(e) => set({ light: e.target.checked ? '#0000' : '#ffffff' })} />
                         Transparent background — for printing straight onto stock
                       </label>
 
-                      <label>Finder eyes</label>
-                      <label>
+                      <label className={labelClass}>Finder eyes</label>
+                      <label className={checkLabel}>
                         <input
+                          className={checkbox}
                           type="checkbox"
                           checked={!!style.eyeColor}
                           onChange={(e) => set({ eyeColor: e.target.checked ? style.dark ?? '#000000' : undefined, eyeBallColor: e.target.checked ? style.eyeBallColor : undefined })}
@@ -694,7 +767,7 @@ export default function CampaignPage() {
                         Give the corner eyes their own colour
                       </label>
                       {style.eyeColor && (
-                        <div className="row">
+                        <div className="flex flex-wrap items-center gap-3">
                           <Color label="Eye frame" value={style.eyeColor} onChange={(eyeColor) => set({ eyeColor })} />
                           <Color label="Eye centre" value={style.eyeBallColor ?? style.eyeColor} onChange={(eyeBallColor) => set({ eyeBallColor })} />
                         </div>
@@ -707,12 +780,12 @@ export default function CampaignPage() {
                       <LogoWell logo={style.logo} onPick={pickLogo} onClear={() => set({ logo: undefined, logoScale: undefined, logoPad: undefined, logoShape: undefined })} />
                       {style.logo ? (
                         <>
-                          <label>Logo size — {Math.round((style.logoScale ?? 0.2) * 100)}% of the code</label>
-                          <input type="range" min={10} max={30} value={Math.round((style.logoScale ?? 0.2) * 100)} onChange={(e) => set({ logoScale: +e.target.value / 100 })} />
-                          <p className="hint">Past ~25% you are covering more than error correction can rebuild. Test the printed code before a run.</p>
+                          <label className={labelClass}>Logo size — {Math.round((style.logoScale ?? 0.2) * 100)}% of the code</label>
+                          <input className={rangeField} type="range" min={10} max={30} value={Math.round((style.logoScale ?? 0.2) * 100)} onChange={(e) => set({ logoScale: +e.target.value / 100 })} />
+                          <p className={hint}>Past ~25% you are covering more than error correction can rebuild. Test the printed code before a run.</p>
 
-                          <label>Backdrop</label>
-                          <select value={style.logoShape ?? 'rounded'} onChange={(e) => set({ logoShape: e.target.value as any })}>
+                          <label className={labelClass}>Backdrop</label>
+                          <select className={selectField} value={style.logoShape ?? 'rounded'} onChange={(e) => set({ logoShape: e.target.value as any })}>
                             <option value="rounded">Rounded plate</option>
                             <option value="square">Square plate</option>
                             <option value="circle">Circle plate</option>
@@ -721,21 +794,21 @@ export default function CampaignPage() {
 
                           {style.logoShape !== 'none' && (
                             <>
-                              <label>Plate padding — {Math.round((style.logoPad ?? 0.12) * 100)}%</label>
-                              <input type="range" min={0} max={40} value={Math.round((style.logoPad ?? 0.12) * 100)} onChange={(e) => set({ logoPad: +e.target.value / 100 })} />
+                              <label className={labelClass}>Plate padding — {Math.round((style.logoPad ?? 0.12) * 100)}%</label>
+                              <input className={rangeField} type="range" min={0} max={40} value={Math.round((style.logoPad ?? 0.12) * 100)} onChange={(e) => set({ logoPad: +e.target.value / 100 })} />
                             </>
                           )}
                         </>
                       ) : (
-                        <p className="hint">A centre logo forces error correction to H, so the code survives having its middle covered.</p>
+                        <p className={hint}>A centre logo forces error correction to H, so the code survives having its middle covered.</p>
                       )}
                     </>
                   )}
 
                   {panel === 'Frame' && (
                     <>
-                      <label>Frame</label>
-                      <select value={style.frame ?? 'none'} onChange={(e) => set({ frame: e.target.value as any, frameText: style.frameText ?? 'SCAN ME' })}>
+                      <label className={labelClass}>Frame</label>
+                      <select className={selectField} value={style.frame ?? 'none'} onChange={(e) => set({ frame: e.target.value as any, frameText: style.frameText ?? 'SCAN ME' })}>
                         {FRAMES.map((f) => (
                           <option key={f} value={f}>
                             {{ none: 'None', box: 'Outline box', label: 'Box with caption bar', ribbon: 'Caption ribbon' }[f]}
@@ -744,34 +817,35 @@ export default function CampaignPage() {
                       </select>
                       {(style.frame ?? 'none') !== 'none' ? (
                         <>
-                          <label>Call to action</label>
-                          <input value={style.frameText ?? ''} maxLength={40} placeholder="SCAN FOR REWARDS" onChange={(e) => set({ frameText: e.target.value })} />
-                          <p className="hint">{(style.frameText ?? '').length}/40 characters. Short lines print larger.</p>
-                          <div className="row">
+                          <label className={labelClass}>Call to action</label>
+                          <input className={field} value={style.frameText ?? ''} maxLength={40} placeholder="SCAN FOR REWARDS" onChange={(e) => set({ frameText: e.target.value })} />
+                          <p className={hint}>{(style.frameText ?? '').length}/40 characters. Short lines print larger.</p>
+                          <div className="flex flex-wrap items-center gap-3">
                             <Color label="Frame colour" value={style.frameColor ?? style.dark} onChange={(frameColor) => set({ frameColor })} />
                             <Color label="Caption text" value={style.frameTextColor ?? '#ffffff'} fallback="#ffffff" onChange={(frameTextColor) => set({ frameTextColor })} />
                           </div>
                         </>
                       ) : (
-                        <p className="hint">A framed code with a caption converts better on printed material — people need telling what the square does.</p>
+                        <p className={hint}>A framed code with a caption converts better on printed material — people need telling what the square does.</p>
                       )}
                     </>
                   )}
 
                   {panel === 'Export' && (
                     <>
-                      <label>Raster size — {exportPx}px</label>
-                      <div className="swatches">
+                      <label className={labelClass}>Raster size — {exportPx}px</label>
+                      <div className={swatches}>
                         {[512, 1024, 2048, 4096].map((px) => (
-                          <button key={px} type="button" className="chip wide" aria-checked={px === exportPx} role="radio" onClick={() => setExportPx(px)}>
+                          <button key={px} type="button" className={cx(chip(px === exportPx), chipWide)} aria-checked={px === exportPx} role="radio" onClick={() => setExportPx(px)}>
                             {px}
                           </button>
                         ))}
                       </div>
-                      <p className="hint">SVG is the one to send to a printer — it stays sharp at any size. PNG is for slides and the web.</p>
+                      <p className={hint}>SVG is the one to send to a printer — it stays sharp at any size. PNG is for slides and the web.</p>
 
-                      <div className="row">
+                      <div className="flex flex-wrap items-center gap-3">
                         <button
+                          className={btn}
                           disabled={!svg}
                           onClick={() => {
                             download(new Blob([svg], { type: 'image/svg+xml' }), `qr-${sel.code}.svg`);
@@ -781,7 +855,7 @@ export default function CampaignPage() {
                           Download SVG
                         </button>
                         <button
-                          className="ghost"
+                          className={btnGhost}
                           disabled={!svg}
                           onClick={() =>
                             act(async () => {
@@ -794,13 +868,13 @@ export default function CampaignPage() {
                         </button>
                       </div>
 
-                      <label>Scan destination</label>
-                      <div className="row">
-                        <input readOnly value={sel.scan_url} onFocus={(e) => e.target.select()} />
+                      <label className={labelClass}>Scan destination</label>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <input className={field} readOnly value={sel.scan_url} onFocus={(e) => e.target.select()} />
                       </div>
-                      <div className="row">
+                      <div className="flex flex-wrap items-center gap-3">
                         <button
-                          className="ghost"
+                          className={btnGhost}
                           onClick={() => {
                             navigator.clipboard.writeText(sel.scan_url);
                             toast.success('Scan URL copied.');
@@ -808,14 +882,14 @@ export default function CampaignPage() {
                         >
                           Copy URL
                         </button>
-                        <a href={sel.scan_url} target="_blank" rel="noreferrer">
-                          <button className="ghost">Test the scan flow</button>
+                        <a className={btnGhost} href={sel.scan_url} target="_blank" rel="noreferrer">
+                          Test the scan flow
                         </a>
                       </div>
 
-                      <label>Danger zone</label>
+                      <label className={labelClass}>Danger zone</label>
                       <button
-                        className="danger"
+                        className={btnDanger}
                         disabled={busy || sel.voided}
                         onClick={async () => {
                           const go = await confirmDialog({
@@ -838,47 +912,48 @@ export default function CampaignPage() {
                   )}
                 </div>
 
-                <div className="studio-preview">
-                  <div className="card">
-                    <div className="preview-head">
-                      <b>Live preview</b>
-                      <span className="muted">{rendering ? 'rendering…' : dirty ? 'unsaved changes' : 'saved'}</span>
+                <div className={studioPreview}>
+                  <div className={cx(card, 'mt-3')}>
+                    <div className={previewHead}>
+                      <b className="text-sm font-[650] tracking-[-0.015em]">Live preview</b>
+                      <span className={cx(stamp, 'text-[10.5px] tracking-[.12em]')}>{rendering ? 'rendering…' : dirty ? 'unsaved changes' : 'saved'}</span>
                     </div>
 
-                    <div className="qrbox" style={{ background: backdrop.css }}>
+                    <div className={qrbox} style={{ background: backdrop.css }}>
                       {previewSrc ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={previewSrc} alt={`QR code for ${sel.code}`} />
                       ) : (
-                        <div className="skeleton" style={{ width: '70%', height: '70%', borderRadius: 8 }} />
+                        <div className={skeleton} style={{ width: '70%', height: '70%', borderRadius: 8 }} />
                       )}
                     </div>
 
-                    <div className="swatches" style={{ marginTop: 12 }}>
+                    <div className={cx(swatches, 'mt-3')}>
                       {BACKDROPS.map((b) => (
                         <button
                           key={b.name}
                           type="button"
-                          className="chip"
+                          className={chip(b.name === backdrop.name)}
                           role="radio"
                           aria-checked={b.name === backdrop.name}
                           title={`Preview on ${b.name.toLowerCase()}`}
                           onClick={() => setBackdrop(b)}
                         >
-                          <span className="backdrop-chip" style={{ background: b.css }} />
+                          <span className="size-[22px] rounded-sm border border-line" style={{ background: b.css }} />
                         </button>
                       ))}
                     </div>
 
-                    {renderErr && <p className="err">{renderErr}</p>}
-                    {!renderErr && warning && <p className="warn">{warning}</p>}
+                    {renderErr && <p className={cx(alertErr, 'mt-3.5')}>{renderErr}</p>}
+                    {!renderErr && warning && <p className={cx(alertWarn, 'mt-3.5')}>{warning}</p>}
 
-                    <p className="muted" style={{ marginTop: 12, wordBreak: 'break-all' }}>
+                    <p className={cx(muted, 'mt-3 break-all')}>
                       {sel.scan_url}
                     </p>
 
-                    <div className="row">
+                    <div className="flex flex-wrap items-center gap-3">
                       <button
+                        className={btn}
                         disabled={busy || !dirty}
                         onClick={() =>
                           act(async () => {
@@ -891,12 +966,12 @@ export default function CampaignPage() {
                       >
                         {busy ? 'Saving…' : dirty ? 'Save design' : 'Saved'}
                       </button>
-                      <button className="ghost" disabled={!dirty} onClick={() => setStyle(saved)}>
+                      <button className={btnGhost} disabled={!dirty} onClick={() => setStyle(saved)}>
                         Revert
                       </button>
                     </div>
-                    <p className="hint">
-                      Saving changes how <code>{`${API}/v1/qr-codes/${sel.id}/image`}</code> renders. It never changes
+                    <p className={hint}>
+                      Saving changes how <code className={codeChip}>{`${API}/v1/qr-codes/${sel.id}/image`}</code> renders. It never changes
                       what the code points at, so anything already printed keeps working.
                     </p>
                   </div>

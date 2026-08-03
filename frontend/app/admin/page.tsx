@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
 import { confirmDialog, promptDialog, toast } from '@/lib/ui';
+import { ago, num, when } from '@/lib/fmt';
 
 /** The rail: nine sections, grouped by what an operator is doing when they open them. */
 const TABS = [
@@ -32,15 +33,6 @@ const HEAD: Record<Tab, string> = {
   'Audit log': 'Every privileged override, newest first.',
 };
 
-const when = (t?: string | null) => (t ? new Date(t).toLocaleString() : '—');
-const ago = (t: string) => {
-  let s = (Date.now() - new Date(t).getTime()) / 1000;
-  for (const [n, u] of [[60, 's'], [60, 'm'], [24, 'h'], [7, 'd']] as const) {
-    if (s < n) return `${Math.round(s)}${u} ago`;
-    s /= n;
-  }
-  return when(t);
-};
 // ponytail: crude UA bucketing, good enough for a device column. Use a UA parser if it needs to be right.
 const device = (ua: string) =>
   !ua ? '—' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobile/.test(ua) ? 'Mobile' : 'Desktop';
@@ -247,13 +239,16 @@ export default function Admin() {
     act(() => api(path, { method: 'PATCH', body: JSON.stringify(body) }), ok);
   const post = (path: string, body: any, ok?: string) =>
     act(() => api(path, { method: 'POST', body: JSON.stringify(body) }), ok);
+  /** An in-page jump. A button, not an <a> without an href — that takes no keyboard focus. */
   const link = (label: string, onClick: () => void, danger = false) => (
-    <a
-      style={{ cursor: 'pointer', ...(danger ? { color: 'var(--bad)' } : {}) }}
-      onClick={() => !busy && onClick()}
+    <button
+      className="linkish"
+      style={danger ? { color: 'var(--bad)' } : undefined}
+      disabled={busy}
+      onClick={onClick}
     >
       {label}
-    </a>
+    </button>
   );
   /** One row inside an Actions menu. */
   const item = (label: string, onClick: () => void, danger = false) => (
@@ -287,7 +282,7 @@ export default function Admin() {
       actions={
         <>
           {!o.ledger_balanced && d.overview && (
-            <span className="pill suspended">ledger off by {o.ledger_sum}</span>
+            <span className="pill suspended">ledger off by {num(o.ledger_sum)}</span>
           )}
           <button className="ghost" onClick={() => load()}>
             Refresh
@@ -333,7 +328,7 @@ export default function Admin() {
                 </svg>
               </div>
               <div>
-                <b>{o.ledger_balanced ? 'Ledger balanced' : `Ledger off by ${o.ledger_sum}`}</b>
+                <b>{o.ledger_balanced ? 'Ledger balanced' : `Ledger off by ${num(o.ledger_sum)}`}</b>
                 <p className="muted">
                   {o.ledger_balanced
                     ? 'Every entry sums to zero — no coins have been created or lost.'
@@ -351,7 +346,7 @@ export default function Admin() {
                 ['Scan → signup', `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`, 'Scans'],
               ].map(([k, v, go]) => (
                 <button className="kpi" key={k as string} onClick={() => setTab(go as Tab)}>
-                  <b>{v ?? 0}</b>
+                  <b>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
                   <span className="muted">{k as string}</span>
                 </button>
               ))}
@@ -365,7 +360,7 @@ export default function Admin() {
                 ['Voided QR codes', o.voided_codes, 'QR codes'],
               ].map(([k, v, go]) => (
                 <button className="queue-row" key={k as string} onClick={() => setTab(go as Tab)}>
-                  <span className={`queue-count${v ? ' hot' : ''}`}>{v ?? 0}</span>
+                  <span className={`queue-count${v ? ' hot' : ''}`}>{num(v as number)}</span>
                   <span>{k as string}</span>
                   <span className="queue-go" aria-hidden="true">
                     →
@@ -387,7 +382,7 @@ export default function Admin() {
                 ['guest', o.guest_redemptions],
               ].map(([k, v]) => (
                 <div className="stat" key={k as string}>
-                  <b>{v ?? 0}</b>
+                  <b>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
                   <span className="muted">{k as string}</span>
                 </div>
               ))}
@@ -405,7 +400,7 @@ export default function Admin() {
                 ['redemptions', o.redemptions],
               ].map(([k, v]) => (
                 <div className="stat" key={k as string}>
-                  <b>{v ?? 0}</b>
+                  <b>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
                   <span className="muted">{k as string}</span>
                 </div>
               ))}
@@ -554,7 +549,7 @@ export default function Admin() {
                 num: true,
                 sort: (x) => x.budget,
                 get: (x) => (
-                  <span className={x.budget < x.coin_rate ? 'err' : ''}>{x.budget}</span>
+                  <span className={x.budget < x.coin_rate ? 'err' : ''}>{num(x.budget)}</span>
                 ),
               },
               {
@@ -579,7 +574,7 @@ export default function Admin() {
                     {item('Adjust budget', async () => {
                       const v = await promptDialog({
                         title: `Adjust budget for "${x.name}"`,
-                        body: `Current budget is ${x.budget} coins. Negative claws back; the result cannot go below zero.`,
+                        body: `Current budget is ${num(x.budget)} coins. Negative claws back; the result cannot go below zero.`,
                         inputLabel: 'Coins',
                         input: '100',
                         confirmText: 'Adjust',
@@ -656,7 +651,7 @@ export default function Admin() {
               {
                 h: 'Converted',
                 sort: (x) => x.redeemed,
-                get: (x) => <span className={x.redeemed ? 'ok' : 'muted'}>{x.redeemed ? `+${x.coins} coins` : '—'}</span>,
+                get: (x) => <span className={x.redeemed ? 'ok' : 'muted'}>{x.redeemed ? `+${num(x.coins)} coins` : '—'}</span>,
               },
             ]}
           />
@@ -677,7 +672,7 @@ export default function Admin() {
               { h: 'Publisher user', get: (x) => <code>{x.publisher_user_ref}</code> },
               { h: 'Kind', sort: (x) => x.identified, get: (x) => pill(x.identified ? 'identified' : 'guest') },
               { h: 'Upgraded', sort: (x) => x.upgraded_at ?? '', get: (x) => when(x.upgraded_at) },
-              { h: 'Coins', num: true, sort: (x) => x.coins, get: (x) => x.coins },
+              { h: 'Coins', num: true, sort: (x) => x.coins, get: (x) => num(x.coins) },
               {
                 h: '',
                 get: (x) =>
@@ -758,7 +753,7 @@ export default function Admin() {
             empty="No accounts."
             cols={[
               { h: 'Account', get: (x) => <code>{x.account}</code> },
-              { h: 'Balance', num: true, sort: (x) => x.balance, get: (x) => x.balance },
+              { h: 'Balance', num: true, sort: (x) => x.balance, get: (x) => num(x.balance) },
               { h: '', get: (x) => link('Entries', () => setLedgerAccount(x.account)) },
             ]}
           />

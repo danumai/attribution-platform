@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { BASE_URL } from '../../config';
+import { ALLOW_SELF_FUNDING, BASE_URL } from '../../config';
 import {
   validateAndroidPackage,
   validateBonusLabel,
@@ -19,7 +19,7 @@ import {
 } from '../../common/attribution';
 import { QrStyle, validateStyle } from '../../common/qr';
 import { sha256, str, validateLandingUrl } from '../../common/security';
-import { balance, balances, ledger } from '../../database/ledger';
+import { audit, balance, balances, ledger } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
 import { AuthGuard, Session } from '../auth/auth.guard';
 import { SessionClaims, newApiKey, newShortCode } from '../auth/tokens';
@@ -174,13 +174,17 @@ export class PortalController {
     return c;
   }
 
-  // demo funding: credits the campaign budget directly (PSP checkout in production)
+  // Demo funding: credits the campaign budget directly, with no payment behind it. Off in
+  // production (see ALLOW_SELF_FUNDING) — left on, any promoter mints the budget that pays
+  // publishers. Replace with a PSP checkout webhook that credits on `payment_intent.succeeded`.
   @Post('campaigns/:id/fund')
   async fund(
     @Session() s: SessionClaims,
     @Param('id') id: string,
     @Body() b: { coins: number },
   ) {
+    if (!ALLOW_SELF_FUNDING)
+      throw new ForbiddenException('direct funding is disabled — fund through checkout');
     await this.promoterCampaign(s.org_id, id);
     if (!Number.isInteger(b.coins) || b.coins < 1 || b.coins > 10_000_000)
       throw new BadRequestException('coins must be 1–10000000');
@@ -189,6 +193,9 @@ export class PortalController {
       await ledger(tx, 'external:funding', -b.coins, ref);
       await ledger(tx, `campaign:${id}`, b.coins, ref);
     });
+    // Money entered the system without a payment record; the ledger alone does not say who
+    // asked for it.
+    await audit(s.org_id, 'campaign.fund', `campaign:${id}`, { coins: b.coins });
     return { budget: await balance(`campaign:${id}`) };
   }
 
@@ -324,7 +331,13 @@ export class PortalController {
     });
   }
 
-  /** Where scans go, and what the publisher says it gives new users. Absent = leave unchanged. */
+  /**
+   * Where scans go, and what the publisher says it gives new users. Absent = leave unchanged;
+   * an explicit `""` or `null` clears the field.
+   *
+   * Publishers only: these are the four fields the scan redirect reads off the *publisher*
+   * side of a partnership. A promoter setting them wrote columns that nothing ever reads.
+   */
   @Patch('orgs/me')
   async patchOrg(
     @Session() s: SessionClaims,
@@ -336,15 +349,18 @@ export class PortalController {
       bonus_label?: string;
     },
   ) {
+    if (s.type !== 'publisher') throw new ForbiddenException('publishers only');
     const fields = {
       landing_url: validateLandingUrl(b.landing_url),
       android_package: validateAndroidPackage(b.android_package),
       ios_app_id: validateIosAppId(b.ios_app_id),
       bonus_label: validateBonusLabel(b.bonus_label),
     };
+    // Filter on whether the key was *sent*, not on the validated value: every validator
+    // returns null for a cleared field too, so filtering on the value made clearing impossible.
     return prisma.org.update({
       where: { id: s.org_id },
-      data: Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null)),
+      data: Object.fromEntries(Object.entries(fields).filter(([k]) => k in b)),
       select: {
         id: true,
         name: true,

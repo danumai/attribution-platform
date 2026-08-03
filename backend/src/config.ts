@@ -81,6 +81,25 @@ if (rawTrustProxy === 'true')
   );
 export const TRUST_PROXY = /^\d+$/.test(rawTrustProxy) ? Number(rawTrustProxy) : rawTrustProxy;
 
+const flag = (name: string, prodDefault: boolean) =>
+  process.env[name] === undefined ? (PROD ? prodDefault : true) : process.env[name] === 'true';
+
+/**
+ * Unauthenticated Swagger UI at `/docs`. Fine locally, reconnaissance in production — it
+ * lists every route, body shape and auth scheme in one page. Opt in explicitly if a
+ * deployment really wants it published.
+ */
+export const ENABLE_DOCS = flag('ENABLE_DOCS', false);
+
+/**
+ * `POST /v1/campaigns/:id/fund` credits a campaign budget with no payment behind it — a
+ * promoter can mint their own budget, and that budget is what pays publishers real fees.
+ * It exists so the demo stack is usable without a PSP, and it must stay off in production
+ * until checkout is wired up. Admins can still fund deliberately via `campaigns/:id/adjust`,
+ * which is super-admin only and audited.
+ */
+export const ALLOW_SELF_FUNDING = flag('ALLOW_SELF_FUNDING', false);
+
 /** Super admin, seeded on first boot. Validated here so a bad value fails before the DB is touched. */
 export const ADMIN_EMAIL = required('ADMIN_EMAIL', 'admin@qrreward.local');
 export const ADMIN_PASSWORD = required('ADMIN_PASSWORD', 'admin12345');

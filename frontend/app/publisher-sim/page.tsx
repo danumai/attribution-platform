@@ -1,5 +1,21 @@
 'use client';
 import { Suspense, useEffect, useState } from 'react';
+import { TicketMark } from '@/lib/mark';
+import { num } from '@/lib/fmt';
+import {
+  Coupon,
+  Fields,
+  Pass,
+  PassStamp,
+  Perf,
+  Serial,
+  Stub,
+  passLede,
+  passNote,
+  passPage,
+  passTitle,
+} from '@/lib/pass';
+import { alertErr, btn, card, checkLabel, checkbox, cx, field, label, muted, pillNeutral } from '@/lib/tw';
 
 /**
  * Stands in for the publisher's app on first open — the step that used to be a web page
@@ -52,95 +68,156 @@ function Sim() {
     });
   };
 
+  const brand = (
+    <div className="mb-6 flex items-center gap-2.25 [&_svg]:size-6 [&_svg]:shrink-0 [&_svg]:fill-ink">
+      <TicketMark />
+      <b className="text-sm font-[650] tracking-[-0.015em]">DramaBox</b>
+      <span className={pillNeutral}>demo publisher</span>
+    </div>
+  );
+
   if (result && result.attributed === false)
     return (
-      <main className="auth" style={{ maxWidth: 460 }}>
-        <h1>Welcome</h1>
-        <p className="muted">
-          Account created. This install was not attributable to a campaign
-          {result.reason ? ` (${result.reason})` : ''} — so it is treated as organic and the
-          promoter is charged nothing.
-        </p>
-        <div className="card">
-          <p className="muted">
-            An unattributed install is a normal answer, not an error. Most installs are organic.
-          </p>
-        </div>
+      <main className={passPage}>
+        <Pass>
+          <Coupon>
+            {brand}
+            <PassStamp>ORGANIC</PassStamp>
+            <h1 className={passTitle}>Account created</h1>
+            <p className={passLede}>
+              This install was not attributable to a campaign
+              {result.reason ? ` (${result.reason})` : ''}, so no promoter was charged.
+            </p>
+            <p className={passNote}>
+              An unattributed install is a normal answer, not an error. Most installs are organic —
+              the platform only bills a promoter when it can name the campaign that earned one.
+            </p>
+          </Coupon>
+          <Perf />
+          <Stub>
+            <Fields
+              items={[
+                ['Attributed', 'No'],
+                ['Reason', result.reason ?? 'no match'],
+                ['Promoter charged', '0'],
+              ]}
+            />
+            <Serial items={['Organic', 'Rev 01']} />
+          </Stub>
+        </Pass>
       </main>
     );
 
   if (result)
     return (
-      <main className="auth" style={{ maxWidth: 460 }}>
-        <div className="brand">✓</div>
-        <h1>{result.bonus_label ?? 'Joining bonus applied'}</h1>
-        <p className="muted">
-          Granted by this publisher under its own new-user policy. The platform recorded the
-          install against <strong>{result.campaign_name}</strong> and charged the promoter a{' '}
-          {result.fee}-credit marketing fee — the user&apos;s bonus and the promoter&apos;s fee
-          are separate things.
-        </p>
-        {result.pending_fee > 0 && (
-          <div className="card">
-            <p>
-              <strong>{result.pending_fee} credits</strong> of the fee are held back until this
-              publisher confirms the user cleared its verification bar.
+      <main className={passPage}>
+        <Pass>
+          <Coupon>
+            {brand}
+            <PassStamp posted>POSTED</PassStamp>
+            <h1 className={passTitle}>{result.bonus_label ?? 'Joining bonus applied'}</h1>
+            <p className={passLede}>
+              Granted by this publisher under its own new-user policy. The platform recorded the
+              install against <strong>{result.campaign_name}</strong> and charged the promoter a{' '}
+              {num(result.fee)}-credit marketing fee — the user&apos;s bonus and the promoter&apos;s
+              fee are separate things.
             </p>
-            <p className="muted">
-              Holds until {new Date(result.confirm_deadline).toLocaleDateString()}.
-            </p>
-            <button disabled={busy} onClick={() => call({ confirm_id: result.attribution_id })}>
-              {busy ? 'Confirming…' : 'Confirm this user is verified'}
-            </button>
-            {err && <div className="err">{err}</div>}
-          </div>
-        )}
-        <div className="card">
-          <p className="muted">
-            Attribution {result.attribution_id} · matched by {result.match_method}
-          </p>
-        </div>
+
+            {result.pending_fee > 0 && (
+              <div className={`${card} mt-3`}>
+                <p>
+                  <strong>{num(result.pending_fee)} credits</strong> of the fee are held back until
+                  this publisher confirms the user cleared its verification bar.
+                </p>
+                <p className={muted}>
+                  Holds until {new Date(result.confirm_deadline).toLocaleDateString()}.
+                </p>
+                <button
+                  className={cx(btn, 'mt-3.5')}
+                  disabled={busy}
+                  onClick={() => call({ confirm_id: result.attribution_id })}
+                >
+                  {busy ? 'Confirming…' : 'Confirm this user is verified'}
+                </button>
+                {err && <div className={`${alertErr} mt-3.5`}>{err}</div>}
+              </div>
+            )}
+          </Coupon>
+          <Perf />
+          <Stub>
+            <Fields
+              items={[
+                ['Attribution', result.attribution_id],
+                ['Matched by', result.match_method],
+                ['Fee charged', num(result.fee)],
+                ...(result.pending_fee > 0
+                  ? ([['Held back', num(result.pending_fee)]] as [string, string][])
+                  : []),
+              ]}
+            />
+            <Serial items={[result.pending_fee > 0 ? 'Part held' : 'Posted', 'Rev 01']} />
+          </Stub>
+        </Pass>
       </main>
     );
 
   return (
-    <main style={{ maxWidth: 460 }}>
-      <h1>DramaBox</h1>
-      <p className="muted">Publisher app — first open (demo)</p>
-      <p className="muted">
-        Nothing arrived from the scan. Signing up triggers a server-to-server attribution
-        lookup; the app itself never handles a code.
-      </p>
-      <form className="card" onSubmit={signup}>
-        <label>Your email (becomes publisher_user_ref)</label>
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="viewer@example.com"
-        />
-        <label>Play install referrer (Android only — leave blank to test the iOS path)</label>
-        <input
-          value={referrer}
-          onChange={(e) => setReferrer(e.target.value)}
-          placeholder="utm_source=qrmarketer&qrm_claim=…"
-        />
-        <label>Publisher API key (this demo&apos;s stand-in for server config)</label>
-        <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="pk_…" />
-        <label>
-          <input
-            type="checkbox"
-            checked={verified}
-            onChange={(e) => setVerified(e.target.checked)}
-          />{' '}
-          User is verified (full fee) — leave unticked for the guest tier
-        </label>
-        <button type="submit" disabled={busy}>
-          {busy ? 'Creating account…' : 'Create account'}
-        </button>
-        {err && <div className="err">{err}</div>}
-      </form>
+    <main className={passPage}>
+      <Pass>
+        <Coupon>
+          {brand}
+          <h1 className={passTitle}>First open</h1>
+          <p className={passLede}>
+            Nothing arrived from the scan. Signing up triggers a server-to-server attribution
+            lookup; the app itself never handles a code.
+          </p>
+          <form onSubmit={signup}>
+            <label className={label}>Your email (becomes publisher_user_ref)</label>
+            <input
+              className={field}
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="viewer@example.com"
+            />
+            <label className={label}>Play install referrer (Android only — leave blank to test the iOS path)</label>
+            <input
+              className={field}
+              value={referrer}
+              onChange={(e) => setReferrer(e.target.value)}
+              placeholder="utm_source=qrmarketer&qrm_claim=…"
+            />
+            <label className={label}>Publisher API key (this demo&apos;s stand-in for server config)</label>
+            <input className={field} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="pk_…" />
+            <label className={checkLabel}>
+              <input
+                className={checkbox}
+                type="checkbox"
+                checked={verified}
+                onChange={(e) => setVerified(e.target.checked)}
+              />
+              User is verified (full fee) — leave unticked for the guest tier
+            </label>
+            <button className={cx(btn, 'mt-3.5')} type="submit" disabled={busy}>
+              {busy ? 'Creating account…' : 'Create account'}
+            </button>
+            {err && <div className={`${alertErr} mt-3.5`}>{err}</div>}
+          </form>
+        </Coupon>
+        <Perf />
+        <Stub>
+          <Fields
+            items={[
+              ['Surface', 'Publisher app'],
+              ['Received from scan', 'Nothing'],
+              ['Tier on signup', verified ? 'Identified' : 'Guest'],
+              ['Match path', referrer.trim() ? 'Referrer' : 'Fingerprint'],
+            ]}
+          />
+          <Serial items={['Stand-in', 'Rev 01']} />
+        </Stub>
+      </Pass>
     </main>
   );
 }

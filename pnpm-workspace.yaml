@@ -2,6 +2,13 @@ packages:
   - backend
   - frontend
 
+# Transitive deps under express/nest that sit on the request path of every call, pinned past
+# their DoS advisories (body-parser GHSA-v422-hmwv-36x6, qs 6.15.2). Patch bumps only —
+# delete these once @nestjs/platform-express ships the fixed versions itself.
+overrides:
+  body-parser: ^1.20.6
+  qs: ^6.15.2
+
 # pnpm does not hoist, so a package only sees what it declares, and dependency install
 # scripts are blocked until listed here.
 allowBuilds:

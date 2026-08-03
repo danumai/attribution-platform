@@ -2,12 +2,12 @@ import { Archivo, Inter } from 'next/font/google';
 import { UI } from '@/lib/ui';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'], display: 'swap', variable: '--font-sans' });
+const inter = Inter({ subsets: ['latin'], display: 'swap', variable: '--font-inter' });
 const archivo = Archivo({
   subsets: ['latin'],
   display: 'swap',
   axes: ['wdth'],
-  variable: '--font-display',
+  variable: '--font-archivo',
 });
 
 const CONTRACT = `
@@ -36,10 +36,22 @@ export const metadata = {
 
 export const viewport = { themeColor: '#e7ddc9' };
 
+/* The paper grain: the ground is stock, not a screen. On the landing page the same
+   layer becomes a desk — the grain over a slow, uneven wash of the stock's own tone.
+   `has-[.lp]` is the old `body:has(.lp)` rule, spelled as a variant. */
+const GRAIN =
+  "before:content-[''] before:pointer-events-none before:fixed before:inset-0 before:z-0 " +
+  'before:bg-[image:var(--grain)] before:bg-[length:140px_140px] before:opacity-[.08] ' +
+  'before:[mix-blend-mode:multiply] has-[.lp]:before:opacity-[.10] ' +
+  'has-[.lp]:before:bg-[image:var(--grain),radial-gradient(120%_80%_at_18%_-10%,color-mix(in_srgb,#ffffff_46%,transparent),transparent_62%),radial-gradient(90%_70%_at_92%_8%,color-mix(in_srgb,#1a1712_16%,transparent),transparent_58%)] ' +
+  'has-[.lp]:before:bg-[length:140px_140px,cover,cover]';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${archivo.variable}`}>
-      <body>
+      <body
+        className={`min-h-dvh bg-paper font-sans text-[15px] leading-[1.55] tracking-[-0.006em] text-ink antialiased ${GRAIN}`}
+      >
         <div hidden dangerouslySetInnerHTML={{ __html: `<!--${CONTRACT}-->` }} />
         {children}
         <UI />

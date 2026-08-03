@@ -9,6 +9,8 @@
 import { ReactNode, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { TicketMark } from '@/lib/mark';
+import { btnBase, cx, h1, inkAccent, muted, riseStagger, stamp } from '@/lib/tw';
 
 export type NavItem = {
   id: string;
@@ -34,12 +36,31 @@ const ICONS = {
   back: <path d="M11.5 5 6.5 10l5 5" />,
 } as const;
 
-function Icon({ name }: { name: keyof typeof ICONS }) {
+function Icon({ name, className }: { name: keyof typeof ICONS; className?: string }) {
   return (
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"
-         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         className={cx('size-[17px] shrink-0', className)}>
       {ICONS[name]}
     </svg>
+  );
+}
+
+/* One rail row. Each state prints its own hover ink rather than layering a second
+   hover rule over the first — two utilities on one property would race. */
+const railRow =
+  'my-px flex w-full items-center gap-2.5 rounded-md px-2.75 py-2 text-left text-sm ' +
+  'font-medium no-underline';
+
+function railItem(state: 'idle' | 'current' | 'out') {
+  return cx(
+    btnBase,
+    railRow,
+    state === 'current'
+      ? 'border-accent-line bg-accent-soft font-semibold text-accent'
+      : state === 'out'
+        ? 'mt-2 rounded-none border-transparent bg-transparent pt-3 text-ink-soft enabled:hover:text-bad'
+        : 'border-transparent bg-transparent text-ink-soft enabled:hover:bg-card-alt enabled:hover:text-ink',
   );
 }
 
@@ -66,32 +87,42 @@ export function Shell({
   const [open, setOpen] = useState(false);
 
   const nav = items.map((it, i) => {
+    const current = it.id === active;
     const head = it.group && it.group !== items[i - 1]?.group && (
-      <span className="rail-group" key={`${it.group}-h`}>{it.group}</span>
+      <span
+        key={`${it.group}-h`}
+        className={`${stamp} block px-3 pt-3.5 pb-1.5 text-[9.5px]`}
+      >
+        {it.group}
+      </span>
     );
     const inner = (
       <>
-        <Icon name={it.icon} />
-        <span>{it.label}</span>
-        {it.badge ? <span className="rail-badge">{it.badge}</span> : null}
+        <Icon name={it.icon} className={current ? 'text-accent' : 'text-mut'} />
+        <span className="flex-1 truncate">{it.label}</span>
+        {it.badge ? (
+          <span className="min-w-5 shrink-0 rounded-sm border border-warn-line bg-warn-soft px-1.5 py-px text-center font-mono text-[11px] font-bold text-warn">
+            {it.badge}
+          </span>
+        ) : null}
       </>
     );
     return (
-      <div key={it.id} className="rail-slot">
+      <div key={it.id} className="first:[&_span:first-child]:pt-0.5">
         {head}
         {it.href ? (
           <Link
-            className="rail-item"
+            className={railItem(current ? 'current' : 'idle')}
             href={it.href}
-            aria-current={it.id === active ? 'page' : undefined}
+            aria-current={current ? 'page' : undefined}
             onClick={() => setOpen(false)}
           >
             {inner}
           </Link>
         ) : (
           <button
-            className="rail-item"
-            aria-current={it.id === active ? 'page' : undefined}
+            className={railItem(current ? 'current' : 'idle')}
+            aria-current={current ? 'page' : undefined}
             onClick={() => {
               onSelect?.(it.id);
               setOpen(false);
@@ -105,49 +136,89 @@ export function Shell({
   });
 
   return (
-    <div className={`shell${open ? ' open' : ''}`}>
-      <button className="rail-scrim" aria-label="Close menu" onClick={() => setOpen(false)} />
+    <div className="relative z-1 grid min-h-dvh grid-cols-[248px_minmax(0,1fr)] max-[900px]:grid-cols-[minmax(0,1fr)]">
+      <button
+        className={cx(
+          'hidden',
+          open && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-55 max-[900px]:block max-[900px]:bg-[color-mix(in_srgb,#2a2113_45%,transparent)]',
+        )}
+        aria-label="Close menu"
+        onClick={() => setOpen(false)}
+      />
 
-      <aside className="rail">
-        <div className="rail-id">
-          <span className="rail-mark" aria-hidden="true">QR</span>
-          <div className="rail-who">
-            <b>{org.name}</b>
-            <span className="muted">{org.type === 'admin' ? 'super admin' : org.type}</span>
+      {/* the rail is a ticket stub: perforated inner edge, stamped group labels */}
+      <aside
+        className={cx(
+          'sticky top-0 flex h-dvh flex-col self-start border-r border-line bg-card px-3.5 pt-5 pb-4',
+          "after:pointer-events-none after:absolute after:inset-y-0 after:-right-px after:w-px after:bg-[image:var(--perf-v)] after:bg-[length:1px_11px] after:content-['']",
+          'max-[900px]:fixed max-[900px]:left-0 max-[900px]:z-60 max-[900px]:w-66 max-[900px]:shadow-contact',
+          'max-[900px]:transition-transform max-[900px]:duration-[.24s] max-[900px]:ease-press',
+          open ? 'max-[900px]:translate-x-0' : 'max-[900px]:-translate-x-[101%]',
+        )}
+      >
+        <div className="flex items-center gap-2.5 border-b border-line-soft px-2 pb-4">
+          <span
+            className="grid size-8 shrink-0 place-items-center rounded-sm bg-ink text-card [&_svg]:size-[19px] [&_svg]:fill-current"
+            aria-hidden="true"
+          >
+            <TicketMark />
+          </span>
+          <div className="min-w-0 leading-[1.25]">
+            <b className="block truncate text-sm font-[650] tracking-[-0.015em]">{org.name}</b>
+            <span className={`${stamp} tracking-[.13em]`}>
+              {org.type === 'admin' ? 'super admin' : org.type}
+            </span>
           </div>
         </div>
 
-        <nav className="rail-nav" aria-label="Sections">{nav}</nav>
+        <nav className="-mx-1 flex-1 overflow-y-auto py-3" aria-label="Sections">
+          {nav}
+        </nav>
 
         <button
-          className="rail-item rail-out"
+          className={cx(railItem('out'), 'border-t border-t-line-soft')}
           onClick={() => {
             localStorage.clear();
             r.push('/login');
           }}
         >
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"
-               strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+               strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+               className="size-[17px] shrink-0 text-mut">
             <path d="M8 3.5H5a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 5 16.5h3M12 13l3.5-3L12 7M15 10H7.5" />
           </svg>
-          <span>Sign out</span>
+          <span className="flex-1 truncate">Sign out</span>
         </button>
       </aside>
 
-      <div className="shell-body">
-        <header className="pagehead">
-          <button className="rail-toggle" aria-label="Open menu" onClick={() => setOpen(true)}>
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+      <div className="flex min-w-0 flex-col">
+        {/* solid band, never translucent or blurred — see DESIGN.md, Navigation */}
+        <header className="sticky top-0 z-20 flex items-center gap-3.5 border-b border-line bg-paper px-7.5 pt-4.5 pb-4 max-[900px]:p-4">
+          <button
+            className={cx(btnBase, inkAccent, 'hidden size-9 shrink-0 p-0 max-[900px]:grid max-[900px]:place-items-center')}
+            aria-label="Open menu"
+            onClick={() => setOpen(true)}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true" className="size-4.5">
               <path d="M3.5 5.5h13M3.5 10h13M3.5 14.5h13" />
             </svg>
           </button>
-          <div className="pagehead-text">
-            <h1>{title}</h1>
-            {lede && <p className="muted">{lede}</p>}
+          <div className="min-w-0 flex-1">
+            <h1 className={h1}>{title}</h1>
+            {lede && <p className={`${muted} mt-0.5 max-w-[70ch]`}>{lede}</p>}
           </div>
-          {actions && <div className="pagehead-actions">{actions}</div>}
+          {actions && <div className="flex shrink-0 items-center gap-2.5">{actions}</div>}
         </header>
-        <main>{children}</main>
+        <main
+          className={cx(
+            'w-full max-w-[1180px] px-7.5 pt-1 pb-24 max-[900px]:px-4 max-[900px]:pb-20',
+            /* the first section head sits under the page header, so it needs no top rule */
+            '[&>h2:first-child]:mt-4.5',
+            riseStagger,
+          )}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );
