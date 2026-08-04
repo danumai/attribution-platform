@@ -1,3 +1,5 @@
+import * as lp from '@/lib/lp';
+
 const STEPS = [
   { key: 'print', label: 'Print' },
   { key: 'scan', label: 'Scan' },
@@ -18,16 +20,16 @@ const STEPS = [
 // @supports/@media gate.
 export default function JourneyFlow() {
   return (
-    <div className="lp-journey" aria-hidden="true">
-      <svg className="lp-journey-line" viewBox="0 0 400 4" preserveAspectRatio="none">
-        <line x1="0" y1="2" x2="400" y2="2" className="lp-journey-track" />
-        <line x1="0" y1="2" x2="400" y2="2" className="lp-journey-draw" />
+    <div className={lp.journey} aria-hidden="true">
+      <svg className={lp.journeyLine} viewBox="0 0 400 4" preserveAspectRatio="none">
+        <line x1="0" y1="2" x2="400" y2="2" className={lp.journeyTrack} />
+        <line x1="0" y1="2" x2="400" y2="2" className={lp.journeyDraw} />
       </svg>
       {STEPS.map((s) => (
-        <div className="lp-journey-point" key={s.key}>
-          <span className="lp-journey-dot" />
-          <span className="lp-journey-token" />
-          <span className="lp-journey-label">{s.label}</span>
+        <div className={`group ${lp.journeyPoint}`} key={s.key}>
+          <span className={lp.journeyDot} />
+          <span className={lp.journeyToken} />
+          <span className={lp.journeyLabel}>{s.label}</span>
         </div>
       ))}
     </div>

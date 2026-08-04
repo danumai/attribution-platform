@@ -1,1086 +1,16 @@
-/* Landing surface. World: printed ticket stock — buff card, thermal-black ink,
-   process-blue validation ink, ochre for value held back, green for value posted.
-   The composition is a boarding pass: coupon, perforation, stub.
-
-   This pass raises the world's material fidelity: laid-paper fibre in the stock,
-   letterpress deboss on the display line, a guilloché security tint on the stub,
-   crop marks as press furniture, and rubber-stamped tier states. Motion is one
-   authored sequence — the pass coming off the press — plus scroll-linked moves
-   that only exist where the scroll itself carries the meaning. */
-
-.lp {
-  --paper: #e7ddc9;
-  --stock: #faf6ee;
-  --stock-2: #f3ecdd;
-  --ink: #1a1712;
-  --ink-soft: #4e483a;
-  --mut: #6f6757;
-  --line: #d8cbb2;
-  --line-soft: #e6dcc7;
-  --press: #1c39bb;
-  --press-lit: #2a4ae0;
-  --press-deep: #142a8c;
-  --hold: #a35c00;
-  --hold-strong: #8a4e00;
-  --hold-soft: #f6ecd8;
-  --hold-edge: #e3c893;
-  --post: #0a6b4a;
-  --post-soft: #e4f0e9;
-  --post-edge: #b6d8c8;
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-
-  /* laid fibre in the card surface — the tooth you feel on real ticket stock */
-  --fibre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.92' numOctaves='4'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23f)' opacity='.55'/%3E%3C/svg%3E");
-  /* uneven ink coverage, used as a mask so a stamp reads as pressed, not printed */
-  --distress: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='110' height='110'%3E%3Cfilter id='d'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.34' numOctaves='3'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='2.1' intercept='.34'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='110' height='110' filter='url(%23d)'/%3E%3C/svg%3E");
-
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
-
-  /* printed stock does not follow the OS theme; the portal still does */
-  color-scheme: light;
-  max-width: none;
-  margin: 0;
-  padding: 0;
-  color: var(--ink);
-  overflow-x: clip;
-}
-
-/* the portal's code chip reads off dark-mode tokens — restate it on stock */
-.lp code {
-  font-family: var(--mono);
-  background: var(--stock-2);
-  border: 1px solid var(--line-soft);
-  color: var(--ink-soft);
-}
-
-/* the portal's grid vignette and entrance stagger belong to the app, not to the page.
-   The ground becomes a desk: fine grain over a slow, uneven wash of the stock's own tone. */
-body:has(.lp) { background: #e7ddc9; }
-body:has(.lp)::before {
-  display: block;
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23f)' opacity='.5'/%3E%3C/svg%3E"),
-    radial-gradient(120% 80% at 18% -10%, color-mix(in srgb, #ffffff 46%, transparent), transparent 62%),
-    radial-gradient(90% 70% at 92% 8%, color-mix(in srgb, #1a1712 16%, transparent), transparent 58%);
-  background-size: 140px 140px, cover, cover;
-  mask-image: none;
-  -webkit-mask-image: none;
-  opacity: 0.1;
-  mix-blend-mode: multiply;
-}
-.lp > *, .lp main > * { animation: none; }
-.lp main { max-width: none; margin: 0; padding: 0; }
-
-.lp ::selection { background: var(--press); color: #fff; }
-
-.lp-sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.lp-wrap {
-  width: min(1160px, 100% - 48px);
-  margin-inline: auto;
-}
-
-/* ---------- the stock itself ---------- */
-
-/* every surface cut from card carries the fibre. The overlay sits under content
-   (negative z-index inside an isolated stacking context) so it tints the card,
-   never the type. */
-.lp-stocked {
-  position: relative;
-  isolation: isolate;
-}
-.lp-stocked::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  background-image: var(--fibre);
-  background-size: 120px 120px;
-  opacity: 0.055;
-  mix-blend-mode: multiply;
-  pointer-events: none;
-}
-
-/* ---------- ticket vocabulary ---------- */
-
-.lp-field { display: grid; gap: 4px; }
-.lp-field dt,
-.lp-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--mut);
-}
-.lp-field dd {
-  margin: 0;
-  font-family: var(--mono);
-  font-size: 13px;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-
-/* the tear line, biting a notch out of both edges of the card */
-.lp-perf {
-  position: relative;
-  flex: 0 0 auto;
-  align-self: stretch;
-}
-.lp-perf::before {
-  content: "";
-  position: absolute;
-  inset: 14px auto 14px 50%;
-  width: 2px;
-  translate: -50% 0;
-  background: repeating-linear-gradient(to bottom, var(--line) 0 5px, transparent 5px 11px);
-}
-.lp-perf::after,
-.lp-notch {
-  content: "";
-  position: absolute;
-  left: 50%;
-  width: 22px;
-  height: 22px;
-  translate: -50% 0;
-  border-radius: 50%;
-  background: var(--paper);
-  box-shadow: inset 0 -1px 0 rgba(26, 23, 18, 0.12), inset 0 2px 3px rgba(26, 23, 18, 0.14);
-}
-.lp-perf::after { top: -11px; }
-.lp-notch { bottom: -11px; }
-
-.lp-pass-shell {
-  position: relative;
-  isolation: isolate;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--stock);
-  /* contact, not lift: a hairline lit edge, a tight contact shadow, one long cast */
-  box-shadow:
-    0 1px 0 #fff inset,
-    0 -1px 0 rgba(26, 23, 18, 0.05) inset,
-    0 1px 2px rgba(26, 23, 18, 0.05),
-    0 10px 18px -14px rgba(26, 23, 18, 0.3),
-    0 44px 64px -42px rgba(26, 23, 18, 0.55);
-}
-
-/* press furniture: registration crop marks around a trimmed card */
-.lp-cropped::after {
-  content: "";
-  position: absolute;
-  inset: -21px;
-  pointer-events: none;
-  --m: linear-gradient(var(--line) 0 0);
-  background-image: var(--m), var(--m), var(--m), var(--m), var(--m), var(--m), var(--m), var(--m);
-  background-repeat: no-repeat;
-  background-size:
-    13px 1px, 1px 13px, 13px 1px, 1px 13px,
-    13px 1px, 1px 13px, 13px 1px, 1px 13px;
-  background-position:
-    left top, left top, right top, right top,
-    left bottom, left bottom, right bottom, right bottom;
-  opacity: 0.7;
-}
-
-/* ---------- nav ---------- */
-
-.lp-nav {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  padding: 16px 0;
-  background: var(--paper);
-  border-bottom: 1px solid var(--line);
-}
-.lp-nav-inner {
-  width: min(1160px, 100% - 48px);
-  margin-inline: auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-}
-/* the page feeding through the press — reading progress in validation ink */
-.lp-nav-progress {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  background: var(--press);
-  transform: scaleX(0);
-  transform-origin: left;
-}
-.lp-mark {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 650;
-  font-size: 14px;
-  letter-spacing: -0.015em;
-  color: var(--ink);
-  text-decoration: none;
-  white-space: nowrap;
-}
-.lp-mark svg {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  fill: var(--ink);
-  transition: fill 0.2s var(--ease), rotate 0.35s var(--ease);
-}
-.lp-mark:hover svg { fill: var(--press); rotate: -4deg; }
-.lp-nav-actions { display: flex; align-items: center; gap: 10px; }
-
-/* ---------- buttons ---------- */
-
-.lp-btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 11px 20px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  text-decoration: none;
-  cursor: pointer;
-  background: var(--press);
-  color: #fff;
-  box-shadow: 0 1px 0 var(--press-deep), 0 1px 2px color-mix(in srgb, var(--press-deep) 25%, transparent);
-  transition: background 0.16s ease, transform 0.09s ease, box-shadow 0.16s ease,
-    border-color 0.16s ease;
-}
-.lp-btn:hover {
-  background: var(--press-lit);
-  text-decoration: none;
-  box-shadow: 0 2px 0 var(--press-deep), 0 6px 14px -8px color-mix(in srgb, var(--press-deep) 55%, transparent);
-}
-/* a key press: the button seats into the card and its printed edge disappears */
-.lp-btn:active {
-  transform: translateY(1px);
-  box-shadow: 0 0 0 var(--press-deep), 0 1px 2px color-mix(in srgb, var(--press-deep) 30%, transparent);
-}
-
-.lp-btn-ghost {
-  background: transparent;
-  color: var(--ink);
-  border-color: var(--mut);
-  box-shadow: none;
-  /* ink soaking across the card from the left, rather than a state swap */
-  background-image: linear-gradient(var(--stock-2) 0 0);
-  background-repeat: no-repeat;
-  background-size: 0% 100%;
-  transition: background-size 0.28s var(--ease), border-color 0.16s ease, transform 0.09s ease,
-    color 0.16s ease;
-}
-.lp-btn-ghost:hover {
-  background-color: transparent;
-  background-size: 100% 100%;
-  border-color: var(--ink);
-  box-shadow: none;
-}
-.lp-btn-ghost:active { transform: translateY(1px); box-shadow: none; }
-.lp-btn-lg { padding: 14px 26px; font-size: 15px; }
-.lp :focus-visible { outline: 2px solid var(--press); outline-offset: 3px; }
-
-/* ---------- hero ---------- */
-
-/* ambient gradient backdrop, low-saturation, using the system's own three inks
-   at low opacity so it reads as this product's colors, not a generic SaaS wash */
-.lp-hero {
-  padding: 46px 0 12px;
-  position: relative;
-  isolation: isolate;
-}
-.lp-hero-glow {
-  position: absolute;
-  inset: -80px -10% auto -10%;
-  height: 620px;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(45% 55% at 18% 20%, color-mix(in srgb, var(--press) 16%, transparent), transparent 70%),
-    radial-gradient(38% 48% at 82% 10%, color-mix(in srgb, var(--hold) 14%, transparent), transparent 72%),
-    radial-gradient(40% 50% at 55% 60%, color-mix(in srgb, var(--post) 10%, transparent), transparent 74%);
-  filter: blur(6px);
-  opacity: 0.9;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .lp-hero-glow[data-run] {
-    animation: lp-glow-drift 22s ease-in-out infinite alternate;
-  }
-}
-@keyframes lp-glow-drift {
-  from { background-position: 0 0, 0 0, 0 0; transform: translateY(0); }
-  to { background-position: 30px 20px, -24px 16px, 14px -18px; transform: translateY(6px); }
-}
-
-@supports (animation-timeline: scroll()) {
-  @media (prefers-reduced-motion: no-preference) {
-    /* The hero pass needs BOTH its entrance (lp-press-land, from the shared
-       .lp-pass/.lp-board rule below) and this parallax drift. Both use the
-       `animation` shorthand, and this selector is more specific than
-       `.lp .lp-pass`, so declaring it separately would reset animation-name
-       and silently drop the entrance in any browser supporting
-       animation-timeline: scroll(). List both animations here instead, so
-       this rule is the single source of truth for the hero pass. */
-    .lp .lp-hero .lp-pass {
-      animation: lp-press-land 0.78s var(--ease) both, lp-parallax-pass linear both;
-      animation-timeline: auto, scroll(root block);
-      animation-range: normal, 0 640px;
-    }
-    @keyframes lp-parallax-pass {
-      to { transform: translateY(-24px); }
-    }
-  }
-}
-
-.lp-pass {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 30px 320px;
-  align-items: stretch;
-}
-
-.lp-coupon { padding: 44px 42px 40px; }
-
-.lp-routing {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 30px;
-  padding-bottom: 24px;
-  margin-bottom: 30px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.lp-h1 {
-  font-family: var(--font-display), var(--font-sans), sans-serif;
-  font-weight: 800;
-  font-stretch: 112%;
-  font-size: clamp(40px, 6.2vw, 80px);
-  line-height: 0.94;
-  letter-spacing: -0.036em;
-  text-wrap: balance;
-  margin: 0;
-  color: var(--ink);
-  /* letterpress: the type is struck into the stock, lit from above */
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 -1px 0 rgba(26, 23, 18, 0.12);
-}
-.lp-h1 em {
-  position: relative;
-  font-style: normal;
-  color: var(--press);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-
-.lp-lede {
-  max-width: 52ch;
-  margin-top: 24px;
-  font-size: 16.5px;
-  line-height: 1.62;
-  color: var(--ink-soft);
-  letter-spacing: -0.006em;
-}
-.lp-lede b { color: var(--ink); font-weight: 650; }
-
-.lp-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
-.lp-cta-note { margin-top: 16px; font-size: 13px; color: var(--mut); }
-
-/* the stub: the part torn off and scanned. A security tint sits under it, the way
-   a real instrument prints a guilloché ground that a photocopier cannot hold. */
-.lp-stub {
-  position: relative;
-  isolation: isolate;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 40px 30px;
-}
-.lp-stub::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background-image:
-    repeating-radial-gradient(circle at 78% 16%, transparent 0 7px,
-      color-mix(in srgb, var(--press) 40%, transparent) 7px 7.7px, transparent 7.7px 15px),
-    repeating-radial-gradient(circle at 14% 84%, transparent 0 9px,
-      color-mix(in srgb, var(--press) 34%, transparent) 9px 9.7px, transparent 9.7px 19px);
-  opacity: 0.13;
-  mask-image: radial-gradient(120% 90% at 60% 40%, var(--ink) 30%, transparent 78%);
-  -webkit-mask-image: radial-gradient(120% 90% at 60% 40%, var(--ink) 30%, transparent 78%);
-}
-
-.lp-code {
-  position: relative;
-  padding: 14px;
-  border-radius: 6px;
-  background: #fff;
-  border: 1px solid var(--line-soft);
-  box-shadow: 0 1px 2px rgba(26, 23, 18, 0.05);
-  overflow: hidden;
-}
-.lp-code svg { display: block; width: 100%; height: auto; fill: var(--ink); }
-.lp-scan {
-  position: absolute;
-  inset: 0 0 auto;
-  height: 44%;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--press) 14%, transparent) 74%,
-    color-mix(in srgb, var(--press) 30%, transparent)
-  );
-  border-bottom: 2px solid var(--press);
-  opacity: 0;
-}
-/* the plate takes the reader's ring the instant the sweep clears the code */
-.lp-code-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 6px;
-  box-shadow: 0 0 0 2px var(--press) inset;
-  opacity: 0;
-}
-@keyframes lp-sweep {
-  0% { transform: translateY(-100%); opacity: 0; }
-  8% { opacity: 1; }
-  46% { transform: translateY(227%); opacity: 1; }
-  56%, 100% { transform: translateY(227%); opacity: 0; }
-}
-@keyframes lp-ring {
-  0%, 44% { opacity: 0; }
-  47% { opacity: 1; }
-  62%, 100% { opacity: 0; }
-}
-
-.lp-stub-fields { display: grid; gap: 15px; margin: 0; }
-.lp-status { display: inline-grid; }
-.lp-status > span {
-  grid-area: 1 / 1;
-  font-family: var(--mono);
-  font-size: 13px;
-  justify-self: start;
-}
-.lp-status-idle { color: var(--mut); }
-.lp-status-done { color: var(--post); font-weight: 600; opacity: 0; }
-@keyframes lp-flip-a { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
-@keyframes lp-flip-b { 0%, 45% { opacity: 0; } 46%, 100% { opacity: 1; } }
-
-/* the stub's tail: serial, revision and press number, the way stock is marked */
-.lp-serial {
-  margin-top: auto;
-  padding-top: 4px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  color: var(--mut);
-  border-top: 1px dashed var(--line);
-  padding-block-start: 14px;
-}
-
-/* ---------- the posting board ---------- */
-
-.lp-board {
-  margin-top: 18px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--stock);
-  overflow: hidden;
-  box-shadow: 0 1px 0 #fff inset, 0 18px 40px -34px rgba(26, 23, 18, 0.4);
-  position: relative;
-}
-/* a soft light-catch along the top edge, the one "glass" touch on this card */
-.lp-board::after {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 44px;
-  background: linear-gradient(to bottom, color-mix(in srgb, #fff 55%, transparent), transparent);
-  pointer-events: none;
-  border-radius: 12px 12px 0 0;
-}
-.lp-board-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--line);
-  background: var(--stock-2);
-  position: relative;
-  z-index: 1;
-}
-.lp-board-title {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-}
-.lp-tag {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--line);
-  color: var(--mut);
-}
-.lp-board-rows { list-style: none; margin: 0; padding: 0; position: relative; z-index: 1; }
-.lp-board-row {
-  display: grid;
-  grid-template-columns: 78px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  padding: 13px 20px;
-  border-bottom: 1px solid var(--line-soft);
-  animation: lp-post 0.55s var(--ease) both;
-}
-.lp-board-row:last-child { border-bottom: 0; }
-@keyframes lp-post {
-  from { opacity: 0; transform: translateY(-12px); filter: blur(5px); }
-}
-.lp-board-meta { display: grid; gap: 2px; min-width: 0; }
-.lp-board-meta b {
-  font-size: 13.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lp-board-meta span {
-  font-size: 11.5px;
-  color: var(--mut);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lp-arrow { color: var(--press); }
-.lp-board-coins {
-  font-family: var(--mono);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--post);
-  font-variant-numeric: tabular-nums;
-}
-/* the ink setting on the page as the figure lands */
-.lp-board-row:first-child .lp-board-coins { animation: lp-ink 0.6s var(--ease) both; }
-@keyframes lp-ink { from { filter: blur(3px); opacity: 0.2; } }
-
-.lp-board-foot {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--line);
-  background: var(--stock-2);
-}
-.lp-board-foot span {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--mut);
-}
-.lp-board-foot b {
-  font-family: var(--mono);
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-
-.lp-tier {
-  justify-self: start;
-  padding: 3px 9px;
-  border-radius: 4px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border: 1px solid;
-}
-.lp-tier-guest { color: var(--hold-strong); background: var(--hold-soft); border-color: var(--hold-edge); }
-.lp-tier-verified { color: var(--post); background: var(--post-soft); border-color: var(--post-edge); }
-
-/* ---------- section frame ---------- */
-
-.lp-section { padding: 108px 0 0; }
-.lp-section-head { max-width: 62ch; margin-bottom: 40px; }
-
-/* press furniture: the trim rule the sheet is cut along, with its registration
-   tick struck in validation ink. Graphic structure, not a label. */
-.lp-trim {
-  height: 1px;
-  margin: 0 0 34px;
-  border: 0;
-  background: linear-gradient(to right, var(--press) 0 26px,
-    color-mix(in srgb, var(--ink) 26%, transparent) 26px);
-}
-
-.lp-h2 {
-  font-family: var(--font-display), var(--font-sans), sans-serif;
-  font-weight: 800;
-  font-stretch: 108%;
-  font-size: clamp(28px, 3.6vw, 42px);
-  line-height: 1.04;
-  letter-spacing: -0.03em;
-  text-transform: none;
-  text-wrap: balance;
-  color: var(--ink);
-  margin: 0;
-  display: block;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
-}
-.lp-h2::after { content: none; }
-.lp-sub {
-  margin-top: 16px;
-  font-size: 15.5px;
-  line-height: 1.62;
-  color: var(--ink-soft);
-  max-width: 60ch;
-}
-
-/* ---------- the journey: a scroll-activated flow diagram standing in for a
-   promo video. Four waypoints on one line, each lighting up (and sending a
-   token traveling to it) as its matching coupon below scrolls into view. ---------- */
-
-.lp-journey {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 22px;
-  padding: 0 6px;
-}
-.lp-journey-line {
-  position: absolute;
-  inset: 15px 6px auto 6px;
-  width: calc(100% - 12px);
-  height: 4px;
-  overflow: visible;
-}
-.lp-journey-track,
-.lp-journey-draw {
-  stroke-width: 2;
-  /* No vector-effect: non-scaling-stroke here -- the viewBox is "0 0 400 4" with
-     preserveAspectRatio="none", so x and y scale non-uniformly (width stretches,
-     height doesn't). With non-scaling-stroke, Chromium miscomputes the dash
-     pattern under that non-uniform transform (dasharray/dashoffset land on the
-     wrong segments instead of growing the line from 0). Safe to drop: the line
-     is horizontal, so only the y-scale affects visible stroke width, and the
-     viewBox height (4) already matches the rendered height (4px) 1:1. */
-}
-.lp-journey-track { stroke: var(--line); }
-.lp-journey-draw {
-  stroke: var(--press);
-  /* line's viewBox is "0 0 400 4", so its actual path length is 400 user units
-     (matches x1=0/x2=400) -- dasharray/offset must be scaled to that, not 100. */
-  stroke-dasharray: 400;
-  /* Fully drawn by default -- the scroll-linked draw-in below is additive
-     motion, not something content depends on (browsers without view()
-     support, or reduced motion, just see a complete line). */
-  stroke-dashoffset: 0;
-}
-
-.lp-journey-point {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding-top: 8px;
-}
-.lp-journey-dot {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--stock);
-  border: 2px solid var(--line);
-  transition: border-color 0.3s var(--ease), background 0.3s var(--ease), transform 0.3s var(--ease);
-}
-.lp-journey-point[data-active] .lp-journey-dot {
-  border-color: var(--press);
-  background: var(--press);
-  transform: scale(1.15);
-}
-.lp-journey-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--mut);
-  transition: color 0.3s var(--ease);
-}
-.lp-journey-point[data-active] .lp-journey-label { color: var(--press); }
-
-/* the token that travels to a waypoint the instant it activates */
-.lp-journey-token {
-  position: absolute;
-  top: 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--post);
-  opacity: 0;
-  pointer-events: none;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .lp-journey-point[data-active] .lp-journey-token {
-    animation: lp-token-arrive 0.5s var(--ease) both;
-  }
-}
-@keyframes lp-token-arrive {
-  from { opacity: 0; transform: translate(-16px, -6px) scale(0.6); }
-  60% { opacity: 1; }
-  to { opacity: 0; transform: translate(0, 0) scale(1); }
-}
-
-/* These two rules were written for the scroll diagram (which loses its
-   spatial meaning under 1000px, once .lp-strip stops being 4 columns) —
-   not for the modal's track, which is a fixed-size floating panel that
-   should always show all 4 labeled waypoints regardless of viewport. */
-@media (max-width: 1000px) {
-  .lp-journey { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .lp-journey-label { display: none; }
-  .lp-journey.lp-journey-modal-inner { display: grid; }
-  .lp-journey-modal-inner .lp-journey-label { display: block; }
-}
-@media (max-width: 720px) {
-  .lp-journey { display: none; }
-  .lp-journey.lp-journey-modal-inner { display: grid; }
-}
-
-.lp-journey-trigger {
-  margin-top: 18px;
-}
-.lp-journey-trigger span { font-size: 11px; }
-
-.lp-journey-modal-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: color-mix(in srgb, var(--ink) 45%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-.lp-journey-modal {
-  position: relative;
-  width: min(720px, 100%);
-  padding: 34px 28px 28px;
-}
-.lp-journey-video {
-  display: block;
-  width: 100%;
-  aspect-ratio: 1280 / 800;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--stock-2);
-  margin-bottom: 16px;
-}
-.lp-journey-modal-close {
-  position: absolute;
-  top: -14px;
-  right: -14px;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  background: var(--stock);
-  color: var(--ink-soft);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  box-shadow: 0 2px 8px -2px rgba(26, 23, 18, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-.lp-journey-modal-close:hover { background: var(--stock-2); color: var(--ink); }
-.lp-journey-modal-inner {
-  margin-bottom: 20px;
-}
-.lp-journey-modal-body {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--ink-soft);
-  min-height: 44px;
-}
-
-/* ---------- the route: four coupons on one strip ---------- */
-
-.lp-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--stock);
-  overflow: hidden;
-  box-shadow: 0 1px 0 #fff inset, 0 1px 2px rgba(26, 23, 18, 0.04),
-    0 34px 54px -40px rgba(26, 23, 18, 0.5);
-}
-.lp-leg {
-  position: relative;
-  padding: 30px 26px 32px;
-  transition: background 0.24s ease;
-}
-.lp-leg:hover { background: color-mix(in srgb, var(--stock-2) 60%, transparent); }
-.lp-leg + .lp-leg::before {
-  content: "";
-  position: absolute;
-  inset: 18px auto 18px 0;
-  width: 2px;
-  background: repeating-linear-gradient(to bottom, var(--line) 0 5px, transparent 5px 11px);
-}
-.lp-leg-no {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--press);
-}
-.lp-leg h3 {
-  margin: 14px 0 10px;
-  font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-}
-.lp-leg p { font-size: 15px; line-height: 1.6; color: var(--ink-soft); }
-.lp-leg code {
-  display: inline-block;
-  margin-top: 14px;
-  padding: 3px 7px;
-  border-radius: 4px;
-  border: 1px solid var(--line-soft);
-  background: var(--stock-2);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--mut);
-}
-
-/* ---------- fare classes: guest vs verified ---------- */
-
-.lp-classes {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-}
-.lp-class {
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  padding: 32px 30px 30px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--stock);
-  transition: border-color 0.24s ease, box-shadow 0.24s ease;
-}
-.lp-class:hover {
-  border-color: color-mix(in srgb, var(--ink) 30%, var(--line));
-  box-shadow: 0 1px 0 #fff inset, 0 18px 34px -28px rgba(26, 23, 18, 0.35);
-}
-.lp-class-verified { border-color: color-mix(in srgb, var(--press) 34%, var(--line)); }
-.lp-class-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-.lp-class h3 {
-  font-family: var(--font-display), var(--font-sans), sans-serif;
-  font-size: 24px;
-  font-weight: 800;
-  font-stretch: 108%;
-  letter-spacing: -0.026em;
-  color: var(--ink);
-}
-
-/* struck across the card at an angle, with the uneven coverage of a real stamp */
-.lp-stamp {
-  position: absolute;
-  bottom: 22px;
-  right: 24px;
-  padding: 6px 14px 5px;
-  border: 2px solid currentColor;
-  border-radius: 4px;
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  rotate: -11deg;
-  opacity: 0.34;
-  pointer-events: none;
-  -webkit-mask-image: var(--distress);
-  mask-image: var(--distress);
-  -webkit-mask-size: 110px 110px;
-  mask-size: 110px 110px;
-}
-.lp-class-guest .lp-stamp { color: var(--hold); }
-.lp-class-verified .lp-stamp { color: var(--post); }
-
-.lp-class .lp-amount {
-  font-family: var(--mono);
-  font-size: 44px;
-  font-weight: 600;
-  letter-spacing: -0.045em;
-  font-variant-numeric: tabular-nums;
-  margin: 26px 0 6px;
-}
-.lp-class-guest .lp-amount { color: var(--hold); }
-.lp-class-verified .lp-amount { color: var(--post); }
-.lp-class .lp-amount small {
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0;
-  color: var(--mut);
-  margin-left: 8px;
-}
-.lp-num { position: relative; }
-.lp-meter {
-  height: 6px;
-  margin: 20px 0 18px;
-  border-radius: 999px;
-  background: var(--stock-2);
-  border: 1px solid var(--line-soft);
-  overflow: hidden;
-}
-.lp-meter i {
-  display: block;
-  height: 100%;
-  transform-origin: left;
-}
-.lp-class-guest .lp-meter i { width: 20%; background: var(--hold); }
-.lp-class-verified .lp-meter i { width: 100%; background: var(--post); }
-@keyframes lp-fill { from { transform: scaleX(0); } }
-.lp-class p { font-size: 15px; line-height: 1.62; color: var(--ink-soft); }
-.lp-class p + p { margin-top: 12px; }
-.lp-class .lp-class-foot {
-  margin-top: auto;
-  padding-top: 22px;
-  /* keep the footnote clear of the struck stamp in the same corner */
-  padding-right: 128px;
-  font-size: 12.5px;
-  color: var(--mut);
-}
-
-/* ---------- fare rules: the money controls, printed on the back ---------- */
-
-.lp-rules {
-  margin: 0;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--stock);
-  overflow: hidden;
-  box-shadow: 0 1px 0 #fff inset, 0 1px 2px rgba(26, 23, 18, 0.04);
-}
-.lp-rule {
-  position: relative;
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 190px;
-  gap: 24px;
-  align-items: baseline;
-  padding: 26px 30px;
-  transition: background 0.24s ease;
-}
-.lp-rule:hover { background: color-mix(in srgb, var(--stock-2) 60%, transparent); }
-.lp-rule + .lp-rule::before {
-  content: "";
-  position: absolute;
-  inset: 0 22px auto 22px;
-  height: 2px;
-  background: repeating-linear-gradient(to right, var(--line) 0 5px, transparent 5px 11px);
-}
-.lp-rule dt {
-  font-size: 14.5px;
-  font-weight: 650;
-  letter-spacing: -0.015em;
-  color: var(--ink);
-}
-.lp-rule dd {
-  margin: 0;
-  max-width: 66ch;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--ink-soft);
-}
-.lp-rule-val {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--mut);
-  text-align: right;
-  transition: color 0.2s ease;
-}
-.lp-rule:hover .lp-rule-val { color: var(--press); }
-
-/* ---------- close ---------- */
-
-.lp-close { padding: 108px 0 0; }
-.lp-close-pass { display: grid; grid-template-columns: minmax(0, 1fr) 30px 300px; }
-.lp-close-main { padding: 46px 42px; }
-.lp-close-stub {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 14px;
-  padding: 40px 30px;
-}
-.lp-close-stub p { font-size: 14px; line-height: 1.6; color: var(--ink-soft); }
-
-.lp-foot {
-  margin-top: 92px;
-  padding: 24px 0 40px;
-  border-top: 1px solid var(--line);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 24px;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12.5px;
-  color: var(--ink-soft);
-}
-.lp-foot a { color: var(--ink-soft); font-weight: 500; }
-.lp-foot a:hover { color: var(--press); }
-.lp-foot-press {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-}
-
-/* ============================================================
-   MOTION
-   Everything below is additive to a page that is already fully
-   legible without it. Nothing here hides content by default.
-   ============================================================ */
+/* Landing motion only.
+ *
+ * Every static rule this file used to carry now lives as Tailwind utilities in
+ * lib/lp.ts. What is left is the part the utility layer cannot reach:
+ *
+ *   - @keyframes definitions
+ *   - @property, and the counter trick that animates a printed integer
+ *   - `animation-timeline: view()/scroll()` ranges staggered per :nth-of-type
+ *
+ * The `lp-*` class names in the TSX exist for these selectors and nothing else.
+ *
+ * Motion here is additive to a page that is already fully legible without it.
+ * Nothing below hides content by default. */
 
 @media (prefers-reduced-motion: no-preference) {
   /* --- the authored moment: the pass comes off the press ---
@@ -1089,14 +19,14 @@ body:has(.lp)::before {
 
   .lp .lp-pass,
   .lp .lp-board {
-    animation: lp-press-land 0.78s var(--ease) both;
+    animation: lp-press-land 0.78s var(--ease-out) both;
   }
   .lp .lp-board { animation-delay: 0.34s; }
   @keyframes lp-press-land {
     from { opacity: 0; transform: translateY(20px) scale(0.992); filter: blur(7px); }
   }
 
-  .lp .lp-routing .lp-field { animation: lp-strike 0.34s var(--ease) both; }
+  .lp .lp-routing .lp-field { animation: lp-strike 0.34s var(--ease-out) both; }
   .lp .lp-routing .lp-field:nth-child(1) { animation-delay: 0.3s; }
   .lp .lp-routing .lp-field:nth-child(2) { animation-delay: 0.37s; }
   .lp .lp-routing .lp-field:nth-child(3) { animation-delay: 0.44s; }
@@ -1106,7 +36,7 @@ body:has(.lp)::before {
 
   /* the headline is struck line by line: a wipe, not a fade */
   .lp .lp-h1 {
-    animation: lp-struck 0.72s var(--ease) 0.42s both;
+    animation: lp-struck 0.72s var(--ease-out) 0.42s both;
     clip-path: inset(0 0 0 0);
   }
   @keyframes lp-struck {
@@ -1114,23 +44,23 @@ body:has(.lp)::before {
   }
 
   /* the second plate of the press run lands on the word the page turns on */
-  .lp .lp-h1 em { animation: lp-second-plate 0.42s var(--ease) 1.02s both; }
-  @keyframes lp-second-plate { from { color: var(--ink); } }
+  .lp .lp-h1 em { animation: lp-second-plate 0.42s var(--ease-out) 1.02s both; }
+  @keyframes lp-second-plate { from { color: var(--color-ink); } }
 
-  .lp .lp-lede { animation: lp-rise 0.6s var(--ease) 0.72s both; }
-  .lp .lp-cta { animation: lp-rise 0.6s var(--ease) 0.82s both; }
-  .lp .lp-cta-note { animation: lp-rise 0.6s var(--ease) 0.9s both; }
+  .lp .lp-lede { animation: lp-rise 0.6s var(--ease-out) 0.72s both; }
+  .lp .lp-cta { animation: lp-rise 0.6s var(--ease-out) 0.82s both; }
+  .lp .lp-cta-note { animation: lp-rise 0.6s var(--ease-out) 0.9s both; }
   @keyframes lp-rise { from { opacity: 0; transform: translateY(10px); } }
 
   /* the stub prints downward, the way a thermal head lays a code */
-  .lp .lp-code { animation: lp-print 0.66s var(--ease) 0.62s both; }
+  .lp .lp-code { animation: lp-print 0.66s var(--ease-out) 0.62s both; }
   @keyframes lp-print { from { clip-path: inset(0 0 100% 0); } }
-  .lp .lp-stub-fields .lp-field { animation: lp-rise 0.5s var(--ease) both; }
+  .lp .lp-stub-fields .lp-field { animation: lp-rise 0.5s var(--ease-out) both; }
   .lp .lp-stub-fields .lp-field:nth-child(1) { animation-delay: 0.86s; }
   .lp .lp-stub-fields .lp-field:nth-child(2) { animation-delay: 0.92s; }
   .lp .lp-stub-fields .lp-field:nth-child(3) { animation-delay: 0.98s; }
   .lp .lp-stub-fields .lp-field:nth-child(4) { animation-delay: 1.04s; }
-  .lp .lp-serial { animation: lp-rise 0.5s var(--ease) 1.12s both; }
+  .lp .lp-serial { animation: lp-rise 0.5s var(--ease-out) 1.12s both; }
 
   /* --- the recurring validation loop, only while the stub is on screen --- */
   .lp-stub[data-run] .lp-scan {
@@ -1144,6 +74,28 @@ body:has(.lp)::before {
   }
   .lp-stub[data-run] .lp-status-done {
     animation: lp-flip-b 5.2s steps(1, end) 1.6s infinite;
+  }
+  @keyframes lp-sweep {
+    0% { transform: translateY(-100%); opacity: 0; }
+    8% { opacity: 1; }
+    46% { transform: translateY(227%); opacity: 1; }
+    56%, 100% { transform: translateY(227%); opacity: 0; }
+  }
+  @keyframes lp-ring {
+    0%, 44% { opacity: 0; }
+    47% { opacity: 1; }
+    62%, 100% { opacity: 0; }
+  }
+  @keyframes lp-flip-a { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
+  @keyframes lp-flip-b { 0%, 45% { opacity: 0; } 46%, 100% { opacity: 1; } }
+
+  /* the ambient wash drifts while the hero is on screen */
+  .lp-hero-glow[data-run] {
+    animation: lp-glow-drift 22s ease-in-out infinite alternate;
+  }
+  @keyframes lp-glow-drift {
+    from { background-position: 0 0, 0 0, 0 0; transform: translateY(0); }
+    to { background-position: 30px 20px, -24px 16px, 14px -18px; transform: translateY(6px); }
   }
 }
 
@@ -1168,10 +120,25 @@ body:has(.lp)::before {
     @keyframes lp-nav-set {
       to {
         box-shadow: 0 14px 26px -24px rgba(26, 23, 18, 0.75);
-        background: color-mix(in srgb, var(--paper) 82%, transparent);
+        background: color-mix(in srgb, var(--color-paper) 82%, transparent);
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
       }
+    }
+
+    /* The hero pass needs BOTH its entrance (lp-press-land, above) and this
+       parallax drift. Both use the `animation` shorthand, and this selector is
+       more specific than `.lp .lp-pass`, so declaring it separately would reset
+       animation-name and silently drop the entrance in any browser supporting
+       animation-timeline: scroll(). List both animations here instead, so this
+       rule is the single source of truth for the hero pass. */
+    .lp .lp-hero .lp-pass {
+      animation: lp-press-land 0.78s var(--ease-out) both, lp-parallax-pass linear both;
+      animation-timeline: auto, scroll(root block);
+      animation-range: normal, 0 640px;
+    }
+    @keyframes lp-parallax-pass {
+      to { transform: translateY(-24px); }
     }
   }
 }
@@ -1191,16 +158,16 @@ body:has(.lp)::before {
     .lp .lp-leg:nth-child(3) { animation-range: entry 13% entry 63%; }
     .lp .lp-leg:nth-child(4) { animation-range: entry 17% entry 67%; }
 
-    /* the journey diagram's waypoints light up one by one, on the same
-       stagger as the coupon strip below them so the two read as one motion.
-       Scoped to :not(.lp-journey-modal-inner) -- the modal reuses these same
-       classes for its own, independently time-driven (setInterval) waypoint
-       activation via [data-active], which must keep working unaffected. */
+    /* the journey diagram's waypoints light up one by one, on the same stagger as
+       the coupon strip below them so the two read as one motion. Scoped to
+       :not(.lp-journey-modal-inner) — the modal reuses these same classes for its
+       own, independently time-driven (setInterval) waypoint activation via
+       [data-active], which must keep working unaffected. */
     @keyframes lp-journey-dot-active {
-      to { border-color: var(--press); background: var(--press); transform: scale(1.15); }
+      to { border-color: var(--color-accent); background: var(--color-accent); transform: scale(1.15); }
     }
     @keyframes lp-journey-label-active {
-      to { color: var(--press); }
+      to { color: var(--color-accent); }
     }
     @keyframes lp-journey-token-active {
       0%, 40% { opacity: 0; transform: translate(-16px, -6px) scale(0.6); }
@@ -1254,6 +221,7 @@ body:has(.lp)::before {
       animation-timeline: view();
       animation-range: entry 20% entry 70%;
     }
+    @keyframes lp-fill { from { transform: scaleX(0); } }
 
     /* and their figures count up to meet the meters */
     @property --n {
@@ -1274,8 +242,8 @@ body:has(.lp)::before {
       animation-range: entry 20% entry 70%;
     }
     @keyframes lp-count { from { --n: 0; } }
-    .lp .lp-class-guest { --fig: var(--hold); }
-    .lp .lp-class-verified { --fig: var(--post); }
+    .lp .lp-class-guest { --fig: var(--color-warn-lit); }
+    .lp .lp-class-verified { --fig: var(--color-ok); }
 
     /* the stamp lands once the fare it marks is on screen */
     .lp .lp-stamp {
@@ -1299,77 +267,4 @@ body:has(.lp)::before {
       from { opacity: 0; transform: translateY(18px); filter: blur(3px); }
     }
   }
-}
-
-/* ---------- responsive ---------- */
-
-@media (max-width: 1180px) {
-  /* crop marks need bleed room; below the measure there is none */
-  .lp-cropped::after { display: none; }
-}
-
-@media (max-width: 1000px) {
-  .lp-pass, .lp-close-pass { grid-template-columns: minmax(0, 1fr); }
-  .lp-perf { height: 30px; }
-  .lp-perf::before {
-    inset: 50% 14px auto 14px;
-    width: auto;
-    height: 2px;
-    translate: 0 -50%;
-    background: repeating-linear-gradient(to right, var(--line) 0 5px, transparent 5px 11px);
-  }
-  .lp-perf::after, .lp-notch {
-    top: 50%;
-    bottom: auto;
-    left: -11px;
-    translate: 0 -50%;
-  }
-  .lp-notch { left: auto; right: -11px; }
-  .lp-stub, .lp-close-stub { padding: 4px 32px 36px; }
-  .lp-stub {
-    display: grid;
-    grid-template-columns: 190px minmax(0, 1fr);
-    align-items: center;
-    gap: 12px 28px;
-  }
-  .lp-stub-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .lp-serial { grid-column: 1 / -1; margin-top: 4px; }
-  .lp-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .lp-leg:nth-child(3), .lp-leg:nth-child(4) { border-top: 1px solid var(--line-soft); }
-  .lp-rule { grid-template-columns: 200px minmax(0, 1fr); padding: 24px 24px; }
-  .lp-rule-val { grid-column: 2; text-align: left; }
-}
-
-@media (max-width: 720px) {
-  .lp-wrap, .lp-nav-inner { width: calc(100% - 32px); }
-  .lp-hero { padding-top: 26px; }
-  /* keeps "Pay for signups," on one line so the authored break still lands */
-  .lp-h1 { font-size: 34px; }
-  .lp-coupon, .lp-close-main { padding: 32px 22px 28px; }
-  .lp-routing { gap: 10px 20px; padding-bottom: 20px; margin-bottom: 24px; }
-  .lp-stub { grid-template-columns: minmax(0, 1fr); padding: 4px 22px 28px; }
-  .lp-close-stub { padding: 4px 22px 28px; }
-  .lp-code { max-width: 210px; }
-  .lp-section, .lp-close { padding-top: 76px; }
-  .lp-rule-head { margin-bottom: 26px; }
-  .lp-strip, .lp-classes { grid-template-columns: minmax(0, 1fr); }
-  .lp-classes { gap: 16px; }
-  .lp-leg + .lp-leg { border-top: 1px solid var(--line-soft); }
-  .lp-leg + .lp-leg::before { content: none; }
-  .lp-rule { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 22px 20px; }
-  .lp-rule + .lp-rule::before { inset: 0 16px auto 16px; }
-  .lp-rule-val { grid-column: 1; text-align: left; }
-  .lp-board-row { grid-template-columns: 70px minmax(0, 1fr); gap: 8px 12px; }
-  .lp-board-coins { grid-column: 2; grid-row: 1; justify-self: end; }
-  .lp-board-meta { grid-column: 1 / -1; }
-  .lp-cta .lp-btn { flex: 1 1 100%; }
-  .lp-stamp { bottom: 18px; right: 18px; font-size: 13px; }
-  .lp-class .lp-class-foot { padding-right: 104px; }
-}
-
-@media (max-width: 480px) {
-  /* the nav cannot hold a wordmark and two actions; signing in lives in the page */
-  .lp-nav-actions .lp-btn-ghost { display: none; }
-  .lp-mark { font-size: 13px; }
-  .lp-foot { justify-content: flex-start; }
 }

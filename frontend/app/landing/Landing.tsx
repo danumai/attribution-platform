@@ -4,6 +4,7 @@ import ScanStub from './ScanStub';
 import JourneyFlow from './JourneyFlow';
 import JourneyTrigger from './JourneyTrigger';
 import HeroGlow from './HeroGlow';
+import * as lp from '@/lib/lp';
 import './landing.css';
 
 const SIGNUP_PROMOTER = '/login?mode=signup&type=promoter';
@@ -84,73 +85,75 @@ const RULES = [
 
 export default function Landing() {
   return (
-    <div className="lp">
-      <nav className="lp-nav">
-        <div className="lp-nav-inner">
-          <Link href="/" className="lp-mark">
+    /* `lp` and the other lp-* names are motion hooks for landing.css, not styling */
+    <div className="lp max-w-none overflow-x-clip p-0 text-ink">
+      <nav className={lp.nav}>
+        <div className={lp.navInner}>
+          <Link href="/" className={lp.mark}>
             <TicketMark />
             QR Reward Platform
           </Link>
-          <div className="lp-nav-actions">
-            <Link href="/login" className="lp-btn lp-btn-ghost">
+          <div className="flex items-center gap-2.5">
+            {/* the nav cannot hold a wordmark and two actions on a phone;
+                signing in lives in the page */}
+            <Link href="/login" className={`${lp.btnGhost} max-[480px]:hidden`}>
               Sign in
             </Link>
-            <Link href={SIGNUP_PROMOTER} className="lp-btn">
+            <Link href={SIGNUP_PROMOTER} className={lp.btn}>
               Start a campaign
             </Link>
           </div>
         </div>
-        <span className="lp-nav-progress" aria-hidden="true" />
+        <span className={lp.navProgress} aria-hidden="true" />
       </nav>
 
-      <main>
-      <header className="lp-hero lp-wrap">
+      <main className="m-0 max-w-none p-0">
+      <header className={`${lp.hero} ${lp.wrap}`}>
         <HeroGlow />
-        <div className="lp-pass lp-pass-shell lp-stocked lp-cropped">
-          <div className="lp-coupon">
-            <dl className="lp-routing">
-              <div className="lp-field">
-                <dt>Funded by</dt>
-                <dd>Promoter</dd>
-              </div>
-              <div className="lp-field">
-                <dt>Verified by</dt>
-                <dd>Publisher</dd>
-              </div>
-              <div className="lp-field">
-                <dt>Settled in</dt>
-                <dd>Coins</dd>
-              </div>
+        <div className={lp.cx(lp.pass, lp.passShell, lp.stocked, lp.cropped)}>
+          <div className={lp.coupon}>
+            <dl className={lp.routing}>
+              {([
+                ['Funded by', 'Promoter'],
+                ['Verified by', 'Publisher'],
+                ['Settled in', 'Coins'],
+              ] as const).map(([dt, dd]) => (
+                <div className={`lp-field ${lp.field}`} key={dt}>
+                  <dt className={lp.fieldTerm}>{dt}</dt>
+                  <dd className={lp.fieldValue}>{dd}</dd>
+                </div>
+              ))}
             </dl>
 
-            <h1 className="lp-h1">
+            <h1 className={lp.h1}>
               Pay for signups,
               <br />
               not for <em>scans</em>.
             </h1>
 
-            <p className="lp-lede">
+            <p className={lp.lede}>
               Print a QR code on anything. When someone scans it they land inside a partner
               publisher&rsquo;s app, and coins leave your campaign budget{' '}
               <b>only after that publisher confirms a real signup</b> — at the guest rate until
               they verify the person, at your full rate once they do.
             </p>
 
-            <div className="lp-cta">
-              <Link href={SIGNUP_PROMOTER} className="lp-btn lp-btn-lg">
+            <div className={lp.cta}>
+              <Link href={SIGNUP_PROMOTER} className={`${lp.btn} ${lp.btnLg}`}>
                 Start a campaign
               </Link>
-              <Link href={SIGNUP_PUBLISHER} className="lp-btn lp-btn-ghost lp-btn-lg">
+              <Link href={SIGNUP_PUBLISHER} className={`${lp.btnGhost} ${lp.btnLg}`}>
                 Join as a publisher
               </Link>
             </div>
-            <p className="lp-cta-note">
+            <p className={lp.ctaNote}>
               Fund a budget, print a code, and watch it draw down. No spend until a scan converts.
             </p>
           </div>
 
-          <div className="lp-perf" aria-hidden="true">
-            <span className="lp-notch" />
+          <div className={lp.perf} aria-hidden="true">
+            <span className={lp.notchTop} />
+            <span className={lp.notchBottom} />
           </div>
 
           <ScanStub />
@@ -159,142 +162,143 @@ export default function Landing() {
         <ActivityBoard />
       </header>
 
-      <section className="lp-section lp-wrap">
-        <hr className="lp-trim" />
-        <div className="lp-section-head">
-          <h2 className="lp-h2">One scan, four coupons.</h2>
-          <p className="lp-sub">
+      <section className={`${lp.section} ${lp.wrap}`}>
+        <hr className={lp.trim} />
+        <div className={lp.sectionHead}>
+          <h2 className={lp.h2}>One scan, four coupons.</h2>
+          <p className={lp.sub}>
             Nothing is charged to you until the fourth. Every stage is a checkpoint the scan has to
             clear, and the money only moves at the end of the strip.
           </p>
           <JourneyTrigger />
         </div>
         <JourneyFlow />
-        <div className="lp-strip lp-stocked">
+        <div className={`${lp.strip} ${lp.stocked}`}>
           {LEGS.map((l) => (
-            <article className="lp-leg" key={l.no}>
-              <span className="lp-leg-no">{l.no}</span>
-              <h3>{l.title}</h3>
-              <p>{l.body}</p>
-              <code>{l.meta}</code>
+            <article className={lp.leg} key={l.no}>
+              <span className={lp.legNo}>{l.no}</span>
+              <h3 className={lp.legTitle}>{l.title}</h3>
+              <p className={lp.legBody}>{l.body}</p>
+              <code className={lp.legMeta}>{l.meta}</code>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="lp-section lp-wrap">
-        <hr className="lp-trim" />
-        <div className="lp-section-head">
-          <h2 className="lp-h2">Two fares for the same seat.</h2>
-          <p className="lp-sub">
+      <section className={`${lp.section} ${lp.wrap}`}>
+        <hr className={lp.trim} />
+        <div className={lp.sectionHead}>
+          <h2 className={lp.h2}>Two fares for the same seat.</h2>
+          <p className={lp.sub}>
             A publisher can hand coins to anyone who signs up, but you should not pay full price
             for a stranger. So a scan settles at one of two rates you set yourself — and the
             difference is held, not lost.
           </p>
         </div>
-        <div className="lp-classes">
-          <article className="lp-class lp-class-guest lp-stocked lp-enter">
-            <div className="lp-class-top">
-              <h3>Guest</h3>
-              <span className="lp-tier lp-tier-guest">held</span>
+        <div className={lp.classes}>
+          <article className={`${lp.fareCard(false)} ${lp.stocked}`}>
+            <div className={lp.fareTop}>
+              <h3 className={lp.fareTitle}>Guest</h3>
+              <span className={lp.tierGuest}>held</span>
             </div>
-            <span className="lp-stamp" aria-hidden="true">Held</span>
-            <p className="lp-amount">
-              <span className="lp-num" style={{ '--to': 10 } as React.CSSProperties}>
+            <span className={`${lp.fareStamp} text-warn-lit`} aria-hidden="true">Held</span>
+            <p className={`${lp.fareAmount} text-warn-lit`}>
+              <span className="lp-num relative" style={{ '--to': 10 } as React.CSSProperties}>
                 10
               </span>{' '}
               <small>of 50 coins</small>
             </p>
-            <div className="lp-meter">
-              <i />
+            <div className={lp.fareMeter}>
+              <i className="w-1/5 bg-warn-lit" />
             </div>
-            <p>
+            <p className={lp.fareBody}>
               Somebody scanned and signed up, but the publisher has not vouched for who they are.
               They get the guest rate now, and the remaining 40 coins sit as{' '}
-              <code>pending_coins</code> against a deadline.
+              <code className={lp.codeInline}>pending_coins</code> against a deadline.
             </p>
-            <p className="lp-class-foot">
+            <p className={lp.fareFoot}>
               Grace window set per partnership · default 7 days
             </p>
           </article>
 
-          <article className="lp-class lp-class-verified lp-stocked lp-enter">
-            <div className="lp-class-top">
-              <h3>Verified</h3>
-              <span className="lp-tier lp-tier-verified">posted</span>
+          <article className={`${lp.fareCard(true)} ${lp.stocked}`}>
+            <div className={lp.fareTop}>
+              <h3 className={lp.fareTitle}>Verified</h3>
+              <span className={lp.tierVerified}>posted</span>
             </div>
-            <span className="lp-stamp" aria-hidden="true">Posted</span>
-            <p className="lp-amount">
-              <span className="lp-num" style={{ '--to': 50 } as React.CSSProperties}>
+            <span className={`${lp.fareStamp} text-ok`} aria-hidden="true">Posted</span>
+            <p className={`${lp.fareAmount} text-ok`}>
+              <span className="lp-num relative" style={{ '--to': 50 } as React.CSSProperties}>
                 50
               </span>{' '}
               <small>of 50 coins</small>
             </p>
-            <div className="lp-meter">
-              <i />
+            <div className={lp.fareMeter}>
+              <i className="w-full bg-ok" />
             </div>
-            <p>
+            <p className={lp.fareBody}>
               The publisher cleared the user against its own bar and said so. The held-back
               difference is released in a single idempotent call, so a retry cannot pay the same
               person twice.
             </p>
-            <p className="lp-class-foot">
+            <p className={lp.fareFoot}>
               Released after the deadline? Refused — the budget keeps the difference.
             </p>
           </article>
         </div>
       </section>
 
-      <section className="lp-section lp-wrap">
-        <hr className="lp-trim" />
-        <div className="lp-section-head">
-          <h2 className="lp-h2">Fare rules, printed on the back.</h2>
-          <p className="lp-sub">
+      <section className={`${lp.section} ${lp.wrap}`}>
+        <hr className={lp.trim} />
+        <div className={lp.sectionHead}>
+          <h2 className={lp.h2}>Fare rules, printed on the back.</h2>
+          <p className={lp.sub}>
             A code in the wild is a spending instrument you cannot recall. These are the controls
             that keep a lost print run from becoming a lost budget.
           </p>
         </div>
-        <dl className="lp-rules lp-stocked">
+        <dl className={`${lp.rules} ${lp.stocked}`}>
           {RULES.map((r) => (
-            <div className="lp-rule lp-enter" key={r.term}>
-              <dt>{r.term}</dt>
-              <dd>{r.body}</dd>
-              <dd className="lp-rule-val">{r.val}</dd>
+            <div className={lp.rule} key={r.term}>
+              <dt className={lp.ruleTerm}>{r.term}</dt>
+              <dd className={lp.ruleBody}>{r.body}</dd>
+              <dd className={lp.ruleVal}>{r.val}</dd>
             </div>
           ))}
         </dl>
       </section>
 
-      <section className="lp-close lp-wrap">
-        <hr className="lp-trim" />
-        <div className="lp-close-pass lp-pass-shell lp-stocked lp-cropped lp-enter">
-          <div className="lp-close-main">
-            <h2 className="lp-h2">Ready to print?</h2>
-            <p className="lp-sub">
+      <section className={`${lp.close} ${lp.wrap}`}>
+        <hr className={lp.trim} />
+        <div className={lp.cx('lp-enter', lp.closePass, lp.passShell, lp.stocked, lp.cropped)}>
+          <div className={lp.closeMain}>
+            <h2 className={lp.h2}>Ready to print?</h2>
+            <p className={lp.sub}>
               Create a promoter account, request a partnership with a publisher, fund a campaign,
               and design your first code. The budget you fund is the most you can ever spend.
             </p>
-            <div className="lp-cta">
-              <Link href={SIGNUP_PROMOTER} className="lp-btn lp-btn-lg">
+            <div className={lp.cta}>
+              <Link href={SIGNUP_PROMOTER} className={`${lp.btn} ${lp.btnLg}`}>
                 Start a campaign
               </Link>
-              <Link href="/login" className="lp-btn lp-btn-ghost lp-btn-lg">
+              <Link href="/login" className={`${lp.btnGhost} ${lp.btnLg}`}>
                 Sign in
               </Link>
             </div>
           </div>
 
-          <div className="lp-perf" aria-hidden="true">
-            <span className="lp-notch" />
+          <div className={lp.perf} aria-hidden="true">
+            <span className={lp.notchTop} />
+            <span className={lp.notchBottom} />
           </div>
 
-          <aside className="lp-close-stub">
-            <span className="lp-label">Publishers</span>
+          <aside className={lp.closeStub}>
+            <span className={lp.fieldTerm}>Publishers</span>
             <p>
               Bring your own audience and your own verification. Set a landing URL, take a
               partnership, and call the Partner API when a scanned user signs up.
             </p>
-            <Link href={SIGNUP_PUBLISHER} className="lp-btn lp-btn-ghost">
+            <Link href={SIGNUP_PUBLISHER} className={lp.btnGhost}>
               Join as a publisher
             </Link>
           </aside>
@@ -302,8 +306,8 @@ export default function Landing() {
       </section>
       </main>
 
-      <footer className="lp-foot lp-wrap">
-        <span className="lp-foot-press">QR Reward Platform · Stock 04 · Press 01</span>
+      <footer className={`${lp.foot} ${lp.wrap}`}>
+        <span className={lp.footPress}>QR Reward Platform · Stock 04 · Press 01</span>
         <span>
           Activity shown on this page is example data, not live traffic. ·{' '}
           <Link href="/login">Sign in</Link>

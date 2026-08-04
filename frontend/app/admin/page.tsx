@@ -5,6 +5,49 @@ import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
 import { confirmDialog, promptDialog, toast } from '@/lib/ui';
 import { ago, num, when } from '@/lib/fmt';
+import {
+  btn,
+  btnGhost,
+  btnTinyGhost,
+  card,
+  cx,
+  codeKey,
+  empty as emptyBox,
+  field,
+  figure,
+  health,
+  healthMark,
+  kpi,
+  kpiFigure,
+  label as labelClass,
+  link as linkClass,
+  linkish,
+  menu,
+  menuItem,
+  menuPop,
+  menuScrim,
+  menuSummary,
+  muted,
+  pill as pillFor,
+  pillBad,
+  queueCount,
+  queueRow,
+  search,
+  searchInput,
+  sectionHead,
+  select as selectField,
+  skeleton,
+  stamp,
+  table,
+  tableFoot,
+  tableWrap,
+  tablebar,
+  td,
+  tdNum,
+  th,
+  thNum,
+  tr,
+} from '@/lib/tw';
 
 /** The rail: nine sections, grouped by what an operator is doing when they open them. */
 const TABS = [
@@ -36,7 +79,7 @@ const HEAD: Record<Tab, string> = {
 // ponytail: crude UA bucketing, good enough for a device column. Use a UA parser if it needs to be right.
 const device = (ua: string) =>
   !ua ? '—' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobile/.test(ua) ? 'Mobile' : 'Desktop';
-const pill = (s: string) => <span className={`pill ${s}`}>{s}</span>;
+const pill = (s: string) => <span className={pillFor(s)}>{s}</span>;
 
 type Col = { h: string; get: (row: any) => ReactNode; sort?: (row: any) => any; num?: boolean };
 
@@ -45,8 +88,8 @@ const PAGE = 50;
 /** Row actions live behind one control instead of a run of dot-separated links. */
 function Actions({ children }: { children: ReactNode }) {
   return (
-    <details className="menu">
-      <summary aria-label="Row actions" title="Actions">
+    <details className={menu}>
+      <summary className={menuSummary} aria-label="Row actions" title="Actions">
         <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <circle cx="3" cy="8" r="1.5" />
           <circle cx="8" cy="8" r="1.5" />
@@ -54,8 +97,8 @@ function Actions({ children }: { children: ReactNode }) {
         </svg>
       </summary>
       {/* click-away: the backdrop closes the menu the way a native popover would */}
-      <div className="menu-scrim" onClick={(e) => (e.currentTarget.closest('details') as any)?.removeAttribute('open')} />
-      <div className="menu-pop" onClick={(e) => (e.currentTarget.closest('details') as any)?.removeAttribute('open')}>
+      <div className={menuScrim} onClick={(e) => (e.currentTarget.closest('details') as any)?.removeAttribute('open')} />
+      <div className={menuPop} onClick={(e) => (e.currentTarget.closest('details') as any)?.removeAttribute('open')}>
         {children}
       </div>
     </details>
@@ -98,43 +141,43 @@ function Table({
 
   if (loading)
     return (
-      <div className="card" style={{ display: 'grid', gap: 10 }}>
+      <div className={cx(card, 'mt-3 grid gap-2.5')}>
         {Array.from({ length: 6 }, (_, i) => (
-          <div key={i} className="skeleton" style={{ width: `${100 - i * 7}%` }} />
+          <div key={i} className={skeleton} style={{ width: `${100 - i * 7}%` }} />
         ))}
       </div>
     );
 
   return (
     <>
-      <div className="tablebar">
-        <div className="search">
+      <div className={tablebar}>
+        <div className={search}>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
             <circle cx="7" cy="7" r="4.5" />
             <path d="m10.5 10.5 3 3" strokeLinecap="round" />
           </svg>
-          <input placeholder="Filter these rows…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter rows" />
+          <input className={searchInput} placeholder="Filter these rows…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter rows" />
           {q && (
-            <button className="ghost tiny" onClick={() => setQ('')}>
+            <button className={cx(btnTinyGhost, 'shrink-0')} onClick={() => setQ('')}>
               Clear
             </button>
           )}
         </div>
-        <span className="muted">
+        <span className={muted}>
           {shown.length}
           {shown.length !== rows.length && ` of ${rows.length}`} rows
         </span>
       </div>
 
       {shown.length ? (
-        <div className="tablewrap">
-          <table>
+        <div className={tableWrap}>
+          <table className={table}>
             <thead>
               <tr>
                 {cols.map((c, i) => (
                   <th
                     key={i}
-                    className={`${c.num ? 'num' : ''}${sort?.i === i ? ' sorted' : ''}`}
+                    className={cx(c.num ? thNum : th, sort?.i === i && 'text-accent')}
                     aria-sort={sort?.i === i ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
                     style={{ cursor: c.h ? 'pointer' : 'default', userSelect: 'none' }}
                     onClick={() =>
@@ -142,16 +185,16 @@ function Table({
                     }
                   >
                     {c.h}
-                    {sort?.i === i && <span className="caret">{sort.dir === 1 ? '↑' : '↓'}</span>}
+                    {sort?.i === i && <span className="ml-1">{sort.dir === 1 ? '↑' : '↓'}</span>}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {shown.slice(0, limit).map((r, i) => (
-                <tr key={r.id ?? r.account ?? i}>
+                <tr className={tr} key={r.id ?? r.account ?? i}>
                   {cols.map((c, j) => (
-                    <td key={j} className={c.num ? 'num' : ''}>
+                    <td key={j} className={c.num ? tdNum : td}>
                       {c.get(r)}
                     </td>
                   ))}
@@ -160,19 +203,19 @@ function Table({
             </tbody>
           </table>
           {shown.length > limit && (
-            <div className="tablefoot">
-              <button className="ghost" onClick={() => setLimit((l) => l + PAGE)}>
+            <div className={tableFoot}>
+              <button className={btnGhost} onClick={() => setLimit((l) => l + PAGE)}>
                 Show {Math.min(PAGE, shown.length - limit)} more
               </button>
-              <span className="muted">{shown.length - limit} rows below</span>
+              <span className={muted}>{shown.length - limit} rows below</span>
             </div>
           )}
         </div>
       ) : (
-        <div className="card empty">
+        <div className={cx(card, emptyBox, 'mt-3')}>
           <p>{q ? `Nothing matches “${q}”.` : empty}</p>
           {q && (
-            <button className="ghost" onClick={() => setQ('')}>
+            <button className={cx(btnGhost, 'mt-3.5')} onClick={() => setQ('')}>
               Clear the filter
             </button>
           )}
@@ -242,8 +285,7 @@ export default function Admin() {
   /** An in-page jump. A button, not an <a> without an href — that takes no keyboard focus. */
   const link = (label: string, onClick: () => void, danger = false) => (
     <button
-      className="linkish"
-      style={danger ? { color: 'var(--bad)' } : undefined}
+      className={cx(linkish, danger && 'text-bad')}
       disabled={busy}
       onClick={onClick}
     >
@@ -252,7 +294,7 @@ export default function Admin() {
   );
   /** One row inside an Actions menu. */
   const item = (label: string, onClick: () => void, danger = false) => (
-    <button key={label} className={`menu-item${danger ? ' danger' : ''}`} disabled={busy} onClick={onClick}>
+    <button key={label} className={menuItem(danger)} disabled={busy} onClick={onClick}>
       {label}
     </button>
   );
@@ -282,20 +324,21 @@ export default function Admin() {
       actions={
         <>
           {!o.ledger_balanced && d.overview && (
-            <span className="pill suspended">ledger off by {num(o.ledger_sum)}</span>
+            <span className={pillBad}>ledger off by {num(o.ledger_sum)}</span>
           )}
-          <button className="ghost" onClick={() => load()}>
+          <button className={btnGhost} onClick={() => load()}>
             Refresh
           </button>
         </>
       }
     >
       {newKey && (
-        <div className="card">
+        <div className={cx(card, 'mt-3')}>
           <b>New API key — shown once. Copy it now.</b>
-          <code className="key">{newKey}</code>
-          <div className="row">
+          <code className={codeKey}>{newKey}</code>
+          <div className="mt-3.5 flex flex-wrap items-center gap-3">
             <button
+              className={btn}
               onClick={() => {
                 navigator.clipboard.writeText(newKey);
                 toast.success('Copied');
@@ -303,7 +346,7 @@ export default function Admin() {
             >
               Copy
             </button>
-            <button className="ghost" onClick={() => setNewKey('')}>
+            <button className={btnGhost} onClick={() => setNewKey('')}>
               Dismiss
             </button>
           </div>
@@ -312,68 +355,74 @@ export default function Admin() {
 
       {tab === 'Overview' &&
         (loading ? (
-          <div className="card" style={{ display: 'grid', gap: 12 }}>
+          <div className={cx(card, 'mt-3 grid gap-3')}>
             {Array.from({ length: 5 }, (_, i) => (
-              <div key={i} className="skeleton" style={{ width: `${100 - i * 9}%` }} />
+              <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
             ))}
           </div>
         ) : (
           <>
             {/* The one thing a platform operator has to know before anything else: does the
                 money add up. It leads the page rather than sitting in a footnote row. */}
-            <div className={`health ${o.ledger_balanced ? 'good' : 'bad'}`}>
-              <div className="health-mark" aria-hidden="true">
+            <div className={health(o.ledger_balanced)}>
+              <div className={healthMark(o.ledger_balanced)} aria-hidden="true">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   {o.ledger_balanced ? <path d="m5 10.5 3.2 3L15 6.5" /> : <path d="M10 5.5v5.5M10 14v.1" />}
                 </svg>
               </div>
               <div>
-                <b>{o.ledger_balanced ? 'Ledger balanced' : `Ledger off by ${num(o.ledger_sum)}`}</b>
-                <p className="muted">
+                <b className="font-[650] tracking-[-0.015em]">
+                  {o.ledger_balanced ? 'Ledger balanced' : `Ledger off by ${num(o.ledger_sum)}`}
+                </b>
+                <p className={cx(muted, 'mt-0.75 max-w-[62ch]')}>
                   {o.ledger_balanced
                     ? 'Every entry sums to zero — no coins have been created or lost.'
                     : 'Entries do not sum to zero. Coins have been created or destroyed outside the ledger — investigate before any payout.'}
                 </p>
               </div>
-              {!o.ledger_balanced && link('Open the ledger', () => setTab('Ledger'))}
+              {!o.ledger_balanced && (
+                <span className="ml-auto self-center whitespace-nowrap">
+                  {link('Open the ledger', () => setTab('Ledger'))}
+                </span>
+              )}
             </div>
 
-            <h2>Live now</h2>
-            <div className="kpis">
+            <h2 className={sectionHead}>Live now</h2>
+            <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-3">
               {[
                 ['Scans, last 24h', o.scans_24h, 'Scans'],
                 ['Active campaigns', o.active_campaigns, 'Campaigns'],
                 ['Scan → signup', `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`, 'Scans'],
               ].map(([k, v, go]) => (
-                <button className="kpi" key={k as string} onClick={() => setTab(go as Tab)}>
-                  <b>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
-                  <span className="muted">{k as string}</span>
+                <button className={kpi} key={k as string} onClick={() => setTab(go as Tab)}>
+                  <b className={kpiFigure}>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
+                  <span className={stamp}>{k as string}</span>
                 </button>
               ))}
             </div>
 
-            <h2>Needs attention</h2>
-            <div className="card queue">
+            <h2 className={sectionHead}>Needs attention</h2>
+            <div className={cx(card, 'mt-3 p-2')}>
               {[
                 ['Partnerships waiting on a publisher', o.pending_partnerships, 'Partnerships'],
                 ['Suspended organizations', o.suspended_orgs, 'Organizations'],
                 ['Voided QR codes', o.voided_codes, 'QR codes'],
               ].map(([k, v, go]) => (
-                <button className="queue-row" key={k as string} onClick={() => setTab(go as Tab)}>
-                  <span className={`queue-count${v ? ' hot' : ''}`}>{num(v as number)}</span>
+                <button className={queueRow} key={k as string} onClick={() => setTab(go as Tab)}>
+                  <span className={queueCount(Boolean(v))}>{num(v as number)}</span>
                   <span>{k as string}</span>
-                  <span className="queue-go" aria-hidden="true">
+                  <span className="ml-auto text-mut" aria-hidden="true">
                     →
                   </span>
                 </button>
               ))}
               {!o.pending_partnerships && !o.suspended_orgs && !o.voided_codes && (
-                <p className="muted">Nothing is waiting on you.</p>
+                <p className={cx(muted, 'px-3 py-2.5')}>Nothing is waiting on you.</p>
               )}
             </div>
 
-            <h2>Coins</h2>
-            <div className="card row statrow">
+            <h2 className={sectionHead}>Coins</h2>
+            <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
               {[
                 ['funded', o.total_funded],
                 ['granted', o.coins_granted],
@@ -381,15 +430,18 @@ export default function Admin() {
                 ['identified', o.identified_redemptions],
                 ['guest', o.guest_redemptions],
               ].map(([k, v]) => (
-                <div className="stat" key={k as string}>
-                  <b>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
-                  <span className="muted">{k as string}</span>
+                <div
+                  className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt"
+                  key={k as string}
+                >
+                  <b className={figure}>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
+                  <span className={cx(stamp, 'mt-0.5 block')}>{k as string}</span>
                 </div>
               ))}
             </div>
 
-            <h2>Platform</h2>
-            <div className="card row statrow">
+            <h2 className={sectionHead}>Platform</h2>
+            <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
               {[
                 ['promoters', o.promoters],
                 ['publishers', o.publishers],
@@ -399,9 +451,12 @@ export default function Admin() {
                 ['scans', o.scans],
                 ['redemptions', o.redemptions],
               ].map(([k, v]) => (
-                <div className="stat" key={k as string}>
-                  <b>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
-                  <span className="muted">{k as string}</span>
+                <div
+                  className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt"
+                  key={k as string}
+                >
+                  <b className={figure}>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
+                  <span className={cx(stamp, 'mt-0.5 block')}>{k as string}</span>
                 </div>
               ))}
             </div>
@@ -417,8 +472,8 @@ export default function Admin() {
               { h: 'Name', get: (x) => x.name },
               { h: 'Type', get: (x) => pill(x.type) },
               { h: 'Email', get: (x) => x.email },
-              { h: 'Landing URL', get: (x) => (x.landing_url ? <a href={x.landing_url} target="_blank" rel="noreferrer">{x.landing_url}</a> : '—') },
-              { h: 'API key', get: (x) => (x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="err">missing</span>) },
+              { h: 'Landing URL', get: (x) => (x.landing_url ? <a className={linkClass} href={x.landing_url} target="_blank" rel="noreferrer">{x.landing_url}</a> : '—') },
+              { h: 'API key', get: (x) => (x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="text-bad">missing</span>) },
               { h: 'Campaigns', num: true, get: (x) => x.campaigns },
               { h: 'Coins', num: true, get: (x) => x.coin_balance ?? '—' },
               { h: 'Joined', get: (x) => when(x.created_at), sort: (x) => x.created_at },
@@ -498,9 +553,9 @@ export default function Admin() {
                 sort: (x: any) => x[f],
                 get: (x: any) => (
                   <input
+                    className={cx(field, 'w-[90px] px-2 py-1.5 text-[13px]')}
                     type="number"
                     defaultValue={x[f]}
-                    style={{ width: 90 }}
                     onBlur={(e) =>
                       +e.target.value !== x[f] &&
                       patch(`/v1/admin/partnerships/${x.id}`, { [f]: +e.target.value }, 'Rate updated')
@@ -549,7 +604,7 @@ export default function Admin() {
                 num: true,
                 sort: (x) => x.budget,
                 get: (x) => (
-                  <span className={x.budget < x.coin_rate ? 'err' : ''}>{num(x.budget)}</span>
+                  <span className={x.budget < x.coin_rate ? 'text-bad' : ''}>{num(x.budget)}</span>
                 ),
               },
               {
@@ -557,8 +612,8 @@ export default function Admin() {
                 sort: (x) => x.status,
                 get: (x) => (
                   <select
+                    className={cx(selectField, 'w-[110px] px-2 py-1.5 text-[13px]')}
                     value={x.status}
-                    style={{ width: 110 }}
                     onChange={(e) => patch(`/v1/admin/campaigns/${x.id}`, { status: e.target.value }, 'Campaign updated')}
                   >
                     {['active', 'paused', 'ended'].map((s) => (
@@ -618,10 +673,10 @@ export default function Admin() {
 
       {tab === 'Scans' && (
         <>
-          <p className="muted">
+          <p className={cx(muted, 'mt-3')}>
             The user column fills in once the scan converts and the publisher reports its user reference.
           </p>
-          <select value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)} style={{ maxWidth: 340 }}>
+          <select className={cx(selectField, 'max-w-[340px]')} value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)}>
             <option value="">All campaigns</option>
             {campaigns.map((c) => (
               <option key={c.id} value={c.id}>
@@ -651,7 +706,7 @@ export default function Admin() {
               {
                 h: 'Converted',
                 sort: (x) => x.redeemed,
-                get: (x) => <span className={x.redeemed ? 'ok' : 'muted'}>{x.redeemed ? `+${num(x.coins)} coins` : '—'}</span>,
+                get: (x) => <span className={x.redeemed ? 'text-ok' : 'text-mut'}>{x.redeemed ? `+${num(x.coins)} coins` : '—'}</span>,
               },
             ]}
           />
@@ -704,7 +759,7 @@ export default function Admin() {
                 h: '',
                 get: (x) => (
                   <Actions>
-                    <a className="menu-item" href={x.scan_url} target="_blank" rel="noreferrer">
+                    <a className={menuItem()} href={x.scan_url} target="_blank" rel="noreferrer">
                       Open the scan URL
                     </a>
                     {item('Copy scan URL', () => {
@@ -746,7 +801,7 @@ export default function Admin() {
 
       {tab === 'Ledger' && (
         <>
-          <h2>Account balances</h2>
+          <h2 className={sectionHead}>Account balances</h2>
           <Table
             loading={loading}
             rows={d.ledger?.balances ?? []}
@@ -757,7 +812,7 @@ export default function Admin() {
               { h: '', get: (x) => link('Entries', () => setLedgerAccount(x.account)) },
             ]}
           />
-          <h2>
+          <h2 className={sectionHead}>
             Entries {ledgerAccount ? <>for <code>{ledgerAccount}</code></> : '(last 300, all accounts)'}
           </h2>
           {ledgerAccount && link('Clear account filter', () => setLedgerAccount(''))}
@@ -768,7 +823,7 @@ export default function Admin() {
             cols={[
               { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
               { h: 'Account', get: (x) => <code>{x.account}</code> },
-              { h: 'Amount', num: true, sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'err' : 'ok'}>{x.amount}</span> },
+              { h: 'Amount', num: true, sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'text-bad' : 'text-ok'}>{x.amount}</span> },
               { h: 'Ref', get: (x) => <code>{x.ref}</code> },
             ]}
           />
@@ -789,7 +844,7 @@ export default function Admin() {
               {
                 h: 'Detail',
                 get: (x) => (
-                  <span className="muted" style={{ whiteSpace: 'pre-wrap' }}>
+                  <span className={cx(muted, 'whitespace-pre-wrap')}>
                     {JSON.stringify(x.detail)}
                   </span>
                 ),

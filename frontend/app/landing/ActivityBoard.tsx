@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import * as lp from '@/lib/lp';
 
 type Tier = 'guest' | 'verified';
 type Event = {
@@ -44,31 +45,31 @@ export default function ActivityBoard() {
   }, []);
 
   return (
-    <div className="lp-board lp-stocked">
-      <div className="lp-board-head">
-        <span className="lp-board-title">Redemptions posting</span>
-        <span className="lp-tag">Example data</span>
+    <div className={`${lp.board} ${lp.stocked}`}>
+      <div className={lp.boardHead}>
+        <span className={lp.boardTitle}>Redemptions posting</span>
+        <span className={lp.tag}>Example data</span>
       </div>
-      <p className="lp-sr">
+      <p className={lp.srOnly}>
         Each row is one scan that resolved: the campaign it came from, the publisher that
         verified the user, and the coins debited from the promoter&rsquo;s budget. Guest rows are
         partial rewards awaiting verification.
       </p>
-      <ul className="lp-board-rows" aria-hidden="true">
+      <ul className={lp.boardRows} aria-hidden="true">
         {events.map((e) => (
-          <li className="lp-board-row" key={e.id}>
-            <span className={`lp-tier lp-tier-${e.tier}`}>{e.tier}</span>
-            <span className="lp-board-meta">
+          <li className={lp.boardRow} key={e.id}>
+            <span className={lp.tier(e.tier)}>{e.tier}</span>
+            <span className={lp.boardMeta}>
               <b>{e.campaign}</b>
               <span>
-                {e.promoter} <span className="lp-arrow">→</span> {e.publisher} · {e.ref}
+                {e.promoter} <span className="text-accent">→</span> {e.publisher} · {e.ref}
               </span>
             </span>
-            <span className="lp-board-coins">+{e.coins}</span>
+            <span className={lp.boardCoins}>+{e.coins}</span>
           </li>
         ))}
       </ul>
-      <div className="lp-board-foot">
+      <div className={lp.boardFoot}>
         <span>Debited from campaign budgets · this view</span>
         <b>{events.reduce((n, e) => n + e.coins, 0)} coins</b>
       </div>

@@ -75,8 +75,6 @@ export const field =
 /** native arrow is unstyleable, so the chevron is printed into the field */
 export const select = `${field} cursor-pointer appearance-none pr-[34px] bg-no-repeat bg-[position:calc(100%-12px)_50%] bg-[image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2012%2012'%20fill='none'%20stroke='%236f6757'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%204.5%206%207.5%209%204.5'/%3E%3C/svg%3E")]`;
 
-export const fileField = `${field} cursor-pointer p-[9px] text-[13.5px] file:mr-2.5 file:cursor-pointer file:rounded-sm file:border file:border-line file:bg-card-alt file:px-3 file:py-1.5 file:text-[12.5px] file:text-ink file:font-[inherit]`;
-
 export const colorField =
   'h-[42px] w-full cursor-pointer rounded-md border border-line bg-card p-[3px] ' +
   'transition-[border-color,box-shadow] duration-150 ease-press hover:border-mut ' +
@@ -176,7 +174,6 @@ export const hint = 'mt-2 text-[12.5px] leading-[1.5] text-mut';
 const alertBase = 'flex gap-2 rounded-md border px-[13px] py-2.5 text-[13.5px] animate-rise-fast';
 
 export const alertErr = `${alertBase} border-bad-line bg-bad-soft text-bad`;
-export const alertOk = `${alertBase} border-ok-line bg-ok-soft text-ok`;
 export const alertWarn = `${alertBase} border-warn-line bg-warn-soft text-warn`;
 
 /** status chips are printed rectangles, never pills */
@@ -209,6 +206,62 @@ export const figure =
 export const skeleton =
   'h-3 rounded-full animate-shimmer ' +
   'bg-[linear-gradient(90deg,var(--color-line-soft)_25%,var(--color-line)_50%,var(--color-line-soft)_75%)] bg-[length:300%_100%]';
+
+/* ---- admin console ---- */
+
+/** table chrome: the filter box and the row count above the sheet */
+export const tablebar = 'mt-3 flex flex-wrap items-center justify-between gap-3';
+
+export const search =
+  'flex flex-[0_1_340px] items-center gap-2 rounded-md border border-line bg-card px-2.5 ' +
+  'transition-[border-color,box-shadow] duration-150 ease-press ' +
+  'focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/20 ' +
+  '[&>svg]:size-[15px] [&>svg]:shrink-0 [&>svg]:text-mut';
+
+export const searchInput =
+  'w-full border-0 bg-transparent py-2.25 text-[14.5px] text-ink outline-none placeholder:text-mut/75';
+
+/* row action menu — one control per row instead of a run of links */
+export const menu = 'group relative inline-block';
+
+export const menuSummary =
+  'grid h-7 w-[30px] cursor-pointer list-none place-items-center rounded-sm border border-transparent text-mut ' +
+  'transition-[background-color,border-color,color] duration-150 ease-press ' +
+  'hover:border-line hover:bg-card-sunk hover:text-ink ' +
+  'group-open:border-line group-open:bg-card-sunk group-open:text-ink ' +
+  '[&::-webkit-details-marker]:hidden [&_svg]:size-4';
+
+/** full-viewport catcher so clicking anywhere else dismisses the menu */
+export const menuScrim = 'fixed inset-0 z-40';
+
+export const menuPop =
+  'absolute top-[calc(100%+5px)] right-0 z-41 min-w-49 rounded-md border border-line bg-card p-1.25 shadow-contact animate-rise-fast';
+
+export function menuItem(danger?: boolean) {
+  return cx(
+    btnBase,
+    'block w-full rounded-sm px-2.75 py-2 text-left text-[13.5px] font-medium',
+    danger
+      ? 'border-transparent bg-transparent text-bad enabled:hover:bg-bad-soft'
+      : inkQuiet,
+  );
+}
+
+/* The ledger check reads as a stamp on the page, not a line in a stats row. The struck
+   mark and, when it fails, the whole card's wash carry the state. */
+export function health(ok: boolean) {
+  return cx(
+    'mt-4 flex items-start gap-3.5 rounded-lg border p-4 px-4.5 shadow-contact-sm',
+    ok ? 'border-line bg-card' : 'border-bad-line bg-bad-soft',
+  );
+}
+
+export function healthMark(ok: boolean) {
+  return cx(
+    'grid size-[30px] shrink-0 place-items-center rounded-full [&_svg]:size-5',
+    ok ? 'bg-ok-soft text-ok' : 'bg-white text-bad',
+  );
+}
 
 /* ---- QR design studio ---- */
 
