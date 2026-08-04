@@ -36,20 +36,24 @@ export class PrismaExceptionFilter extends BaseExceptionFilter {
 function translate(e: any): HttpException | null {
   switch (e?.code) {
     // Value rejected before/at the driver — an unparseable uuid is the common case.
+    // P2023 ("Inconsistent column data") is the one a malformed uuid on a normal query
+    // actually raises, so it is the code this whole file exists for.
+    case 'P2023':
     case 'P2007':
     case 'P2006':
       return new BadRequestException('malformed identifier or field value');
-    // Raw query failed. Only `22P02` (invalid_text_representation, i.e. a bad `::uuid`
-    // cast) is a client mistake; any other raw failure is ours and stays a 500.
-    case 'P2010':
-      return /22P02/.test(String(e.message)) ? new BadRequestException('malformed identifier') : null;
     case 'P2002':
       return new ConflictException('already exists');
     case 'P2003':
       return new BadRequestException('referenced record does not exist');
     case 'P2025':
       return new NotFoundException();
+    // Raw query failed (P2010), or the pg driver adapter surfaced its own error with no
+    // Prisma code at all. Either way only `22P02` (invalid_text_representation — a bad
+    // `::uuid` cast) is a client mistake; any other failure is ours and stays a 500.
     default:
-      return null;
+      return /\b22P02\b/.test(String(e?.message ?? ''))
+        ? new BadRequestException('malformed identifier')
+        : null;
   }
 }

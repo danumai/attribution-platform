@@ -4,7 +4,9 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { API, api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
-import { confirmDialog, toast } from '@/lib/ui';
+import { Analytics, Audience } from '@/lib/audience';
+import type { CampaignStats, QrCode } from '@/lib/types';
+import { LoadError, confirmDialog, toast } from '@/lib/ui';
 import { num } from '@/lib/fmt';
 import {
   DEFAULT_STYLE,
@@ -19,6 +21,7 @@ import {
   isTransparent,
   readLogo,
   renderPreview,
+  samePlate,
   svgToPng,
 } from '@/lib/qr';
 import {
@@ -231,12 +234,6 @@ function PresetProof({ style, id }: { style: Style; id: string }) {
   );
 }
 
-/** The style keys a preset owns — used to tell which preset, if any, is currently on the plate. */
-const PRESET_KEYS = ['dark', 'light', 'margin', 'shape', 'eyeFrame', 'eyeBall', 'eyeColor', 'eyeBallColor', 'gradient', 'frame', 'frameText', 'frameColor', 'frameTextColor'] as const;
-
-const samePlate = (a: Style, b: Style) =>
-  PRESET_KEYS.every((k) => JSON.stringify(a[k] ?? null) === JSON.stringify(b[k] ?? null));
-
 function Choice({
   options,
   value,
@@ -390,10 +387,13 @@ const BACKDROPS = [
 export default function CampaignPage() {
   const { id } = useParams<{ id: string }>();
   const r = useRouter();
-  const [me, setMe] = useState<any>(null);
-  const [stats, setStats] = useState<any>(null);
-  const [qrs, setQrs] = useState<any[]>([]);
-  const [sel, setSel] = useState<any>(null);
+  const [me, setMe] = useState<ReturnType<typeof getOrg>>(null);
+  const [stats, setStats] = useState<CampaignStats | null>(null);
+  // Set when a load fails. Without it, `!stats` is indistinguishable from "still loading",
+  // so a network blip left the page shimmering forever with no way back.
+  const [loadErr, setLoadErr] = useState('');
+  const [qrs, setQrs] = useState<QrCode[]>([]);
+  const [sel, setSel] = useState<QrCode | null>(null);
   const [style, setStyle] = useState<Style>(DEFAULT_STYLE);
   const [saved, setSaved] = useState<Style>(DEFAULT_STYLE);
   const [panel, setPanel] = useState<Panel>('Style');
@@ -404,17 +404,20 @@ export default function CampaignPage() {
   const [backdrop, setBackdrop] = useState(BACKDROPS[0]);
   const [exportPx, setExportPx] = useState(1024);
   const [newCode, setNewCode] = useState({ expires_in_days: 30, max_uses: '' });
+  const [audience, setAudience] = useState<Analytics | null>(null);
+  const [days, setDays] = useState(30);
 
   const load = useCallback(
     async (keepSelId?: string) => {
       try {
         const [s, q] = await Promise.all([
-          api(`/v1/campaigns/${id}/stats`),
-          api(`/v1/campaigns/${id}/qr-codes`),
+          api<CampaignStats>(`/v1/campaigns/${id}/stats`),
+          api<QrCode[]>(`/v1/campaigns/${id}/qr-codes`),
         ]);
         setStats(s);
+        setLoadErr('');
         setQrs(q);
-        const pick = q.find((x: any) => x.id === keepSelId) ?? q[0] ?? null;
+        const pick = q.find((x) => x.id === keepSelId) ?? q[0] ?? null;
         setSel(pick);
         if (pick) {
           const st = { ...DEFAULT_STYLE, ...(pick.style ?? {}) };
@@ -422,6 +425,7 @@ export default function CampaignPage() {
           setSaved(st);
         }
       } catch (e: any) {
+        setLoadErr(e.message);
         toast.error(e.message);
       }
     },
@@ -433,6 +437,15 @@ export default function CampaignPage() {
     setMe(getOrg());
     load();
   }, [r, load]);
+
+  // Its own effect, keyed on the window: changing the reporting window must not re-fetch the
+  // QR codes and reset the style editor out from under an unsaved edit.
+  useEffect(() => {
+    if (!token()) return;
+    api<Analytics>(`/v1/campaigns/${id}/analytics?days=${days}`)
+      .then(setAudience)
+      .catch((e: any) => toast.error(e.message));
+  }, [id, days]);
 
   // Debounced so dragging a slider does not fire a render per pixel.
   useEffect(() => {
@@ -526,16 +539,21 @@ export default function CampaignPage() {
   );
 
   // The shell arrives with the rail intact while the campaign's numbers are in flight —
-  // a blank page is indistinguishable from a broken one.
+  // a blank page is indistinguishable from a broken one. A *failed* load is a third state:
+  // it must say so and offer a way back, not shimmer forever.
   if (!stats)
     return (
       <Shell org={me} active="campaigns" items={items} title="Campaign" actions={backToCampaigns}>
         <h2 className={sectionHead}>Performance</h2>
-        <div className={cx(card, 'mt-3 grid gap-3')} aria-busy="true" aria-label="Loading">
-          {Array.from({ length: 5 }, (_, i) => (
-            <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
-          ))}
-        </div>
+        {loadErr ? (
+          <LoadError message={loadErr} onRetry={() => load()} />
+        ) : (
+          <div className={cx(card, 'mt-3 grid gap-3')} aria-busy="true" aria-label="Loading">
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
+            ))}
+          </div>
+        )}
       </Shell>
     );
 
@@ -565,6 +583,11 @@ export default function CampaignPage() {
           </div>
         ))}
       </div>
+
+      {/* The numbers above say how much this campaign did. This says where to spend the next
+          print run — which is the decision the promoter actually came here to make. */}
+      <h2 className={sectionHead}>Audience</h2>
+      <Audience data={audience} days={days} onDays={setDays} scoped />
 
       {!isPromoter && (
         <p className={cx(muted, 'mt-4.5')}>
@@ -628,7 +651,7 @@ export default function CampaignPage() {
                   disabled={busy}
                   onClick={() =>
                     act(async () => {
-                      const q = await api(`/v1/campaigns/${id}/qr-codes`, {
+                      const q = await api<QrCode>(`/v1/campaigns/${id}/qr-codes`, {
                         method: 'POST',
                         body: JSON.stringify({
                           style,

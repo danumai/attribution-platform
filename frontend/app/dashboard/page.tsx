@@ -6,7 +6,9 @@ import { api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
 import { confirmDialog, promptDialog, toast } from '@/lib/ui';
 import { ago, num } from '@/lib/fmt';
+import type { Campaign, Me, Partnership, PublisherOption, Redemption } from '@/lib/types';
 import {
+  alertWarn,
   btn,
   btnGhost,
   btnTiny,
@@ -50,7 +52,7 @@ const Loading = ({ lines = 5 }: { lines?: number }) => (
 );
 
 /** Newest first, and never more rows than the caller asked for. */
-function Redemptions({ rows }: { rows: any[] }) {
+function Redemptions({ rows }: { rows: Redemption[] }) {
   return (
     <div className={tableWrap}>
       <table className={table}>
@@ -77,10 +79,6 @@ function Redemptions({ rows }: { rows: any[] }) {
   );
 }
 
-/** Deep links from elsewhere in the console land on a section: /dashboard?s=campaigns */
-const initialSection = () =>
-  (typeof window !== 'undefined' && new URLSearchParams(location.search).get('s')) || 'overview';
-
 const HEAD: Record<string, { title: string; lede: string }> = {
   overview: { title: 'Overview', lede: 'Where your campaigns stand right now.' },
   partnerships: {
@@ -94,12 +92,17 @@ const HEAD: Record<string, { title: string; lede: string }> = {
 
 export default function Dashboard() {
   const r = useRouter();
-  const [me, setMe] = useState<any>(null);
-  const [sec, setSec] = useState(initialSection);
-  const [publishers, setPublishers] = useState<any[]>([]);
-  const [partnerships, setPartnerships] = useState<any[]>([]);
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [redemptions, setRedemptions] = useState<any[]>([]);
+  const [me, setMe] = useState<ReturnType<typeof getOrg>>(null);
+  const [sec, setSec] = useState('overview');
+  const [publishers, setPublishers] = useState<PublisherOption[]>([]);
+  const [partnerships, setPartnerships] = useState<Partnership[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [redemptions, setRedemptions] = useState<Redemption[]>([]);
+  // /v1/orgs/me — carries the publisher's earned balance and its configured destinations
+  const [profile, setProfile] = useState<Me | null>(null);
+  // Read in an effect, never in render: this component is prerendered on the server, where
+  // there is no localStorage, so reading it during render is a guaranteed hydration mismatch.
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [newPartner, setNewPartner] = useState({
@@ -122,16 +125,17 @@ export default function Dashboard() {
   async function load() {
     try {
       const [p, ps, cs, rs, self] = await Promise.all([
-        api('/v1/publishers'),
-        api('/v1/partnerships'),
-        api('/v1/campaigns'),
-        api('/v1/redemptions'),
-        api('/v1/orgs/me'),
+        api<PublisherOption[]>('/v1/publishers'),
+        api<Partnership[]>('/v1/partnerships'),
+        api<Campaign[]>('/v1/campaigns'),
+        api<Redemption[]>('/v1/redemptions'),
+        api<Me>('/v1/orgs/me'),
       ]);
       setPublishers(p);
       setPartnerships(ps);
       setCampaigns(cs);
       setRedemptions(rs);
+      setProfile(self);
       setDest({
         landing_url: self.landing_url ?? '',
         android_package: self.android_package ?? '',
@@ -150,6 +154,13 @@ export default function Dashboard() {
     const o = getOrg();
     if (o?.type === 'admin') return void r.replace('/admin');
     setMe(o);
+    setApiKey(localStorage.getItem('api_key'));
+    // Deep links from elsewhere in the console land on a section: /dashboard?s=campaigns.
+    // Also read here rather than in a `useState` initialiser — the server prerender has no
+    // `location`, so an initialiser would render "overview" on the server and something else
+    // on the client, which is exactly the case a deep link hits.
+    const s = new URLSearchParams(location.search).get('s');
+    if (s && s in HEAD) setSec(s);
     // destinations aren't in the login payload; load() fetches them from /v1/orgs/me
     load();
   }, [r]);
@@ -189,8 +200,17 @@ export default function Dashboard() {
     ['Active campaigns', num(campaigns.filter((c) => c.status === 'active').length), 'campaigns'],
     ['Active partnerships', num(activePartnerships.length), 'partnerships'],
     ['Redemptions', capped ? `${num(100)}+` : num(redemptions.length), 'redemptions'],
-    ['Coins granted', `${capped ? '≥ ' : ''}${num(coinsGranted)}`, 'redemptions'],
+    // A promoter's own figure is a floor derived from the newest 100 rows; a publisher's is
+    // its whole earned balance off the ledger, so it is exact and needs no "≥".
+    isPromoter
+      ? ['Coins granted', `${capped ? '≥ ' : ''}${num(coinsGranted)}`, 'redemptions']
+      : ['Coins earned', num(profile?.earnings ?? 0), 'redemptions'],
   ];
+
+  // A publisher with no destination registered redirects nobody: every scan of every campaign
+  // it is partnered on dies at `no_destination`, silently, for as long as this is unset.
+  const noDestination =
+    !isPromoter && loaded && profile && !profile.landing_url && !profile.android_package && !profile.ios_app_id;
 
   return (
     <Shell
@@ -211,6 +231,17 @@ export default function Dashboard() {
         ) : null
       }
     >
+      {noDestination && sec !== 'settings' && (
+        <div className={alertWarn}>
+          No destination registered yet — every scan sent to you currently fails. Add a Play
+          package, an App Store id, or a web fallback in{' '}
+          <button className={linkish} onClick={() => setSec('settings')}>
+            Settings
+          </button>
+          .
+        </div>
+      )}
+
       {sec === 'overview' && (
         <>
           <h2 className={sectionHead}>Live now</h2>
@@ -284,9 +315,19 @@ export default function Dashboard() {
                   {publishers.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
+                      {p.bonus_label ? ` — ${p.bonus_label}` : ''}
+                      {p.ready ? '' : ' (no app registered yet)'}
                     </option>
                   ))}
                 </select>
+                {/* Worth knowing before a print run, not after: this publisher's scans go nowhere
+                    until it registers a destination. */}
+                {publishers.find((p) => p.id === newPartner.publisher_org_id && !p.ready) && (
+                  <p className={hint}>
+                    This publisher has registered no app or web fallback yet, so scans cannot be
+                    delivered until it does. Partnering is still fine — printing codes is not.
+                  </p>
+                )}
                 <label className={label}>Coins granted per verified signup (full tier)</label>
                 <input
                   className={field}
@@ -309,6 +350,7 @@ export default function Dashboard() {
                   onChange={(e) => setNewPartner({ ...newPartner, grace_days: +e.target.value })}
                 />
                 <button
+                  className={btn}
                   disabled={busy || !newPartner.publisher_org_id}
                   onClick={() =>
                     act(
@@ -516,6 +558,7 @@ export default function Dashboard() {
                   placeholder="Inflight entertainment promo"
                 />
                 <button
+                  className={btn}
                   disabled={busy || !newCampaign.partnership_id || !newCampaign.name}
                   onClick={() =>
                     act(async () => {
@@ -600,13 +643,15 @@ export default function Dashboard() {
               your own terms — this platform never issues or fulfils it.
             </p>
             <button
+              className={btn}
+              disabled={busy}
               onClick={() =>
                 act(async () => {
                   await api('/v1/orgs/me', { method: 'PATCH', body: JSON.stringify(dest) });
                 }, 'Destinations saved.')
               }
             >
-              Save destinations
+              {busy ? 'Saving…' : 'Save destinations'}
             </button>
           </div>
 
@@ -617,8 +662,16 @@ export default function Dashboard() {
               user finishes signing up, passing the Play install referrer (Android) or the
               first-open IP (iOS).
             </p>
-            {typeof window !== 'undefined' && localStorage.getItem('api_key') && (
-              <code className={codeKey}>{localStorage.getItem('api_key')}</code>
+            {/* The key is only ever held in this browser: the server stores a hash, so it
+                cannot be shown again on another device. Say that, rather than rendering
+                nothing and looking broken. */}
+            {apiKey ? (
+              <code className={codeKey}>{apiKey}</code>
+            ) : (
+              <p className={hint}>
+                Your key was shown once when it was issued and is not stored here. If you no
+                longer have it, rotate to issue a new one.
+              </p>
             )}
             <button
               className={btnGhost}
@@ -631,8 +684,11 @@ export default function Dashboard() {
                 });
                 if (go)
                   act(async () => {
-                    const res = await api('/v1/api-keys/rotate', { method: 'POST' });
+                    const res = await api<{ api_key: string }>('/v1/api-keys/rotate', {
+                      method: 'POST',
+                    });
                     localStorage.setItem('api_key', res.api_key);
+                    setApiKey(res.api_key);
                   }, 'New API key issued — it is shown above.');
               }}
             >

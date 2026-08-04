@@ -6,6 +6,16 @@ API=${API:-http://localhost:4000}
 S=$RANDOM
 
 j() { node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d)$1??'')}catch(e){console.log('')}})"; }
+# Query the database the API is actually using. Hardcoding the local container made every
+# ledger assertion pass vacuously against an empty database whenever DATABASE_URL pointed
+# somewhere else. psql runs inside the container either way, so none is needed on the host.
+# One line out of .env, not the whole file: its values are unquoted, which Node's env-file
+# parser accepts and `source` does not.
+: "${DATABASE_URL:=$([ -f .env ] && sed -n 's/^DATABASE_URL=//p' .env | head -1)}"
+q() {
+  if [ -n "${DATABASE_URL:-}" ]; then docker exec qrreward-db psql "$DATABASE_URL" -tAc "$1"
+  else docker exec qrreward-db psql -U qrreward -tAc "$1"; fi
+}
 pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; exit 1; }
 
@@ -116,6 +126,35 @@ FORGE=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_
   -d "{\"install_referrer\":\"qrm_claim=AAAAAAAAAAAAAAAAAAAAAA\",\"publisher_user_ref\":\"forge$S@x.com\"}" | j .attributed)
 [ "$FORGE" = "false" ] && pass "a guessed claim id attributes nothing" || fail "forged claim: $FORGE"
 
+# The one property nothing else here tests. Every other assertion is sequential, but
+# `FOR UPDATE OF s SKIP LOCKED`, the balance lock and the `consumed = false` re-check exist
+# *only* for the simultaneous case — remove any one of the three and the whole suite still
+# passes. Different user refs on purpose, so the UNIQUE constraint cannot be what saves it.
+LOC4=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+REFERRER4=$(printf '%s' "$LOC4" | sed 's/.*&referrer=//' | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(decodeURIComponent(d.trim())))")
+RACE_BEFORE=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+RACE_DIR=$(mktemp -d)
+for i in $(seq 1 20); do
+  curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+    -d "{\"install_referrer\":\"$REFERRER4\",\"publisher_user_ref\":\"race$S-$i@x.com\"}" > "$RACE_DIR/$i" &
+done
+wait
+WON=$(grep -l '"attributed":true' "$RACE_DIR"/* 2>/dev/null | wc -l | tr -d ' ')
+[ "$WON" = "1" ] && pass "20 simultaneous claims on one scan: exactly one is attributed" || fail "concurrent double-spend: $WON claims attributed, expected 1"
+RACE_AFTER=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+[ "$RACE_AFTER" = "$((RACE_BEFORE - 10))" ] && pass "budget charged exactly one guest-tier fee under contention" || fail "budget $RACE_BEFORE -> $RACE_AFTER, expected $((RACE_BEFORE - 10))"
+rm -rf "$RACE_DIR"
+
+# The exception filter's own stated purpose: a malformed uuid in the URL is a client mistake,
+# not a 500. Nothing covered it, so the code it actually raises was missing from the switch.
+BADUUID=$(curl -s -o /dev/null -w '%{http_code}' "$API/v1/qr-codes/not-a-uuid/image")
+[ "$BADUUID" = "400" ] && pass "malformed uuid in a URL is a 400, not a 500" || fail "bad uuid: $BADUUID"
+
+# A non-string password reached bcrypt as a number and threw inside the handler.
+TYPEPW=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
+  -d "{\"name\":\"x\",\"email\":\"typed$S@t.com\",\"password\":12345678,\"type\":\"promoter\"}")
+[ "$TYPEPW" = "400" ] && pass "non-string password rejected (400, not a 500)" || fail "typed password: $TYPEPW"
+
 BADKEY=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/attribution/claim -H "Authorization: Bearer pk_wrong" -H 'Content-Type: application/json' -d "{\"publisher_user_ref\":\"x@x.com\",\"ip\":\"127.0.0.1\"}")
 [ "$BADKEY" = "401" ] && pass "invalid API key rejected (401)" || fail "auth: $BADKEY"
 NOAUTH=$(curl -s -o /dev/null -w '%{http_code}' $API/v1/campaigns)
@@ -165,12 +204,22 @@ BADPKG=$(curl -s -o /dev/null -w '%{http_code}' -XPATCH $API/v1/orgs/me -H "Auth
   -d '{"android_package":"com.evil&id=other.app"}')
 [ "$BADPKG" = "400" ] && pass "malformed package name rejected (no store-URL injection)" || fail "package guard: $BADPKG"
 
+# ...and a promoter must be able to see that before committing a print run, not after.
+DIR=$(curl -s "$API/v1/publishers" -H "Authorization: Bearer $PRO_TOKEN")
+READY=$(echo "$DIR" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const o=JSON.parse(d);console.log(o.find(p=>p.name==='NoApp $S')?.ready, o.find(p=>p.name==='DramaBox $S')?.ready)})")
+[ "$READY" = "false true" ] && pass "publisher directory flags who can actually receive scans" || fail "ready flags: $READY"
+
 echo "10. Ledger integrity"
-SUM=$(docker exec qrreward-db psql -U qrreward -tAc "SELECT sum(amount) FROM ledger_entries")
+SUM=$(q "SELECT sum(amount) FROM ledger_entries")
 [ "$SUM" = "0" ] && pass "double-entry ledger balances to zero" || fail "ledger sum=$SUM"
-DRIFT=$(docker exec qrreward-db psql -U qrreward -tAc \
-  "SELECT count(*) FROM account_balances b JOIN (SELECT account, sum(amount) s FROM ledger_entries GROUP BY account) l USING(account) WHERE b.balance <> l.s")
+DRIFT=$(q "SELECT count(*) FROM account_balances b JOIN (SELECT account, sum(amount) s FROM ledger_entries GROUP BY account) l USING(account) WHERE b.balance <> l.s")
 [ "$DRIFT" = "0" ] && pass "cached balances match ledger (no drift)" || fail "drift on $DRIFT accounts"
+# The publisher reads its own earned balance — the same number the admin portal sees.
+EARNED=$(curl -s "$API/v1/orgs/me" -H "Authorization: Bearer $PUB_TOKEN" | j .earnings)
+# sum(), not the bare column: a publisher with no entries yet has no row at all, and the
+# comparison has to see 0 there rather than an empty string.
+LEDGERED=$(q "SELECT coalesce(sum(balance),0) FROM account_balances WHERE account='publisher:$PUB_ID'")
+[ -n "$EARNED" ] && [ "$EARNED" = "$LEDGERED" ] && pass "publisher sees its own earnings ($EARNED coins)" || fail "earnings=$EARNED ledger=$LEDGERED pub=$PUB_ID"
 
 echo "11. Super admin portal"
 ADM_TOKEN=$(curl -s -XPOST $API/v1/auth/login -H 'Content-Type: application/json' \
@@ -186,7 +235,8 @@ OV=$(A $API/v1/admin/overview)
 [ "$(echo "$OV" | j .scans)" -ge 3 ] && pass "overview counts scans platform-wide" || fail "scan count: $OV"
 
 SCAN0=$(A "$API/v1/admin/scans?campaign_id=$CAMP_ID" | j '[0]')
-echo "$SCAN0" | grep -q "$CODE" && pass "scan log shows QR code, device and conversion" || fail "scans: $SCAN0"
+# `--` and -F: short codes are base64url, so one starting with `-` is otherwise read as flags
+echo "$SCAN0" | grep -qF -- "$CODE" && pass "scan log shows QR code, device and conversion" || fail "scans: $SCAN0"
 
 # admin sees every org, not just its own
 A $API/v1/admin/orgs | grep -q "pub$S@t.com" && pass "org directory lists all tenants" || fail "orgs listing"
@@ -214,6 +264,18 @@ REOPENED=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$ONCE
 echo "$REOPENED" | grep -q 'play.google.com' && pass "overridden code scans again" || fail "override not applied: $REOPENED"
 A $API/v1/admin/audit-log | grep -q 'permanent store signage' && pass "every override lands in the audit log" || fail "no audit entry"
 
+# Sending a partnership back to `pending` is the obvious lever for "suspend this relationship".
+# It was checked only when a campaign was created, so afterwards it changed nothing at all:
+# scans kept redirecting and claims kept paying out against a partnership under no agreement.
+SUSPEND=$(A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"status":"pending"}' | j .status)
+[ "$SUSPEND" = "pending" ] && pass "admin can send a partnership back to pending" || fail "suspend: $SUSPEND"
+HELD=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+echo "$HELD" | grep -q 'reason=partnership_inactive' && pass "an inactive partnership stops scans" || fail "suspended partnership still redirects: $HELD"
+HELDCLAIM=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"publisher_user_ref\":\"held$S@x.com\",\"ip\":\"::1\",\"platform\":\"ios\"}" | j .attributed)
+[ "$HELDCLAIM" = "false" ] && pass "...and stops claims paying out against it" || fail "suspended partnership still pays: $HELDCLAIM"
+A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"status":"active"}' >/dev/null
+
 echo "12. Kill switch & offboarding"
 KILL=$(A -XPOST $API/v1/admin/campaigns/$CAMP_ID/kill -H 'Content-Type: application/json' -d '{"reason":"abuse report"}')
 [ "$(echo "$KILL" | j .status)" = "ended" ] && pass "kill switch ends the campaign" || fail "kill: $KILL"
@@ -226,7 +288,7 @@ GONE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/attribution/claim -
 [ "$GONE" = "401" ] && pass "departed tenant's API key no longer earns fees (401)" || fail "revoked key still works: $GONE"
 
 echo "13. Ledger integrity after admin actions"
-SUM2=$(docker exec qrreward-db psql -U qrreward -tAc "SELECT sum(amount) FROM ledger_entries")
+SUM2=$(q "SELECT sum(amount) FROM ledger_entries")
 [ "$SUM2" = "0" ] && pass "ledger still balances after admin actions" || fail "ledger sum=$SUM2"
 
 echo "14. Input bounds & abuse ceilings"

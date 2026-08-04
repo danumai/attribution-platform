@@ -4,7 +4,9 @@
   "scripts": {
     "dev": "node --env-file-if-exists=../.env node_modules/next/dist/bin/next dev",
     "build": "node --env-file-if-exists=../.env node_modules/next/dist/bin/next build",
-    "start": "next start -p ${PORT:-3000}"
+    "start": "next start -p ${PORT:-3000}",
+    "lint": "next lint",
+    "test:unit": "tsx test/units.test.ts"
   },
   "dependencies": {
     "next": "^14.2.21",
@@ -15,7 +17,10 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.5",
     "typescript": "^5.7.2"
   }
 }

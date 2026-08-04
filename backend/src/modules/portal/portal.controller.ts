@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -18,7 +19,10 @@ import {
   validateIosAppId,
 } from '../../common/attribution';
 import { QrStyle, validateStyle } from '../../common/qr';
+import { capped } from '../../common/paging';
+import { validateRates } from '../../common/rates';
 import { sha256, str, validateLandingUrl } from '../../common/security';
+import { scanAnalytics } from '../../database/analytics';
 import { audit, balance, balances, ledger } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
 import { AuthGuard, Session } from '../auth/auth.guard';
@@ -31,13 +35,27 @@ import { SessionClaims, newApiKey, newShortCode } from '../auth/tokens';
 export class PortalController {
   // ---------- directory & partnerships ----------
 
+  // `ready` is what a promoter actually needs before committing a print run: a publisher with
+  // no destination registered redirects nobody, so every scan of that campaign dies at
+  // `no_destination`. Suspended publishers are hidden — partnering with one can never pay out.
   @Get('publishers')
   async publishers() {
-    return prisma.org.findMany({
-      where: { type: 'publisher' },
-      select: { id: true, name: true },
+    const rows = await prisma.org.findMany({
+      where: { type: 'publisher', suspended: false },
+      select: {
+        id: true,
+        name: true,
+        bonus_label: true,
+        landing_url: true,
+        android_package: true,
+        ios_app_id: true,
+      },
       orderBy: { name: 'asc' },
     });
+    return rows.map(({ landing_url, android_package, ios_app_id, ...o }) => ({
+      ...o,
+      ready: Boolean(landing_url || android_package || ios_app_id),
+    }));
   }
 
   @Post('partnerships')
@@ -52,23 +70,15 @@ export class PortalController {
     },
   ) {
     if (s.type !== 'promoter') throw new ForbiddenException('promoters only');
-    const coin_rate = b.coin_rate ?? 50;
-    if (!Number.isInteger(coin_rate) || coin_rate < 1 || coin_rate > 100000)
-      throw new BadRequestException('coin_rate must be 1–100000');
-    const guest_rate = b.guest_rate ?? Math.min(10, coin_rate);
-    if (!Number.isInteger(guest_rate) || guest_rate < 0 || guest_rate > coin_rate)
-      throw new BadRequestException('guest_rate must be an integer 0–coin_rate');
-    const grace_days = b.grace_days ?? 7;
-    if (!Number.isInteger(grace_days) || grace_days < 0 || grace_days > 365)
-      throw new BadRequestException('grace_days must be an integer 0–365');
+    // No `current` row to resolve against — a new partnership takes the platform defaults for
+    // anything the promoter left out. Same rules the admin patch runs, from one definition.
+    const rates = validateRates(b);
     try {
       return await prisma.partnership.create({
         data: {
           promoter_org_id: s.org_id,
           publisher_org_id: b.publisher_org_id,
-          coin_rate,
-          guest_rate,
-          grace_days,
+          ...rates,
         },
       });
     } catch (e: any) {
@@ -79,7 +89,7 @@ export class PortalController {
   }
 
   @Get('partnerships')
-  async listPartnerships(@Session() s: SessionClaims) {
+  async listPartnerships(@Session() s: SessionClaims, @Query('limit') limit?: string) {
     const rows = await prisma.partnership.findMany({
       where: { OR: [{ promoter_org_id: s.org_id }, { publisher_org_id: s.org_id }] },
       include: {
@@ -87,6 +97,7 @@ export class PortalController {
         publisher: { select: { name: true } },
       },
       orderBy: { created_at: 'desc' },
+      take: capped(limit),
     });
     return rows.map(({ promoter, publisher, ...p }) => ({
       ...p,
@@ -123,8 +134,9 @@ export class PortalController {
   }
 
   @Get('campaigns')
-  async listCampaigns(@Session() s: SessionClaims) {
+  async listCampaigns(@Session() s: SessionClaims, @Query('limit') limit?: string) {
     const rows = await prisma.campaign.findMany({
+      take: capped(limit),
       where: {
         partnership: {
           OR: [{ promoter_org_id: s.org_id }, { publisher_org_id: s.org_id }],
@@ -233,6 +245,24 @@ export class PortalController {
     };
   }
 
+  /**
+   * Where this campaign's scans came from — the reason a promoter funds a second print run.
+   *
+   * Read-only for both sides of the partnership, like `stats`: the publisher hosting the code
+   * has as much reason to see which placement works as the promoter who printed it.
+   * `ownedCampaign` is the whole authorisation story — it throws unless this session is one of
+   * the two orgs on the partnership, so the id can never be used to read a stranger's traffic.
+   */
+  @Get('campaigns/:id/analytics')
+  async analytics(
+    @Session() s: SessionClaims,
+    @Param('id') id: string,
+    @Query('days') days?: string,
+  ) {
+    await this.ownedCampaign(s.org_id, id);
+    return scanAnalytics(id, +(days ?? 30));
+  }
+
   // ---------- QR codes ----------
 
   @Post('campaigns/:id/qr-codes')
@@ -291,11 +321,16 @@ export class PortalController {
   }
 
   @Get('campaigns/:id/qr-codes')
-  async listQr(@Session() s: SessionClaims, @Param('id') id: string) {
+  async listQr(
+    @Session() s: SessionClaims,
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+  ) {
     await this.ownedCampaign(s.org_id, id);
     const rows = await prisma.qrCode.findMany({
       where: { campaign_id: id },
       orderBy: { created_at: 'desc' },
+      take: capped(limit),
     });
     return rows.map((q) => ({ ...q, scan_url: `${BASE_URL}/r/${q.code}` }));
   }
@@ -315,7 +350,7 @@ export class PortalController {
 
   @Get('orgs/me')
   async me(@Session() s: SessionClaims) {
-    return prisma.org.findUniqueOrThrow({
+    const org = await prisma.org.findUniqueOrThrow({
       where: { id: s.org_id },
       select: {
         id: true,
@@ -329,6 +364,11 @@ export class PortalController {
         suspended: true,
       },
     });
+    // Every fee a publisher has earned lands in `publisher:{org_id}`; the admin portal could
+    // read it and the publisher could not. Same number, own tenant.
+    return org.type === 'publisher'
+      ? { ...org, earnings: await balance(`publisher:${org.id}`) }
+      : org;
   }
 
   /**
@@ -374,7 +414,7 @@ export class PortalController {
   }
 
   @Get('redemptions')
-  async redemptions(@Session() s: SessionClaims) {
+  async redemptions(@Session() s: SessionClaims, @Query('limit') limit?: string) {
     const rows = await prisma.redemption.findMany({
       where: {
         campaign: {
@@ -385,7 +425,7 @@ export class PortalController {
       },
       include: { campaign: { select: { name: true } } },
       orderBy: { created_at: 'desc' },
-      take: 100,
+      take: capped(limit ?? '100'),
     });
     return rows.map(({ campaign, ...r }) => ({ ...r, campaign_name: campaign.name }));
   }

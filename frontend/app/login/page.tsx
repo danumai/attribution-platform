@@ -2,6 +2,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import type { AuthResult } from '@/lib/types';
 import {
   Brand,
   Coupon,
@@ -27,6 +28,9 @@ import {
   tabs,
 } from '@/lib/tw';
 
+/** Compile-time, so the demo credentials are dropped from the production bundle entirely. */
+const DEMO = process.env.NODE_ENV !== 'production';
+
 export default function LoginPage() {
   return (
     <Suspense>
@@ -44,9 +48,11 @@ function Login() {
   );
   const [f, setF] = useState({
     name: '',
-    // seeded from .env on backend boot — sign in straight away
-    email: process.env.NEXT_PUBLIC_DEMO_EMAIL ?? '',
-    password: process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? '',
+    // Seeded from .env on backend boot, so a demo signs in straight away — but `NEXT_PUBLIC_*`
+    // is inlined into JS served to every anonymous visitor, so a production build must not
+    // carry working credentials in its bundle. Dev only, and the check is compile-time.
+    email: DEMO ? (process.env.NEXT_PUBLIC_DEMO_EMAIL ?? '') : '',
+    password: DEMO ? (process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? '') : '',
     type: q.get('type') === 'publisher' ? 'publisher' : 'promoter',
     landing_url: '',
   });
@@ -76,7 +82,10 @@ function Login() {
               type: f.type,
               landing_url: f.type === 'publisher' ? f.landing_url || undefined : undefined,
             };
-      const res = await api(`/v1/auth/${mode}`, { method: 'POST', body: JSON.stringify(body) });
+      const res = await api<AuthResult>(`/v1/auth/${mode}`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
       localStorage.setItem('token', res.token);
       localStorage.setItem('org', JSON.stringify(res.org));
       if (res.api_key) {

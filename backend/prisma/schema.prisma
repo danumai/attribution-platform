@@ -125,6 +125,21 @@ model Scan {
   consumed    Boolean  @default(false)
   scanned_at  DateTime @default(now()) @db.Timestamptz(6)
 
+  /// Reporting dimensions, all read off the request headers at redirect time and all optional
+  /// — nothing here feeds attribution, so a missing value costs a report bucket, never a match.
+  /// ISO-3166 alpha-2 resolved by the CDN in front of us; NULL off a CDN.
+  country      String?
+  city         String?
+  /// primary Accept-Language tag, e.g. `en-us`
+  language     String?
+  /// host that linked here — empty for a camera scan, set when the URL was clicked on a page
+  referer_host String?
+  os           String?
+  /// includes in-app webviews (Instagram, TikTok, …), which is the channel signal
+  browser      String?
+  /// mobile | tablet | desktop — enforced by CHECK
+  device_type  String?
+
   qr_code    QrCode      @relation(fields: [qr_code_id], references: [id])
   campaign   Campaign    @relation(fields: [campaign_id], references: [id])
   redemption Redemption?
@@ -133,6 +148,8 @@ model Scan {
   @@index([scanned_at(sort: Desc)])
   /// the fingerprint lookup: unmatched scans for one device shape, newest first
   @@index([ip, platform, consumed, scanned_at(sort: Desc)])
+  /// every analytics breakdown: one campaign over a recent window
+  @@index([campaign_id, scanned_at(sort: Desc)])
   @@map("scans")
 }
 

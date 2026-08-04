@@ -83,6 +83,7 @@ const byReferrer = (tx: Tx, publisherId: string, claimId: string) =>
     WHERE s.claim_id = ${claimId}
       AND s.consumed = false
       AND p.publisher_org_id = ${publisherId}::uuid
+      AND p.status = 'active'
       AND s.scanned_at > now() - make_interval(days => ${REFERRER_WINDOW_DAYS})
     FOR UPDATE OF s SKIP LOCKED`;
 
@@ -109,6 +110,7 @@ const byFingerprint = (tx: Tx, publisherId: string, fingerprint: string, platfor
       AND s.ip = ${fingerprint}
       AND s.platform = ${platform}
       AND p.publisher_org_id = ${publisherId}::uuid
+      AND p.status = 'active'
       AND s.scanned_at > now() - make_interval(mins => ${FINGERPRINT_WINDOW_MIN})
     ORDER BY s.scanned_at DESC
     LIMIT 1

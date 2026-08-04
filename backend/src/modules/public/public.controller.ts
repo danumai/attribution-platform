@@ -16,6 +16,7 @@ import { BASE_URL, FRONTEND_URL } from '../../config';
 import { QrStyle, isAdvanced, renderPng, renderSvg, validateStyle } from '../../common/qr';
 import { detectPlatform, storeUrl } from '../../common/attribution';
 import { clientIp, ipHash, rateLimited } from '../../common/security';
+import { scanSignals } from '../../common/signals';
 import { balance } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
 import { newClaimId } from '../auth/tokens';
@@ -56,6 +57,7 @@ export class PublicController {
             status: true,
             partnership: {
               select: {
+                status: true,
                 publisher: {
                   select: {
                     landing_url: true,
@@ -74,6 +76,10 @@ export class PublicController {
     const campaign = qr.campaign;
     if (campaign.status !== 'active')
       return end(campaign.status === 'paused' ? 'paused' : 'ended');
+    // The partnership is the agreement the fee is paid under. It is checked at campaign
+    // creation, but an admin can send it back to `pending` afterwards — and that has to stop
+    // scans, or the suspension lever silently does nothing while claims keep paying out.
+    if (campaign.partnership.status !== 'active') return end('partnership_inactive');
     if ((await balance(`campaign:${campaign.id}`)) <= 0) return end('budget');
 
     // Resolve the destination *before* burning a use: a publisher who has registered no app
@@ -83,31 +89,40 @@ export class PublicController {
     const destination = storeUrl(platform, campaign.partnership.publisher, claim_id);
     if (!destination) return end('no_destination');
 
-    // Claim one use atomically — this is both the expiry check and the single/multi-use check,
-    // so two simultaneous scans can never both take the last use of a code. Raw because
-    // `uses < max_uses` compares two columns, which the query builder cannot express.
-    const claimed = await prisma.$queryRaw<{ uses: number }[]>`
-      UPDATE qr_codes SET uses = uses + 1
-      WHERE id = ${qr.id}::uuid AND NOT voided
-        AND (expires_at IS NULL OR expires_at > now())
-        AND (max_uses IS NULL OR uses < max_uses)
-      RETURNING uses`;
-    if (!claimed.length)
-      return end(qr.expires_at && qr.expires_at <= new Date() ? 'expired' : 'used_up');
+    // One transaction, because the two writes are one fact. A use claimed without the matching
+    // scan row burns a use of a physical print run that can then never be attributed — the
+    // scanner installs the app and the publisher is told `no_match`.
+    const claimed = await prisma.$transaction(async (tx) => {
+      // Claim one use atomically — this is both the expiry check and the single/multi-use check,
+      // so two simultaneous scans can never both take the last use of a code. Raw because
+      // `uses < max_uses` compares two columns, which the query builder cannot express.
+      const rows = await tx.$queryRaw<{ uses: number }[]>`
+        UPDATE qr_codes SET uses = uses + 1
+        WHERE id = ${qr.id}::uuid AND NOT voided
+          AND (expires_at IS NULL OR expires_at > now())
+          AND (max_uses IS NULL OR uses < max_uses)
+        RETURNING uses`;
+      if (!rows.length) return false;
 
-    // The pending attribution claim. It holds the fingerprint the app's first open will be
-    // matched against; the phone is handed none of it.
-    await prisma.scan.create({
-      data: {
-        qr_code_id: qr.id,
-        campaign_id: campaign.id,
-        claim_id,
-        platform,
-        ip: ipHash(ip),
-        user_agent: (req.headers['user-agent'] ?? '').slice(0, 300),
-      },
-      select: { id: true },
+      // The pending attribution claim. It holds the fingerprint the app's first open will be
+      // matched against; the phone is handed none of it. The signals ride along on the same
+      // insert — they are reporting columns, so they must never cost the hot path a second write.
+      await tx.scan.create({
+        data: {
+          qr_code_id: qr.id,
+          campaign_id: campaign.id,
+          claim_id,
+          platform,
+          ip: ipHash(ip),
+          user_agent: (req.headers['user-agent'] ?? '').slice(0, 300),
+          ...scanSignals(req),
+        },
+        select: { id: true },
+      });
+      return true;
     });
+    if (!claimed)
+      return end(qr.expires_at && qr.expires_at <= new Date() ? 'expired' : 'used_up');
 
     // Straight to the store listing. No token, no code, no query the app can read and spend —
     // on Android the claim id travels only inside Play's install-referrer channel, which is

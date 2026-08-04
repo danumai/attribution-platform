@@ -45,6 +45,16 @@ const REASONS: Record<string, { title: string; body: string; stamp: string }> = 
     body: 'Every reward in this campaign has been given out.',
     stamp: 'CLAIMED',
   },
+  partnership_inactive: {
+    title: 'This offer is on hold',
+    body: 'The partnership behind this campaign is not active right now.',
+    stamp: 'ON HOLD',
+  },
+  no_destination: {
+    title: 'This offer has nowhere to send you',
+    body: 'The partner behind it has not finished setting up their app or website.',
+    stamp: 'ON HOLD',
+  },
   rate_limited: {
     title: 'Too many attempts',
     body: 'Please wait a minute and scan again.',

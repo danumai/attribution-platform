@@ -1,9 +1,21 @@
 'use client';
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
-import { confirmDialog, promptDialog, toast } from '@/lib/ui';
+import { Analytics, Audience } from '@/lib/audience';
+import { LoadError, confirmDialog, promptDialog, toast } from '@/lib/ui';
+import type {
+  AdminOrg,
+  AdminOverview,
+  AdminScan,
+  AuditEntry,
+  Campaign,
+  Ledger,
+  Partnership,
+  QrCode,
+  Redemption,
+} from '@/lib/types';
 import { ago, num, when } from '@/lib/fmt';
 import {
   btn,
@@ -55,6 +67,7 @@ const TABS = [
   { id: 'Organizations', icon: 'orgs', group: 'Accounts' },
   { id: 'Partnerships', icon: 'partnerships', group: 'Accounts' },
   { id: 'Campaigns', icon: 'campaigns', group: 'Accounts' },
+  { id: 'Audience', icon: 'overview', group: 'Traffic' },
   { id: 'Scans', icon: 'scans', group: 'Traffic' },
   { id: 'Redemptions', icon: 'redemptions', group: 'Traffic' },
   { id: 'QR codes', icon: 'qr', group: 'Traffic' },
@@ -69,6 +82,8 @@ const HEAD: Record<Tab, string> = {
   Partnerships:
     'Rates are per redemption. Guest rate is paid up front for an unidentified signup; the delta is released if the user identifies within the grace window.',
   Campaigns: 'Budgets, conversion and the kill switch.',
+  Audience:
+    'Where scans come from, on what, and when. Everything here is read off the request the redirect already receives — a QR code carries nothing about whoever scanned it.',
   Scans: 'Every QR scan, newest first. IPs are stored as a truncated hash — enough to spot a repeat scanner, not enough to identify a person.',
   Redemptions: 'Every signup a publisher vouched for.',
   'QR codes': 'Issued codes, their limits and their state.',
@@ -76,14 +91,47 @@ const HEAD: Record<Tab, string> = {
   'Audit log': 'Every privileged override, newest first.',
 };
 
-// ponytail: crude UA bucketing, good enough for a device column. Use a UA parser if it needs to be right.
+// Fallback only: scans recorded before the signal columns existed have nothing but their UA.
+// ponytail: crude UA bucketing. New scans carry `device_type` from the server instead.
 const device = (ua: string) =>
   !ua ? '—' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobile/.test(ua) ? 'Mobile' : 'Desktop';
+
+/** `Intl` knows every country name already — a lookup table here would be dead weight. */
+const regionNames =
+  typeof Intl !== 'undefined' && 'DisplayNames' in Intl
+    ? new Intl.DisplayNames(['en'], { type: 'region' })
+    : null;
+const country = (code: string) => {
+  try {
+    return regionNames?.of(code) ?? code;
+  } catch {
+    return code;
+  }
+};
 const pill = (s: string) => <span className={pillFor(s)}>{s}</span>;
 
-type Col = { h: string; get: (row: any) => ReactNode; sort?: (row: any) => any; num?: boolean };
+/**
+ * A column over rows of `T`. `sort` is required whenever `get` returns markup: comparing two
+ * React elements with `>` is always false both ways, so those headers used to announce
+ * `aria-sort="ascending"` over an order that had not changed.
+ */
+type Col<T> = { h: string; get: (row: T) => ReactNode; sort?: (row: T) => unknown; num?: boolean };
 
 const PAGE = 50;
+
+/**
+ * One lowercase haystack per row, cached on the row object itself.
+ *
+ * The filter used to `JSON.stringify` every row inside the predicate, so with `limit=1000`
+ * scans it re-serialised a thousand rows on every keystroke. A WeakMap keyed on the row means
+ * each row is serialised once and the cache is collected with the data it describes.
+ */
+const haystacks = new WeakMap<object, string>();
+function haystack(row: object): string {
+  let s = haystacks.get(row);
+  if (s === undefined) haystacks.set(row, (s = JSON.stringify(row).toLowerCase()));
+  return s;
+}
 
 /** Row actions live behind one control instead of a run of dot-separated links. */
 function Actions({ children }: { children: ReactNode }) {
@@ -106,14 +154,14 @@ function Actions({ children }: { children: ReactNode }) {
 }
 
 /** One table for every tab: free-text filter, click-to-sort headers, paged rendering. */
-function Table({
+function Table<T extends object>({
   cols,
   rows,
   empty = 'Nothing here yet.',
   loading,
 }: {
-  cols: Col[];
-  rows: any[];
+  cols: Col<T>[];
+  rows: T[];
   empty?: string;
   loading?: boolean;
 }) {
@@ -121,20 +169,44 @@ function Table({
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const [limit, setLimit] = useState(PAGE);
 
+  // Deliberately outside the memo's dependencies. Every call site passes `cols` as an inline
+  // array literal, so a fresh identity arrives on every render and the memo never hit — it
+  // re-filtered the whole table each time an unrelated piece of state (`busy`) changed. The
+  // only part of `cols` the sort reads is the accessor for the sorted column, and `sort.i`
+  // already changes whenever that does.
+  const colsRef = useRef(cols);
+  colsRef.current = cols;
+
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    let out = needle
-      ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(needle))
-      : rows.slice();
+    const out = needle ? rows.filter((r) => haystack(r).includes(needle)) : rows.slice();
     if (sort) {
-      const key = cols[sort.i].sort ?? cols[sort.i].get;
+      // A column with no `sort` sorts on its rendered value, which is only meaningful when
+      // that value is a primitive. `sortable()` is what stops a header claiming otherwise.
+      const key = colsRef.current[sort.i].sort ?? colsRef.current[sort.i].get;
       out.sort((a, b) => {
-        const [x, y] = [key(a), key(b)] as any[];
+        const [x, y] = [key(a), key(b)] as [any, any];
         return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
       });
     }
     return out;
-  }, [q, rows, sort, cols]);
+  }, [q, rows, sort]);
+
+  /**
+   * Whether clicking this header actually reorders anything.
+   *
+   * Without an explicit `sort`, the comparator falls back to `get`, and for a column that
+   * renders markup that means comparing two React elements — always false in both directions,
+   * so the order never changed while `aria-sort` told a screen reader it had. Probing the
+   * first row is enough: a column renders the same kind of thing for every row.
+   */
+  const sortable = (c: Col<T>) => {
+    if (!c.h) return false;
+    if (c.sort) return true;
+    if (!rows.length) return false;
+    const v = c.get(rows[0]);
+    return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
+  };
 
   // a narrowed result set starts at the top again, not 300 rows down
   useEffect(() => setLimit(PAGE), [q, sort]);
@@ -174,25 +246,31 @@ function Table({
           <table className={table}>
             <thead>
               <tr>
-                {cols.map((c, i) => (
-                  <th
-                    key={i}
-                    className={cx(c.num ? thNum : th, sort?.i === i && 'text-accent')}
-                    aria-sort={sort?.i === i ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
-                    style={{ cursor: c.h ? 'pointer' : 'default', userSelect: 'none' }}
-                    onClick={() =>
-                      c.h && setSort((s) => (s?.i === i ? { i, dir: s.dir === 1 ? -1 : 1 } : { i, dir: 1 }))
-                    }
-                  >
-                    {c.h}
-                    {sort?.i === i && <span className="ml-1">{sort.dir === 1 ? '↑' : '↓'}</span>}
-                  </th>
-                ))}
+                {cols.map((c, i) => {
+                  const can = sortable(c);
+                  return (
+                    <th
+                      key={i}
+                      className={cx(c.num ? thNum : th, sort?.i === i && 'text-accent')}
+                      aria-sort={
+                        can && sort?.i === i ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined
+                      }
+                      style={{ cursor: can ? 'pointer' : 'default', userSelect: 'none' }}
+                      onClick={() =>
+                        can && setSort((s) => (s?.i === i ? { i, dir: s.dir === 1 ? -1 : 1 } : { i, dir: 1 }))
+                      }
+                    >
+                      {c.h}
+                      {can && sort?.i === i && <span className="ml-1">{sort.dir === 1 ? '↑' : '↓'}</span>}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
               {shown.slice(0, limit).map((r, i) => (
-                <tr className={tr} key={r.id ?? r.account ?? i}>
+                // every row type here carries one or the other; the index is the last resort
+                <tr className={tr} key={(r as { id?: string; account?: string }).id ?? (r as { account?: string }).account ?? i}>
                   {cols.map((c, j) => (
                     <td key={j} className={c.num ? tdNum : td}>
                       {c.get(r)}
@@ -225,44 +303,97 @@ function Table({
   );
 }
 
+/** Everything the console holds at once. Partial because it fills in as the fetches land. */
+interface AdminData {
+  overview?: AdminOverview;
+  orgs?: AdminOrg[];
+  partnerships?: Partnership[];
+  campaigns?: Campaign[];
+  scans?: AdminScan[];
+  redemptions?: Redemption[];
+  qrCodes?: QrCode[];
+  ledger?: Ledger;
+  audit?: AuditEntry[];
+  analytics?: Analytics;
+}
+
 export default function Admin() {
   const r = useRouter();
-  const [me, setMe] = useState<any>(null);
+  const [me, setMe] = useState<ReturnType<typeof getOrg>>(null);
   const [tab, setTab] = useState<Tab>('Overview');
-  const [d, setD] = useState<any>({});
+  const [d, setD] = useState<AdminData>({});
+  // Recorded, not just toasted: `loading` is derived from `!d.overview`, so without this a
+  // failed load is indistinguishable from one in flight and the console shimmers forever.
+  const [loadErr, setLoadErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [newKey, setNewKey] = useState('');
   const [campaignFilter, setCampaignFilter] = useState('');
   const [ledgerAccount, setLedgerAccount] = useState('');
+  const [days, setDays] = useState(30);
 
-  async function load() {
+  /** The seven endpoints no filter on this page affects. */
+  const loadCore = useCallback(async () => {
     try {
-      const [overview, orgs, partnerships, campaigns, scans, redemptions, qrCodes, ledger, audit] =
+      const [overview, orgs, partnerships, campaigns, redemptions, qrCodes, audit] =
         await Promise.all([
-          api('/v1/admin/overview'),
-          api('/v1/admin/orgs'),
-          api('/v1/admin/partnerships'),
-          api('/v1/admin/campaigns'),
-          api(`/v1/admin/scans?limit=1000${campaignFilter ? `&campaign_id=${campaignFilter}` : ''}`),
-          api('/v1/admin/redemptions?limit=1000'),
-          api('/v1/admin/qr-codes'),
-          api(`/v1/admin/ledger${ledgerAccount ? `?account=${encodeURIComponent(ledgerAccount)}` : ''}`),
-          api('/v1/admin/audit-log?limit=500'),
+          api<AdminOverview>('/v1/admin/overview'),
+          api<AdminOrg[]>('/v1/admin/orgs?limit=1000'),
+          api<Partnership[]>('/v1/admin/partnerships?limit=1000'),
+          api<Campaign[]>('/v1/admin/campaigns?limit=1000'),
+          api<Redemption[]>('/v1/admin/redemptions?limit=1000'),
+          api<QrCode[]>('/v1/admin/qr-codes?limit=1000'),
+          api<AuditEntry[]>('/v1/admin/audit-log?limit=500'),
         ]);
-      setD({ overview, orgs, partnerships, campaigns, scans, redemptions, qrCodes, ledger, audit });
+      setD((p) => ({ ...p, overview, orgs, partnerships, campaigns, redemptions, qrCodes, audit }));
+      setLoadErr('');
+    } catch (e: any) {
+      setLoadErr(e.message);
+      toast.error(e.message);
+    }
+  }, []);
+
+  /**
+   * The three that a filter does change — kept apart because they used to ride along with the
+   * other seven: picking one account from the ledger dropdown re-pulled ~2500 unrelated rows.
+   *
+   * `analytics` shares the campaign filter with the Scans tab on purpose: picking a campaign
+   * in one place and reading the other's platform-wide numbers is how you misread both.
+   */
+  const loadFiltered = useCallback(async () => {
+    try {
+      const [scans, ledger, analytics] = await Promise.all([
+        api<AdminScan[]>(
+          `/v1/admin/scans?limit=1000${campaignFilter ? `&campaign_id=${campaignFilter}` : ''}`,
+        ),
+        api<Ledger>(
+          `/v1/admin/ledger${ledgerAccount ? `?account=${encodeURIComponent(ledgerAccount)}` : ''}`,
+        ),
+        api<Analytics>(
+          `/v1/admin/analytics?days=${days}${campaignFilter ? `&campaign_id=${campaignFilter}` : ''}`,
+        ),
+      ]);
+      setD((p) => ({ ...p, scans, ledger, analytics }));
     } catch (e: any) {
       toast.error(e.message);
     }
-  }
+  }, [campaignFilter, ledgerAccount, days]);
+
+  const load = useCallback(
+    () => Promise.all([loadCore(), loadFiltered()]),
+    [loadCore, loadFiltered],
+  );
 
   useEffect(() => {
     if (!token()) return void r.replace('/login');
     const o = getOrg();
     if (o?.type !== 'admin') return void r.replace('/dashboard');
     setMe(o);
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [r, campaignFilter, ledgerAccount]);
+    loadCore();
+  }, [r, loadCore]);
+
+  useEffect(() => {
+    if (token()) loadFiltered();
+  }, [loadFiltered]);
 
   async function act(fn: () => Promise<any>, ok = 'Done') {
     setBusy(true);
@@ -300,12 +431,31 @@ export default function Admin() {
   );
 
   if (!me) return null;
-  const loading = !d.overview;
-  const o = d.overview ?? {};
-  const campaigns: any[] = d.campaigns ?? [];
+  // A failed load is its own state — not "still loading", and not data.
+  const failed = !d.overview && Boolean(loadErr);
+  const loading = !d.overview && !failed;
+  const o = d.overview;
+  const campaigns = d.campaigns ?? [];
   // Redemptions carry the publisher's user ref; scans only know the device. Join so a scan row
   // can show who it turned into.
-  const userByScan = new Map<string, any>((d.redemptions ?? []).map((x: any) => [x.scan_id, x]));
+  const userByScan = new Map((d.redemptions ?? []).map((x) => [x.scan_id, x]));
+  // One control, two tabs — Audience and Scans are the same rows counted two ways, so a
+  // campaign chosen on one must still be chosen on the other.
+  const campaignPicker = (
+    <select
+      className={cx(selectField, 'mt-3 max-w-85')}
+      value={campaignFilter}
+      onChange={(e) => setCampaignFilter(e.target.value)}
+      aria-label="Campaign"
+    >
+      <option value="">All campaigns</option>
+      {campaigns.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name} — {c.promoter_name}
+        </option>
+      ))}
+    </select>
+  );
 
   return (
     <Shell
@@ -315,7 +465,7 @@ export default function Admin() {
         label: t.id,
         icon: t.icon,
         group: t.group || undefined,
-        badge: t.id === 'Partnerships' ? o.pending_partnerships : undefined,
+        badge: t.id === 'Partnerships' ? o?.pending_partnerships : undefined,
       }))}
       active={tab}
       onSelect={(id) => setTab(id as Tab)}
@@ -323,7 +473,7 @@ export default function Admin() {
       lede={HEAD[tab]}
       actions={
         <>
-          {!o.ledger_balanced && d.overview && (
+          {o && !o.ledger_balanced && (
             <span className={pillBad}>ledger off by {num(o.ledger_sum)}</span>
           )}
           <button className={btnGhost} onClick={() => load()}>
@@ -354,12 +504,16 @@ export default function Admin() {
       )}
 
       {tab === 'Overview' &&
-        (loading ? (
-          <div className={cx(card, 'mt-3 grid gap-3')}>
-            {Array.from({ length: 5 }, (_, i) => (
-              <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
-            ))}
-          </div>
+        (!o ? (
+          failed ? (
+            <LoadError message={loadErr} onRetry={() => load()} />
+          ) : (
+            <div className={cx(card, 'mt-3 grid gap-3')}>
+              {Array.from({ length: 5 }, (_, i) => (
+                <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
+              ))}
+            </div>
+          )
         ) : (
           <>
             {/* The one thing a platform operator has to know before anything else: does the
@@ -390,9 +544,9 @@ export default function Admin() {
             <h2 className={sectionHead}>Live now</h2>
             <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-3">
               {[
-                ['Scans, last 24h', o.scans_24h, 'Scans'],
+                ['Scans, last 24h', o.scans_24h, 'Audience'],
                 ['Active campaigns', o.active_campaigns, 'Campaigns'],
-                ['Scan → signup', `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`, 'Scans'],
+                ['Scan → signup', `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`, 'Audience'],
               ].map(([k, v, go]) => (
                 <button className={kpi} key={k as string} onClick={() => setTab(go as Tab)}>
                   <b className={kpiFigure}>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
@@ -470,10 +624,10 @@ export default function Admin() {
             rows={d.orgs ?? []}
             cols={[
               { h: 'Name', get: (x) => x.name },
-              { h: 'Type', get: (x) => pill(x.type) },
+              { h: 'Type', sort: (x) => x.type, get: (x) => pill(x.type) },
               { h: 'Email', get: (x) => x.email },
-              { h: 'Landing URL', get: (x) => (x.landing_url ? <a className={linkClass} href={x.landing_url} target="_blank" rel="noreferrer">{x.landing_url}</a> : '—') },
-              { h: 'API key', get: (x) => (x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="text-bad">missing</span>) },
+              { h: 'Landing URL', sort: (x) => x.landing_url ?? '', get: (x) => (x.landing_url ? <a className={linkClass} href={x.landing_url} target="_blank" rel="noreferrer">{x.landing_url}</a> : '—') },
+              { h: 'API key', sort: (x) => x.has_api_key, get: (x) => (x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="text-bad">missing</span>) },
               { h: 'Campaigns', num: true, get: (x) => x.campaigns },
               { h: 'Coins', num: true, get: (x) => x.coin_balance ?? '—' },
               { h: 'Joined', get: (x) => when(x.created_at), sort: (x) => x.created_at },
@@ -563,7 +717,7 @@ export default function Admin() {
                   />
                 ),
               })),
-              { h: 'Status', get: (x) => pill(x.status) },
+              { h: 'Status', sort: (x) => x.status, get: (x) => pill(x.status) },
               { h: 'Created', get: (x) => when(x.created_at), sort: (x) => x.created_at },
               {
                 h: '',
@@ -591,13 +745,14 @@ export default function Admin() {
               { h: 'Promoter', get: (x) => x.promoter_name },
               { h: 'Publisher', get: (x) => x.publisher_name },
               { h: 'Rate', num: true, get: (x) => x.coin_rate },
-              { h: 'Scans', num: true, get: (x) => x.scans },
-              { h: 'Redemptions', num: true, get: (x) => x.redemptions },
+              // `scans`/`redemptions` are counted only by the admin listing, hence optional
+              { h: 'Scans', num: true, get: (x) => x.scans ?? 0 },
+              { h: 'Redemptions', num: true, get: (x) => x.redemptions ?? 0 },
               {
                 h: 'Conv.',
                 num: true,
-                sort: (x) => (x.scans ? x.redemptions / x.scans : -1),
-                get: (x) => (x.scans ? `${((x.redemptions / x.scans) * 100).toFixed(0)}%` : '—'),
+                sort: (x) => (x.scans ? (x.redemptions ?? 0) / x.scans : -1),
+                get: (x) => (x.scans ? `${(((x.redemptions ?? 0) / x.scans) * 100).toFixed(0)}%` : '—'),
               },
               {
                 h: 'Budget',
@@ -671,19 +826,19 @@ export default function Admin() {
         </>
       )}
 
+      {tab === 'Audience' && (
+        <>
+          {campaignPicker}
+          <Audience data={d.analytics ?? null} days={days} onDays={setDays} scoped={Boolean(campaignFilter)} />
+        </>
+      )}
+
       {tab === 'Scans' && (
         <>
           <p className={cx(muted, 'mt-3')}>
             The user column fills in once the scan converts and the publisher reports its user reference.
           </p>
-          <select className={cx(selectField, 'max-w-[340px]')} value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)}>
-            <option value="">All campaigns</option>
-            {campaigns.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} — {c.promoter_name}
-              </option>
-            ))}
-          </select>
+          {campaignPicker}
           <Table
             loading={loading}
             rows={d.scans ?? []}
@@ -692,11 +847,31 @@ export default function Admin() {
               { h: 'When', sort: (x) => x.scanned_at, get: (x) => <span title={when(x.scanned_at)}>{ago(x.scanned_at)}</span> },
               { h: 'Campaign', get: (x) => x.campaign_name },
               { h: 'Publisher', get: (x) => x.publisher_name },
-              { h: 'QR', get: (x) => <code>{x.qr_code}</code> },
-              { h: 'Device', sort: (x) => device(x.user_agent ?? ''), get: (x) => <span title={x.user_agent ?? ''}>{device(x.user_agent ?? '')}</span> },
-              { h: 'IP hash', get: (x) => <code>{x.ip_hash ?? '—'}</code> },
+              { h: 'QR', sort: (x) => x.qr_code, get: (x) => <code>{x.qr_code}</code> },
+              {
+                h: 'Where',
+                sort: (x) => x.country ?? '',
+                get: (x) =>
+                  x.country ? (
+                    <span title={x.city ?? undefined}>
+                      {country(x.country)}
+                      {x.city ? <span className={cx(muted, 'ml-1.5')}>{x.city}</span> : null}
+                    </span>
+                  ) : (
+                    '—'
+                  ),
+              },
+              // device_type is stored from the scan itself; the UA fallback only covers rows
+              // recorded before those columns existed.
+              { h: 'Device', sort: (x) => x.device_type ?? device(x.user_agent ?? ''), get: (x) => <span title={x.user_agent ?? ''}>{x.device_type ?? device(x.user_agent ?? '')}</span> },
+              { h: 'OS', sort: (x) => x.os ?? '', get: (x) => x.os ?? '—' },
+              { h: 'Browser', sort: (x) => x.browser ?? '', get: (x) => x.browser ?? '—' },
+              { h: 'Lang', sort: (x) => x.language ?? '', get: (x) => x.language ?? '—' },
+              { h: 'From', sort: (x) => x.referer_host ?? '', get: (x) => x.referer_host ?? <span className={muted}>camera</span> },
+              { h: 'IP hash', sort: (x) => x.ip_hash ?? '', get: (x) => <code>{x.ip_hash ?? '—'}</code> },
               {
                 h: 'User',
+                sort: (x) => userByScan.get(x.id)?.publisher_user_ref ?? '',
                 get: (x) => {
                   const u = userByScan.get(x.id);
                   return u ? <code title={u.identified ? 'identified' : 'guest'}>{u.publisher_user_ref}</code> : '—';
@@ -724,7 +899,7 @@ export default function Admin() {
               { h: 'Campaign', get: (x) => x.campaign_name },
               { h: 'Promoter', get: (x) => x.promoter_name },
               { h: 'Publisher', get: (x) => x.publisher_name },
-              { h: 'Publisher user', get: (x) => <code>{x.publisher_user_ref}</code> },
+              { h: 'Publisher user', sort: (x) => x.publisher_user_ref, get: (x) => <code>{x.publisher_user_ref}</code> },
               { h: 'Kind', sort: (x) => x.identified, get: (x) => pill(x.identified ? 'identified' : 'guest') },
               { h: 'Upgraded', sort: (x) => x.upgraded_at ?? '', get: (x) => when(x.upgraded_at) },
               { h: 'Coins', num: true, sort: (x) => x.coins, get: (x) => num(x.coins) },
@@ -748,9 +923,9 @@ export default function Admin() {
             rows={d.qrCodes ?? []}
             empty="No codes issued."
             cols={[
-              { h: 'Code', get: (x) => <code>{x.code}</code> },
-              { h: 'Campaign', get: (x) => x.campaign_name },
-              { h: 'Scans', num: true, sort: (x) => x.scans, get: (x) => x.scans },
+              { h: 'Code', sort: (x) => x.code, get: (x) => <code>{x.code}</code> },
+              { h: 'Campaign', get: (x) => x.campaign_name ?? '' },
+              { h: 'Scans', num: true, sort: (x) => x.scans ?? 0, get: (x) => x.scans ?? 0 },
               { h: 'Uses', sort: (x) => x.uses, get: (x) => `${x.uses}${x.max_uses ? ` / ${x.max_uses}` : ' / ∞'}` },
               { h: 'Expires', sort: (x) => x.expires_at ?? '', get: (x) => (x.expires_at ? when(x.expires_at) : 'never') },
               { h: 'Created', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
@@ -807,7 +982,7 @@ export default function Admin() {
             rows={d.ledger?.balances ?? []}
             empty="No accounts."
             cols={[
-              { h: 'Account', get: (x) => <code>{x.account}</code> },
+              { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
               { h: 'Balance', num: true, sort: (x) => x.balance, get: (x) => num(x.balance) },
               { h: '', get: (x) => link('Entries', () => setLedgerAccount(x.account)) },
             ]}
@@ -822,9 +997,9 @@ export default function Admin() {
             empty="No entries."
             cols={[
               { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-              { h: 'Account', get: (x) => <code>{x.account}</code> },
+              { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
               { h: 'Amount', num: true, sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'text-bad' : 'text-ok'}>{x.amount}</span> },
-              { h: 'Ref', get: (x) => <code>{x.ref}</code> },
+              { h: 'Ref', sort: (x) => x.ref, get: (x) => <code>{x.ref}</code> },
             ]}
           />
         </>
@@ -839,10 +1014,11 @@ export default function Admin() {
             cols={[
               { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
               { h: 'Actor', get: (x) => x.actor_name ?? 'system', sort: (x) => x.actor_name ?? '' },
-              { h: 'Action', get: (x) => <code>{x.action}</code> },
-              { h: 'Target', get: (x) => <code>{x.target}</code> },
+              { h: 'Action', sort: (x) => x.action, get: (x) => <code>{x.action}</code> },
+              { h: 'Target', sort: (x) => x.target, get: (x) => <code>{x.target}</code> },
               {
                 h: 'Detail',
+                sort: (x) => JSON.stringify(x.detail),
                 get: (x) => (
                   <span className={cx(muted, 'whitespace-pre-wrap')}>
                     {JSON.stringify(x.detail)}

@@ -22,3 +22,8 @@ allowBuilds:
   '@nestjs/core': false
   # telemetry ping bundled with swagger-ui-dist's postinstall — not needed to render docs.
   '@scarf/scarf': false
+  # tsx compiles the unit tests with esbuild; its postinstall is what places the native
+  # binary, so without it `pnpm test` cannot run at all.
+  esbuild: true
+  # The native resolver behind eslint's import plugin — same story, `pnpm lint` needs it.
+  unrs-resolver: true

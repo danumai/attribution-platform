@@ -56,8 +56,12 @@ export class AuthController {
     // Shape check only — the address is proven by nothing here, so it stays a display field.
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       throw new BadRequestException('email must be a valid address');
-    if (b.password.length < 8) throw new BadRequestException('password min 8 chars');
-    if (Buffer.byteLength(b.password) > MAX_PASSWORD)
+    // Through `str` like every other field: a non-string password reached `.length` as
+    // `undefined` (so the minimum silently passed) and then threw inside `byteLength` as a 500.
+    // The cap here is generous on purpose — the real ceiling is the byte check below.
+    const password = str(b.password, 'password', 200)!;
+    if (password.length < 8) throw new BadRequestException('password min 8 chars');
+    if (Buffer.byteLength(password) > MAX_PASSWORD)
       throw new BadRequestException(`password must be ${MAX_PASSWORD} bytes or fewer`);
     const landing_url = validateLandingUrl(b.landing_url);
     const android_package = validateAndroidPackage(b.android_package);
@@ -71,7 +75,7 @@ export class AuthController {
           name,
           type: b.type,
           email,
-          password_hash: await bcrypt.hash(b.password, 10),
+          password_hash: await bcrypt.hash(password, 10),
           api_key_hash: apiKey ? sha256(apiKey) : null,
           landing_url,
           android_package,
@@ -94,7 +98,10 @@ export class AuthController {
 
   @Post('login')
   async login(@Req() req: Request, @Body() b: { email: string; password: string }) {
-    const email = (b.email ?? '').toLowerCase();
+    // Coerced rather than validated: a non-string email or password is just a credential that
+    // cannot match, and answering 400 here would tell a prober something 401 does not.
+    const email = typeof b.email === 'string' ? b.email.toLowerCase() : '';
+    const password = typeof b.password === 'string' ? b.password : '';
     // Two buckets: per-IP stops credential stuffing across many accounts, per-account stops
     // a distributed brute force against one account.
     if (rateLimited(`login-ip:${clientIp(req)}`, 20) || rateLimited(`login-acct:${email}`, 10))
@@ -103,7 +110,7 @@ export class AuthController {
     // Hash even when the account does not exist. Otherwise an unknown email returns in
     // microseconds and a known one takes bcrypt's ~100ms, which is a reliable oracle for
     // enumerating exactly which addresses are registered on this platform.
-    const ok = await bcrypt.compare(b.password ?? '', org?.password_hash ?? DUMMY_HASH);
+    const ok = await bcrypt.compare(password, org?.password_hash ?? DUMMY_HASH);
     if (!org || !ok) throw new UnauthorizedException('invalid credentials');
     if (org.suspended) throw new UnauthorizedException('account suspended');
     return {

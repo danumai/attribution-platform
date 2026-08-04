@@ -17,15 +17,14 @@ import {
   validateBonusLabel,
   validateIosAppId,
 } from '../../common/attribution';
+import { capped } from '../../common/paging';
+import { validateRates } from '../../common/rates';
 import { sha256, str, validateLandingUrl } from '../../common/security';
+import { scanAnalytics } from '../../database/analytics';
 import { audit, balance, balances, ledger } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
 import { AdminGuard, Session } from '../auth/auth.guard';
 import { SessionClaims, newApiKey } from '../auth/tokens';
-
-// Clamped at both ends: Prisma reads a negative `take` as "last N, reversed", so `?limit=-5`
-// silently returned the oldest rows from a newest-first endpoint.
-const capped = (limit?: string) => Math.min(Math.max(Math.trunc(+(limit ?? 200)) || 200, 1), 1000);
 
 // Super admin: reads everything across all orgs, and can act on anything.
 // No org scoping here — that is the whole point of the role.
@@ -65,8 +64,9 @@ export class AdminController {
   }
 
   @Get('orgs')
-  async orgs(@Query('q') q?: string) {
+  async orgs(@Query('q') q?: string, @Query('limit') limit?: string) {
     const rows = await prisma.org.findMany({
+      take: capped(limit),
       where: {
         type: { not: 'admin' },
         ...(q
@@ -213,13 +213,14 @@ export class AdminController {
   }
 
   @Get('partnerships')
-  async partnerships() {
+  async partnerships(@Query('limit') limit?: string) {
     const rows = await prisma.partnership.findMany({
       include: {
         promoter: { select: { name: true } },
         publisher: { select: { name: true } },
       },
       orderBy: { created_at: 'desc' },
+      take: capped(limit),
     });
     return rows.map(({ promoter, publisher, ...p }) => ({
       ...p,
@@ -235,38 +236,27 @@ export class AdminController {
     @Body()
     b: { coin_rate?: number; guest_rate?: number; grace_days?: number; status?: string },
   ) {
-    if (b.coin_rate !== undefined && (!Number.isInteger(b.coin_rate) || b.coin_rate < 1 || b.coin_rate > 100000))
-      throw new BadRequestException('coin_rate must be 1–100000');
-    if (b.guest_rate !== undefined && (!Number.isInteger(b.guest_rate) || b.guest_rate < 0))
-      throw new BadRequestException('guest_rate must be a non-negative integer');
-    if (b.grace_days !== undefined && (!Number.isInteger(b.grace_days) || b.grace_days < 0 || b.grace_days > 365))
-      throw new BadRequestException('grace_days must be 0–365');
     if (b.status !== undefined && !['pending', 'active'].includes(b.status))
       throw new BadRequestException('status must be pending|active');
 
     const current = await prisma.partnership.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('partnership not found');
-    // guest_rate <= coin_rate is a CHECK constraint the driver reports as an opaque error,
-    // so compare the post-patch pair here to return something the caller can act on.
-    if ((b.guest_rate ?? current.guest_rate) > (b.coin_rate ?? current.coin_rate))
-      throw new BadRequestException('guest_rate cannot exceed coin_rate');
+    // Resolved against the existing row, so the pair rule is checked on the post-patch values
+    // — raising only `guest_rate` has to be judged against the `coin_rate` already stored.
+    const rates = validateRates(b, current);
 
     const updated = await prisma.partnership.update({
       where: { id },
-      data: {
-        coin_rate: b.coin_rate ?? undefined,
-        guest_rate: b.guest_rate ?? undefined,
-        grace_days: b.grace_days ?? undefined,
-        status: b.status ?? undefined,
-      },
+      data: { ...rates, status: b.status ?? undefined },
     });
     await audit(s.org_id, 'partnership.patch', `partnership:${id}`, b);
     return updated;
   }
 
   @Get('campaigns')
-  async campaigns() {
+  async campaigns(@Query('limit') limit?: string) {
     const rows = await prisma.campaign.findMany({
+      take: capped(limit),
       include: {
         partnership: {
           select: {
@@ -407,6 +397,13 @@ export class AdminController {
     return { budget: await balance(`campaign:${id}`), reason: b.reason ?? null };
   }
 
+  // Where scans come from, on what, when — platform-wide, or narrowed to one campaign.
+  // Same function the promoter's own campaign page calls, so the two never disagree.
+  @Get('analytics')
+  async analytics(@Query('campaign_id') campaignId?: string, @Query('days') days?: string) {
+    return scanAnalytics(campaignId || null, +(days ?? 30));
+  }
+
   // scan-level data: who scanned what, when, on which device, and whether it converted
   @Get('scans')
   async scans(@Query('campaign_id') campaignId?: string, @Query('limit') limit?: string) {
@@ -418,6 +415,13 @@ export class AdminController {
         ip: true,
         user_agent: true,
         platform: true,
+        country: true,
+        city: true,
+        language: true,
+        referer_host: true,
+        os: true,
+        browser: true,
+        device_type: true,
         consumed: true,
         qr_code: { select: { code: true } },
         redemption: { select: { coins: true, match_method: true } },
@@ -440,6 +444,13 @@ export class AdminController {
       ip_hash: s.ip,
       user_agent: s.user_agent,
       platform: s.platform,
+      country: s.country,
+      city: s.city,
+      language: s.language,
+      referer_host: s.referer_host,
+      os: s.os,
+      browser: s.browser,
+      device_type: s.device_type,
       consumed: s.consumed,
       qr_code: s.qr_code.code,
       campaign_id: s.campaign.id,
@@ -478,8 +489,9 @@ export class AdminController {
   }
 
   @Get('qr-codes')
-  async qrCodes() {
+  async qrCodes(@Query('limit') limit?: string) {
     const rows = await prisma.qrCode.findMany({
+      take: capped(limit),
       select: {
         id: true,
         code: true,
@@ -503,12 +515,12 @@ export class AdminController {
   }
 
   @Get('ledger')
-  async ledgerEntries(@Query('account') account?: string) {
+  async ledgerEntries(@Query('account') account?: string, @Query('limit') limit?: string) {
     const [entries, balances] = await Promise.all([
       prisma.ledgerEntry.findMany({
         where: account ? { account } : {},
         orderBy: { created_at: 'desc' },
-        take: 300,
+        take: capped(limit ?? '300'),
       }),
       prisma.accountBalance.findMany({ orderBy: { account: 'asc' } }),
     ]);

@@ -228,10 +228,11 @@ export const journeyTrack = 'lp-journey-track [stroke-width:2] stroke-line';
 export const journeyDraw = 'lp-journey-draw [stroke-width:2] stroke-accent [stroke-dasharray:400] [stroke-dashoffset:0]';
 
 export const journeyPoint = 'lp-journey-point relative flex flex-col items-center gap-2 pt-2';
+// Activation is CSS-driven off `view()` (see landing.css) — the `data-active` variants that
+// used to live here belonged to a setInterval-driven modal diagram that is now a <video>.
 export const journeyDot =
   'lp-journey-dot size-4 rounded-full border-2 border-line bg-card ' +
-  'transition-[border-color,background-color,transform] duration-300 ' +
-  'group-data-[active]:border-accent group-data-[active]:bg-accent group-data-[active]:scale-115';
+  'transition-[border-color,background-color,transform] duration-300';
 export const journeyToken =
   'lp-journey-token pointer-events-none absolute top-2 size-2 rounded-full bg-ok opacity-0';
 export const journeyLabel =
@@ -239,9 +240,15 @@ export const journeyLabel =
 
 export const journeyTrigger = 'mt-4.5 [&>span]:text-[11px]';
 
-export const modalScrim =
-  'fixed inset-0 z-100 flex items-center justify-center bg-[color-mix(in_srgb,var(--color-ink)_45%,transparent)] p-6';
-export const modal = 'relative w-[min(720px,100%)] px-7 pt-8.5 pb-7';
+/**
+ * The journey modal is a native <dialog>, so the browser owns the focus trap, Esc, inertness
+ * of the page behind, and the scrim (::backdrop). `m-auto` is what centres it: a dialog in
+ * the top layer has no flex parent to be centred by.
+ */
+export const modalDialog =
+  'm-auto w-[min(720px,calc(100vw-48px))] bg-transparent p-0 text-ink ' +
+  'backdrop:bg-[color-mix(in_srgb,var(--color-ink)_45%,transparent)]';
+export const modal = 'relative w-full px-7 pt-8.5 pb-7';
 export const modalClose =
   'absolute -top-3.5 -right-3.5 z-2 size-7 cursor-pointer rounded-full border border-line bg-card ' +
   'text-base leading-none text-ink-soft shadow-[0_2px_8px_-2px_rgba(26,23,18,.35)] hover:bg-card-alt hover:text-ink';

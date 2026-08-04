@@ -159,10 +159,7 @@
     .lp .lp-leg:nth-child(4) { animation-range: entry 17% entry 67%; }
 
     /* the journey diagram's waypoints light up one by one, on the same stagger as
-       the coupon strip below them so the two read as one motion. Scoped to
-       :not(.lp-journey-modal-inner) — the modal reuses these same classes for its
-       own, independently time-driven (setInterval) waypoint activation via
-       [data-active], which must keep working unaffected. */
+       the coupon strip below them so the two read as one motion. */
     @keyframes lp-journey-dot-active {
       to { border-color: var(--color-accent); background: var(--color-accent); transform: scale(1.15); }
     }
@@ -178,38 +175,38 @@
       from { stroke-dashoffset: 400; }
       to { stroke-dashoffset: 0; }
     }
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-dot {
+    .lp-journey .lp-journey-dot {
       animation: lp-journey-dot-active linear both;
       animation-timeline: view();
       animation-range: entry 5% entry 55%;
     }
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-label {
+    .lp-journey .lp-journey-label {
       animation: lp-journey-label-active linear both;
       animation-timeline: view();
       animation-range: entry 5% entry 55%;
     }
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-token {
+    .lp-journey .lp-journey-token {
       animation: lp-journey-token-active linear both;
       animation-timeline: view();
       animation-range: entry 5% entry 55%;
     }
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(2) .lp-journey-dot,
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(2) .lp-journey-label,
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(2) .lp-journey-token {
+    .lp-journey .lp-journey-point:nth-of-type(2) .lp-journey-dot,
+    .lp-journey .lp-journey-point:nth-of-type(2) .lp-journey-label,
+    .lp-journey .lp-journey-point:nth-of-type(2) .lp-journey-token {
       animation-range: entry 9% entry 59%;
     }
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(3) .lp-journey-dot,
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(3) .lp-journey-label,
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(3) .lp-journey-token {
+    .lp-journey .lp-journey-point:nth-of-type(3) .lp-journey-dot,
+    .lp-journey .lp-journey-point:nth-of-type(3) .lp-journey-label,
+    .lp-journey .lp-journey-point:nth-of-type(3) .lp-journey-token {
       animation-range: entry 13% entry 63%;
     }
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(4) .lp-journey-dot,
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(4) .lp-journey-label,
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-point:nth-of-type(4) .lp-journey-token {
+    .lp-journey .lp-journey-point:nth-of-type(4) .lp-journey-dot,
+    .lp-journey .lp-journey-point:nth-of-type(4) .lp-journey-label,
+    .lp-journey .lp-journey-point:nth-of-type(4) .lp-journey-token {
       animation-range: entry 17% entry 67%;
     }
     /* the connecting line fills across the same span the 4 waypoints activate over */
-    .lp-journey:not(.lp-journey-modal-inner) .lp-journey-draw {
+    .lp-journey .lp-journey-draw {
       animation: lp-journey-draw-fill linear both;
       animation-timeline: view();
       animation-range: entry 5% entry 67%;

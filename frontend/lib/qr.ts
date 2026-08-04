@@ -94,6 +94,23 @@ function luminance(hex: string): number {
  * The same contrast rule the server enforces, run locally so the editor can warn while
  * you drag a colour picker instead of only failing on save.
  */
+/** The style keys a preset owns — the ones that decide which preset, if any, is on the plate. */
+const PRESET_KEYS = [
+  'dark', 'light', 'margin', 'shape', 'eyeFrame', 'eyeBall', 'eyeColor', 'eyeBallColor',
+  'gradient', 'frame', 'frameText', 'frameColor', 'frameTextColor',
+] as const;
+
+/**
+ * Whether two styles are the same *preset*, ignoring everything a preset does not own —
+ * size, error correction and the logo are the promoter's, not the preset's, so changing them
+ * must not make the picker lose its highlighted swatch.
+ *
+ * Lives here rather than in the studio page because it is a fact about presets, which is what
+ * this module owns, and because that is what makes it testable.
+ */
+export const samePlate = (a: Style, b: Style) =>
+  PRESET_KEYS.every((k) => JSON.stringify(a[k] ?? null) === JSON.stringify(b[k] ?? null));
+
 export function contrastProblem(s: Style): string | null {
   const light = s.light ?? '#ffffff';
   if (isTransparent(light)) return null;

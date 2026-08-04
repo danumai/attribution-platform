@@ -7,7 +7,7 @@
  * <UI /> is mounted once in the root layout and renders both.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { btn, btnDanger, btnGhost, cx, field, h3, label, muted } from '@/lib/tw';
+import { alertErr, btn, btnDanger, btnGhost, card, cx, field, h3, label, muted } from '@/lib/tw';
 
 type Kind = 'success' | 'error' | 'info';
 type Toast = { id: number; kind: Kind; text: string; leaving?: boolean };
@@ -72,6 +72,26 @@ export function promptDialog(o: Omit<Dialog, 'resolve'> & { input: string }) {
     dialog = { ...o, resolve: (v) => res(typeof v === 'string' ? v : null) };
     emit();
   });
+}
+
+/**
+ * What a failed load looks like.
+ *
+ * Both consoles derive "still loading" from the absence of data, so a load that *failed* is
+ * indistinguishable from one still in flight: the toast expires after four seconds and the
+ * operator is left watching shimmer bars with nothing to click. This replaces the skeleton
+ * rather than sitting above it — the page is not loading, and must not claim to be.
+ */
+export function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className={cx(card, 'mt-3')} role="alert">
+      <h3 className={h3}>This didn’t load</h3>
+      <p className={cx(alertErr, 'mt-3')}>{message}</p>
+      <button className={cx(btn, 'mt-4')} onClick={onRetry}>
+        Try again
+      </button>
+    </div>
+  );
 }
 
 const ICONS: Record<Kind, JSX.Element> = {
@@ -162,7 +182,7 @@ function Dialogs() {
         {d.input !== undefined && (
           <>
             {d.inputLabel && <label className={label}>{d.inputLabel}</label>}
-            {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+            {/* autofocus is correct here: a prompt dialog exists to take one value */}
             <input
               className={cx(field, d.inputLabel ? '' : 'mt-4.5')}
               autoFocus
