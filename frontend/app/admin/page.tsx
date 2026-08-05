@@ -727,13 +727,15 @@ export default function Admin() {
             { h: 'Created', get: (x) => when(x.created_at), sort: (x) => x.created_at },
             {
               h: '',
+              // Pausing sets `suspended`, not `pending`: `pending` is the publisher's own inbox
+              // state, and a publisher can accept its way out of that one.
               get: (x) =>
-                x.status === 'pending'
-                  ? link('Force approve', () =>
-                      patch(`/v1/admin/partnerships/${x.id}`, { status: 'active' }, 'Partnership approved'),
+                x.status === 'active'
+                  ? link('Suspend', () =>
+                      patch(`/v1/admin/partnerships/${x.id}`, { status: 'suspended' }, 'Partnership suspended'),
                     )
-                  : link('Set pending', () =>
-                      patch(`/v1/admin/partnerships/${x.id}`, { status: 'pending' }, 'Partnership paused'),
+                  : link(x.status === 'pending' ? 'Force approve' : 'Reactivate', () =>
+                      patch(`/v1/admin/partnerships/${x.id}`, { status: 'active' }, 'Partnership approved'),
                     ),
             },
           ]}

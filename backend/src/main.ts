@@ -14,7 +14,11 @@ async function bootstrap() {
   // (see the Dockerfile CMD and the `db:deploy` script) — never by the app at boot.
   await seedAccounts();
 
-  const app = await NestFactory.create(AppModule);
+  // `bodyParser: false` because this file mounts its own below. Nest's default one is
+  // registered during `listen()`, i.e. *after* every `app.use` here — so leaving it on meant a
+  // second parser behind the first, and the rate limiter's "before the body parser" position
+  // held only by accident of which middleware happened to consume the stream first.
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   // req.ip must reflect the real client, or per-IP rate limits collapse to one bucket
   app.getHttpAdapter().getInstance().set('trust proxy', TRUST_PROXY);
 

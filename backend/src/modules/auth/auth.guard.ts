@@ -17,7 +17,9 @@ export class AuthGuard implements CanActivate {
     const token = (req.headers.authorization ?? '').replace(/^Bearer /, '');
     let claims: SessionClaims;
     try {
-      claims = jwt.verify(token, JWT_SECRET) as SessionClaims;
+      // Algorithm pinned, not inferred from the token's own header — the one input an
+      // attacker controls must never get to name the scheme it is checked under.
+      claims = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as SessionClaims;
     } catch {
       throw new UnauthorizedException();
     }

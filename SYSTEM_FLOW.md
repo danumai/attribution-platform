@@ -689,8 +689,10 @@ Seeded from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on first boot — never created via
     GET  /v1/admin/ledger?account=
     auth: Bearer <token> (admin)
 
-4.  Override a partnership's commercial terms
+4.  Override a partnership's commercial terms, or suspend it
     PATCH /v1/admin/partnerships/:id { coin_rate, guest_rate, grace_days, status }
+    status: pending | active | suspended. `suspended` stops scans and payouts and the
+    publisher cannot re-accept its way out of it; `pending` is the publisher's inbox state.
     auth: Bearer <token> (admin) — audited
 
 5.  Kill a runaway campaign (ends it, voids every code it issued)
@@ -1150,7 +1152,7 @@ Full request/response schemas: the live Swagger UI at `/docs`.
 | `POST` | `/v1/api-keys/rotate` | session JWT | New API key, old one dies instantly |
 | `GET` · `PATCH` | `/v1/orgs/me` | session JWT | App package, store id, landing URL, bonus label |
 | `GET` | `/v1/partnerships` | session JWT | Proposed and active partnerships |
-| `POST` | `/v1/partnerships/{id}/accept` | session JWT | Accept the terms |
+| `POST` | `/v1/partnerships/{id}/accept` | session JWT | Accept the terms (from `pending` only) |
 | `GET` | `/v1/redemptions` | session JWT | Your last 100 attributions, for reconciliation |
 
 **Two credentials, never mixed:**

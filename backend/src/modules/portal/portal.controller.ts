@@ -70,6 +70,15 @@ export class PortalController {
     },
   ) {
     if (s.type !== 'promoter') throw new ForbiddenException('promoters only');
+    // The foreign key only proves the id names *an org*. Without this, a promoter could open a
+    // partnership against another promoter, an admin, or a publisher the directory deliberately
+    // hides — none of which can ever pay out, so every campaign built on it dies at the
+    // redirect with `no_destination` and the promoter has already printed the codes.
+    const publisher = await prisma.org.findFirst({
+      where: { id: b.publisher_org_id, type: 'publisher', suspended: false },
+      select: { id: true },
+    });
+    if (!publisher) throw new BadRequestException('no such publisher');
     // No `current` row to resolve against — a new partnership takes the platform defaults for
     // anything the promoter left out. Same rules the admin patch runs, from one definition.
     const rates = validateRates(b);
@@ -108,9 +117,14 @@ export class PortalController {
 
   @Post('partnerships/:id/accept')
   async accept(@Session() s: SessionClaims, @Param('id') id: string) {
-    // updateMany so the publisher-ownership check is part of the WHERE, not a second query
+    // updateMany so the publisher-ownership check is part of the WHERE, not a second query.
+    //
+    // `status: 'pending'` is part of that WHERE for the same reason: an admin suspending a
+    // partnership is a control the publisher must not be able to undo, and with only two
+    // states this endpoint *was* the undo — one call put a suspended relationship straight
+    // back to `active`, and scans and payouts resumed against it.
     const updated = await prisma.partnership.updateMany({
-      where: { id, publisher_org_id: s.org_id },
+      where: { id, publisher_org_id: s.org_id, status: 'pending' },
       data: { status: 'active' },
     });
     if (!updated.count) throw new NotFoundException();

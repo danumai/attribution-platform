@@ -236,8 +236,11 @@ export class AdminController {
     @Body()
     b: { coin_rate?: number; guest_rate?: number; grace_days?: number; status?: string },
   ) {
-    if (b.status !== undefined && !['pending', 'active'].includes(b.status))
-      throw new BadRequestException('status must be pending|active');
+    // `suspended` rather than `pending` is the pause lever: `pending` is the publisher's own
+    // inbox state and the publisher can accept its way out of it, which is exactly what made
+    // an admin suspension revertible by the org it was aimed at.
+    if (b.status !== undefined && !['pending', 'active', 'suspended'].includes(b.status))
+      throw new BadRequestException('status must be pending|active|suspended');
 
     const current = await prisma.partnership.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('partnership not found');

@@ -104,7 +104,14 @@ export class AuthController {
     const password = typeof b.password === 'string' ? b.password : '';
     // Two buckets: per-IP stops credential stuffing across many accounts, per-account stops
     // a distributed brute force against one account.
-    if (rateLimited(`login-ip:${clientIp(req)}`, 20) || rateLimited(`login-acct:${email}`, 10))
+    // The account key is sliced because it is attacker-controlled and becomes a *retained* map
+    // key: a body full of 1mb emails is otherwise a megabyte of resident memory per request
+    // until the sweep runs. 254 is the address ceiling `signup` enforces, so no real login
+    // is ever truncated into somebody else's bucket.
+    if (
+      rateLimited(`login-ip:${clientIp(req)}`, 20) ||
+      rateLimited(`login-acct:${email.slice(0, 254)}`, 10)
+    )
       throw new UnauthorizedException('too many attempts, try again shortly');
     const org = await prisma.org.findUnique({ where: { email } });
     // Hash even when the account does not exist. Otherwise an unknown email returns in

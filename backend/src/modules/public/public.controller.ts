@@ -88,8 +88,8 @@ export class PublicController {
     if (campaign.status !== 'active')
       return end(campaign.status === 'paused' ? 'paused' : 'ended');
     // The partnership is the agreement the fee is paid under. It is checked at campaign
-    // creation, but an admin can send it back to `pending` afterwards — and that has to stop
-    // scans, or the suspension lever silently does nothing while claims keep paying out.
+    // creation, but an admin can suspend it afterwards — and that has to stop scans, or the
+    // suspension lever silently does nothing while claims keep paying out.
     if (campaign.partnership.status !== 'active') return end('partnership_inactive');
     if ((await balance(`campaign:${campaign.id}`)) <= 0) return end('budget');
 

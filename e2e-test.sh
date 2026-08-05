@@ -25,7 +25,7 @@ PUB=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
 PUB_TOKEN=$(echo "$PUB" | j .token); PUB_ID=$(echo "$PUB" | j .org.id); API_KEY=$(echo "$PUB" | j .api_key)
 PRO=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
   -d "{\"name\":\"Air Dhaka $S\",\"email\":\"pro$S@t.com\",\"password\":\"password123\",\"type\":\"promoter\"}")
-PRO_TOKEN=$(echo "$PRO" | j .token)
+PRO_TOKEN=$(echo "$PRO" | j .token); PRO_ID=$(echo "$PRO" | j .org.id)
 [ -n "$API_KEY" ] && pass "publisher got one-time API key" || fail "no API key"
 
 echo "2. Partnership"
@@ -37,6 +37,11 @@ pass "partnership created and accepted (10 guest / 50 full)"
 BADTIER=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
   -d "{\"publisher_org_id\":\"$PUB_ID\",\"coin_rate\":50,\"guest_rate\":80}")
 [ "$BADTIER" = "400" ] && pass "guest_rate above coin_rate rejected (400)" || fail "tier guard: $BADTIER"
+# The foreign key only proves the id names an org. A partnership pointed at a promoter has no
+# app, no landing page and no API key, so every code printed for it dies at `no_destination`.
+BADPUB=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"publisher_org_id\":\"$PRO_ID\"}")
+[ "$BADPUB" = "400" ] && pass "partnership with a non-publisher rejected (400)" || fail "publisher guard: $BADPUB"
 
 echo "3. Campaign + funding"
 CAMP=$(curl -s -XPOST $API/v1/campaigns -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
@@ -308,11 +313,16 @@ REOPENED=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$ONCE
 echo "$REOPENED" | grep -q 'play.google.com' && pass "overridden code scans again" || fail "override not applied: $REOPENED"
 A $API/v1/admin/audit-log | grep -q 'permanent store signage' && pass "every override lands in the audit log" || fail "no audit entry"
 
-# Sending a partnership back to `pending` is the obvious lever for "suspend this relationship".
-# It was checked only when a campaign was created, so afterwards it changed nothing at all:
-# scans kept redirecting and claims kept paying out against a partnership under no agreement.
-SUSPEND=$(A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"status":"pending"}' | j .status)
-[ "$SUSPEND" = "pending" ] && pass "admin can send a partnership back to pending" || fail "suspend: $SUSPEND"
+# Suspending a partnership is the lever for "stop this relationship now". It was checked only
+# when a campaign was created, so afterwards it changed nothing at all: scans kept redirecting
+# and claims kept paying out against a partnership under no agreement.
+SUSPEND=$(A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"status":"suspended"}' | j .status)
+[ "$SUSPEND" = "suspended" ] && pass "admin can suspend a partnership" || fail "suspend: $SUSPEND"
+# ...and the publisher cannot lift it. This used to be one call: `accept` moved any partnership
+# of yours to `active` regardless of where it started, so the org being suspended was the org
+# that could undo the suspension.
+UNDO=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships/$PART_ID/accept -H "Authorization: Bearer $PUB_TOKEN")
+[ "$UNDO" = "404" ] && pass "...which the publisher cannot re-accept its way out of" || fail "publisher lifted an admin suspension: HTTP $UNDO"
 HELD=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
 echo "$HELD" | grep -q 'reason=partnership_inactive' && pass "an inactive partnership stops scans" || fail "suspended partnership still redirects: $HELD"
 HELDCLAIM=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
