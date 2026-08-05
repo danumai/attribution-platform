@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, org as getOrg, token } from '@/lib/api';
@@ -119,7 +119,7 @@ export default function Dashboard() {
     ios_app_id: '',
     bonus_label: '',
   });
-  const setDestField = (k: keyof typeof dest) => (e: any) =>
+  const setDestField = (k: keyof typeof dest) => (e: ChangeEvent<HTMLInputElement>) =>
     setDest((d) => ({ ...d, [k]: e.target.value }));
 
   async function load() {
@@ -290,7 +290,7 @@ export default function Dashboard() {
             <>
               <Redemptions rows={redemptions.slice(0, 5)} />
               {redemptions.length > 5 && (
-                <button className={linkish} style={{ marginTop: 14 }} onClick={() => setSec('redemptions')}>
+                <button className={cx(linkish, 'mt-3.5')} onClick={() => setSec('redemptions')}>
                   All {num(redemptions.length)} redemptions
                 </button>
               )}
@@ -330,21 +330,21 @@ export default function Dashboard() {
                 )}
                 <label className={label}>Coins granted per verified signup (full tier)</label>
                 <input
-                  className={field}
+              className={field}
                   type="number"
                   value={newPartner.coin_rate}
                   onChange={(e) => setNewPartner({ ...newPartner, coin_rate: +e.target.value })}
                 />
                 <label className={label}>Coins for an unverified guest (the rest is held back)</label>
                 <input
-                  className={field}
+              className={field}
                   type="number"
                   value={newPartner.guest_rate}
                   onChange={(e) => setNewPartner({ ...newPartner, guest_rate: +e.target.value })}
                 />
                 <label className={label}>Days a guest has to verify and claim the remainder</label>
                 <input
-                  className={field}
+              className={field}
                   type="number"
                   value={newPartner.grace_days}
                   onChange={(e) => setNewPartner({ ...newPartner, grace_days: +e.target.value })}
@@ -552,7 +552,7 @@ export default function Dashboard() {
                 </select>
                 <label className={label}>Campaign name</label>
                 <input
-                  className={field}
+              className={field}
                   value={newCampaign.name}
                   onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
                   placeholder="Inflight entertainment promo"
@@ -612,28 +612,28 @@ export default function Dashboard() {
             </p>
             <label className={label}>Google Play package (Android scans)</label>
             <input
-                  className={field}
+              className={field}
               value={dest.android_package}
               placeholder="com.example.app"
               onChange={setDestField('android_package')}
             />
             <label className={label}>App Store id (iPhone scans)</label>
             <input
-                  className={field}
+              className={field}
               value={dest.ios_app_id}
               placeholder="123456789"
               onChange={setDestField('ios_app_id')}
             />
             <label className={label}>Web fallback (desktop scans, and platforms with no app registered)</label>
             <input
-                  className={field}
+              className={field}
               value={dest.landing_url}
               placeholder="https://example.com/get-the-app"
               onChange={setDestField('landing_url')}
             />
             <label className={label}>Your joining bonus, in your own words</label>
             <input
-                  className={field}
+              className={field}
               value={dest.bonus_label}
               placeholder="100 free coins for new accounts"
               onChange={setDestField('bonus_label')}

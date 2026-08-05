@@ -1,5 +1,5 @@
 'use client';
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MouseEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
@@ -135,6 +135,8 @@ function haystack(row: object): string {
 
 /** Row actions live behind one control instead of a run of dot-separated links. */
 function Actions({ children }: { children: ReactNode }) {
+  // click-away and pick-an-item both close the menu, the way a native popover would
+  const close = (e: MouseEvent<HTMLElement>) => e.currentTarget.closest('details')?.removeAttribute('open');
   return (
     <details className={menu}>
       <summary className={menuSummary} aria-label="Row actions" title="Actions">
@@ -144,9 +146,8 @@ function Actions({ children }: { children: ReactNode }) {
           <circle cx="13" cy="8" r="1.5" />
         </svg>
       </summary>
-      {/* click-away: the backdrop closes the menu the way a native popover would */}
-      <div className={menuScrim} onClick={(e) => (e.currentTarget.closest('details') as any)?.removeAttribute('open')} />
-      <div className={menuPop} onClick={(e) => (e.currentTarget.closest('details') as any)?.removeAttribute('open')}>
+      <div className={menuScrim} onClick={close} />
+      <div className={menuPop} onClick={close}>
         {children}
       </div>
     </details>
@@ -300,6 +301,23 @@ function Table<T extends object>({
         </div>
       )}
     </>
+  );
+}
+
+/** A row of plain counts — the Coins and Platform strips, which are the same shape twice. */
+function Figures({ items }: { items: [string, number | undefined][] }) {
+  return (
+    <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
+      {items.map(([k, v]) => (
+        <div
+          className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt"
+          key={k}
+        >
+          <b className={figure}>{num(v ?? 0)}</b>
+          <span className={cx(stamp, 'mt-0.5 block')}>{k}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -576,27 +594,19 @@ export default function Admin() {
             </div>
 
             <h2 className={sectionHead}>Coins</h2>
-            <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
-              {[
+            <Figures
+              items={[
                 ['funded', o.total_funded],
                 ['granted', o.coins_granted],
                 ['unspent', (o.total_funded ?? 0) - (o.coins_granted ?? 0)],
                 ['identified', o.identified_redemptions],
                 ['guest', o.guest_redemptions],
-              ].map(([k, v]) => (
-                <div
-                  className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt"
-                  key={k as string}
-                >
-                  <b className={figure}>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
-                  <span className={cx(stamp, 'mt-0.5 block')}>{k as string}</span>
-                </div>
-              ))}
-            </div>
+              ]}
+            />
 
             <h2 className={sectionHead}>Platform</h2>
-            <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
-              {[
+            <Figures
+              items={[
                 ['promoters', o.promoters],
                 ['publishers', o.publishers],
                 ['partnerships', o.partnerships],
@@ -604,226 +614,209 @@ export default function Admin() {
                 ['QR codes', o.qr_codes],
                 ['scans', o.scans],
                 ['redemptions', o.redemptions],
-              ].map(([k, v]) => (
-                <div
-                  className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt"
-                  key={k as string}
-                >
-                  <b className={figure}>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
-                  <span className={cx(stamp, 'mt-0.5 block')}>{k as string}</span>
-                </div>
-              ))}
-            </div>
+              ]}
+            />
           </>
         ))}
 
       {tab === 'Organizations' && (
-        <>
-          <Table
-            loading={loading}
-            rows={d.orgs ?? []}
-            cols={[
-              { h: 'Name', get: (x) => x.name },
-              { h: 'Type', sort: (x) => x.type, get: (x) => pill(x.type) },
-              { h: 'Email', get: (x) => x.email },
-              { h: 'Landing URL', sort: (x) => x.landing_url ?? '', get: (x) => (x.landing_url ? <a className={linkClass} href={x.landing_url} target="_blank" rel="noreferrer">{x.landing_url}</a> : '—') },
-              { h: 'API key', sort: (x) => x.has_api_key, get: (x) => (x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="text-bad">missing</span>) },
-              { h: 'Campaigns', num: true, get: (x) => x.campaigns },
-              { h: 'Coins', num: true, get: (x) => x.coin_balance ?? '—' },
-              { h: 'Joined', get: (x) => when(x.created_at), sort: (x) => x.created_at },
-              { h: 'Status', get: (x) => pill(x.suspended ? 'suspended' : 'active'), sort: (x) => x.suspended },
-              {
-                h: '',
-                get: (x) => (
-                  <Actions>
-                    {item(x.suspended ? 'Reinstate' : 'Suspend', () =>
-                      patch(`/v1/admin/orgs/${x.id}`, { suspended: !x.suspended }, x.suspended ? 'Reinstated' : 'Suspended'),
-                    )}
-                    {item('Rename', async () => {
-                      const name = await promptDialog({
-                        title: `Rename ${x.name}`,
-                        inputLabel: 'Organization name',
-                        input: x.name,
-                        confirmText: 'Rename',
-                      });
-                      if (name && name !== x.name) patch(`/v1/admin/orgs/${x.id}`, { name }, 'Renamed');
-                    })}
-                    {x.type === 'publisher' && (
-                      <>
-                        {item('Set landing URL', async () => {
-                          const landing_url = await promptDialog({
-                            title: `Landing URL for ${x.name}`,
-                            body: 'Where a scanned user is redirected. Must be https.',
-                            inputLabel: 'URL',
-                            input: x.landing_url ?? '',
-                            confirmText: 'Save',
-                          });
-                          if (landing_url) patch(`/v1/admin/orgs/${x.id}`, { landing_url }, 'Landing URL updated');
-                        })}
-                        {item('Rotate API key', async () => {
-                          const go = await confirmDialog({
-                            title: `Rotate the API key for ${x.name}?`,
-                            body: 'The old key stops working immediately, and their backend will fail until they deploy the new one.',
-                            confirmText: 'Rotate key',
-                            danger: true,
-                          });
-                          if (go) post(`/v1/admin/orgs/${x.id}/rotate-key`, {});
-                        })}
-                      </>
-                    )}
-                    {item(
-                      'Offboard org',
-                      async () => {
-                        const reason = await promptDialog({
-                          title: `Offboard ${x.name}?`,
-                          body: 'Suspends the org, revokes its API key and ends every campaign it takes part in. Recorded in the audit log.',
-                          inputLabel: 'Reason',
-                          input: '',
-                          confirmText: 'Offboard',
+        <Table
+          loading={loading}
+          rows={d.orgs ?? []}
+          cols={[
+            { h: 'Name', get: (x) => x.name },
+            { h: 'Type', sort: (x) => x.type, get: (x) => pill(x.type) },
+            { h: 'Email', get: (x) => x.email },
+            { h: 'Landing URL', sort: (x) => x.landing_url ?? '', get: (x) => (x.landing_url ? <a className={linkClass} href={x.landing_url} target="_blank" rel="noreferrer">{x.landing_url}</a> : '—') },
+            { h: 'API key', sort: (x) => x.has_api_key, get: (x) => (x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="text-bad">missing</span>) },
+            { h: 'Campaigns', num: true, get: (x) => x.campaigns },
+            { h: 'Coins', num: true, get: (x) => x.coin_balance ?? '—' },
+            { h: 'Joined', get: (x) => when(x.created_at), sort: (x) => x.created_at },
+            { h: 'Status', get: (x) => pill(x.suspended ? 'suspended' : 'active'), sort: (x) => x.suspended },
+            {
+              h: '',
+              get: (x) => (
+                <Actions>
+                  {item(x.suspended ? 'Reinstate' : 'Suspend', () =>
+                    patch(`/v1/admin/orgs/${x.id}`, { suspended: !x.suspended }, x.suspended ? 'Reinstated' : 'Suspended'),
+                  )}
+                  {item('Rename', async () => {
+                    const name = await promptDialog({
+                      title: `Rename ${x.name}`,
+                      inputLabel: 'Organization name',
+                      input: x.name,
+                      confirmText: 'Rename',
+                    });
+                    if (name && name !== x.name) patch(`/v1/admin/orgs/${x.id}`, { name }, 'Renamed');
+                  })}
+                  {x.type === 'publisher' && (
+                    <>
+                      {item('Set landing URL', async () => {
+                        const landing_url = await promptDialog({
+                          title: `Landing URL for ${x.name}`,
+                          body: 'Where a scanned user is redirected. Must be https.',
+                          inputLabel: 'URL',
+                          input: x.landing_url ?? '',
+                          confirmText: 'Save',
+                        });
+                        if (landing_url) patch(`/v1/admin/orgs/${x.id}`, { landing_url }, 'Landing URL updated');
+                      })}
+                      {item('Rotate API key', async () => {
+                        const go = await confirmDialog({
+                          title: `Rotate the API key for ${x.name}?`,
+                          body: 'The old key stops working immediately, and their backend will fail until they deploy the new one.',
+                          confirmText: 'Rotate key',
                           danger: true,
                         });
-                        if (reason !== null) post(`/v1/admin/orgs/${x.id}/offboard`, { reason }, 'Org offboarded');
-                      },
-                      true,
-                    )}
-                  </Actions>
-                ),
-              },
-            ]}
-          />
-        </>
+                        if (go) post(`/v1/admin/orgs/${x.id}/rotate-key`, {});
+                      })}
+                    </>
+                  )}
+                  {item(
+                    'Offboard org',
+                    async () => {
+                      const reason = await promptDialog({
+                        title: `Offboard ${x.name}?`,
+                        body: 'Suspends the org, revokes its API key and ends every campaign it takes part in. Recorded in the audit log.',
+                        inputLabel: 'Reason',
+                        input: '',
+                        confirmText: 'Offboard',
+                        danger: true,
+                      });
+                      if (reason !== null) post(`/v1/admin/orgs/${x.id}/offboard`, { reason }, 'Org offboarded');
+                    },
+                    true,
+                  )}
+                </Actions>
+              ),
+            },
+          ]}
+        />
       )}
 
       {tab === 'Partnerships' && (
-        <>
-          <Table
-            loading={loading}
-            rows={d.partnerships ?? []}
-            cols={[
-              { h: 'Promoter', get: (x) => x.promoter_name },
-              { h: 'Publisher', get: (x) => x.publisher_name },
-              ...(['coin_rate', 'guest_rate', 'grace_days'] as const).map((f) => ({
-                h: f === 'grace_days' ? 'Grace (days)' : f === 'coin_rate' ? 'Coins / signup' : 'Guest rate',
-                sort: (x: any) => x[f],
-                get: (x: any) => (
-                  <input
-                    className={cx(field, 'w-[90px] px-2 py-1.5 text-[13px]')}
-                    type="number"
-                    defaultValue={x[f]}
-                    onBlur={(e) =>
-                      +e.target.value !== x[f] &&
-                      patch(`/v1/admin/partnerships/${x.id}`, { [f]: +e.target.value }, 'Rate updated')
-                    }
-                  />
-                ),
-              })),
-              { h: 'Status', sort: (x) => x.status, get: (x) => pill(x.status) },
-              { h: 'Created', get: (x) => when(x.created_at), sort: (x) => x.created_at },
-              {
-                h: '',
-                get: (x) =>
-                  x.status === 'pending'
-                    ? link('Force approve', () =>
-                        patch(`/v1/admin/partnerships/${x.id}`, { status: 'active' }, 'Partnership approved'),
-                      )
-                    : link('Set pending', () =>
-                        patch(`/v1/admin/partnerships/${x.id}`, { status: 'pending' }, 'Partnership paused'),
-                      ),
-              },
-            ]}
-          />
-        </>
+        <Table
+          loading={loading}
+          rows={d.partnerships ?? []}
+          cols={[
+            { h: 'Promoter', get: (x) => x.promoter_name },
+            { h: 'Publisher', get: (x) => x.publisher_name },
+            ...(['coin_rate', 'guest_rate', 'grace_days'] as const).map((f) => ({
+              h: f === 'grace_days' ? 'Grace (days)' : f === 'coin_rate' ? 'Coins / signup' : 'Guest rate',
+              sort: (x: any) => x[f],
+              get: (x: any) => (
+                <input
+                  className={cx(field, 'w-22.5 px-2 py-1.5 text-[13px]')}
+                  type="number"
+                  defaultValue={x[f]}
+                  onBlur={(e) =>
+                    +e.target.value !== x[f] &&
+                    patch(`/v1/admin/partnerships/${x.id}`, { [f]: +e.target.value }, 'Rate updated')
+                  }
+                />
+              ),
+            })),
+            { h: 'Status', sort: (x) => x.status, get: (x) => pill(x.status) },
+            { h: 'Created', get: (x) => when(x.created_at), sort: (x) => x.created_at },
+            {
+              h: '',
+              get: (x) =>
+                x.status === 'pending'
+                  ? link('Force approve', () =>
+                      patch(`/v1/admin/partnerships/${x.id}`, { status: 'active' }, 'Partnership approved'),
+                    )
+                  : link('Set pending', () =>
+                      patch(`/v1/admin/partnerships/${x.id}`, { status: 'pending' }, 'Partnership paused'),
+                    ),
+            },
+          ]}
+        />
       )}
 
       {tab === 'Campaigns' && (
-        <>
-          <Table
-            loading={loading}
-            rows={campaigns}
-            cols={[
-              { h: 'Campaign', get: (x) => x.name },
-              { h: 'Promoter', get: (x) => x.promoter_name },
-              { h: 'Publisher', get: (x) => x.publisher_name },
-              { h: 'Rate', num: true, get: (x) => x.coin_rate },
-              // `scans`/`redemptions` are counted only by the admin listing, hence optional
-              { h: 'Scans', num: true, get: (x) => x.scans ?? 0 },
-              { h: 'Redemptions', num: true, get: (x) => x.redemptions ?? 0 },
-              {
-                h: 'Conv.',
-                num: true,
-                sort: (x) => (x.scans ? (x.redemptions ?? 0) / x.scans : -1),
-                get: (x) => (x.scans ? `${(((x.redemptions ?? 0) / x.scans) * 100).toFixed(0)}%` : '—'),
-              },
-              {
-                h: 'Budget',
-                num: true,
-                sort: (x) => x.budget,
-                get: (x) => (
-                  <span className={x.budget < x.coin_rate ? 'text-bad' : ''}>{num(x.budget)}</span>
-                ),
-              },
-              {
-                h: 'Status',
-                sort: (x) => x.status,
-                get: (x) => (
-                  <select
-                    className={cx(selectField, 'w-[110px] px-2 py-1.5 text-[13px]')}
-                    value={x.status}
-                    onChange={(e) => patch(`/v1/admin/campaigns/${x.id}`, { status: e.target.value }, 'Campaign updated')}
-                  >
-                    {['active', 'paused', 'ended'].map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </select>
-                ),
-              },
-              {
-                h: '',
-                get: (x) => (
-                  <Actions>
-                    {item('Adjust budget', async () => {
-                      const v = await promptDialog({
-                        title: `Adjust budget for "${x.name}"`,
-                        body: `Current budget is ${num(x.budget)} coins. Negative claws back; the result cannot go below zero.`,
-                        inputLabel: 'Coins',
-                        input: '100',
-                        confirmText: 'Adjust',
-                      });
-                      if (v) post(`/v1/admin/campaigns/${x.id}/adjust`, { coins: +v }, 'Budget adjusted');
-                    })}
-                    {item('View its scans', () => {
-                      setCampaignFilter(x.id);
-                      setTab('Scans');
-                    })}
-                    {item('View its ledger', () => {
-                      setLedgerAccount(`campaign:${x.id}`);
-                      setTab('Ledger');
-                    })}
-                    {x.status !== 'ended' && (
-                      <>
-                        {item(
-                          'Kill campaign',
-                          async () => {
-                            const reason = await promptDialog({
-                              title: `Kill "${x.name}"?`,
-                              body: 'Ends the campaign and voids every QR code it ever issued. Printed codes stop working immediately.',
-                              inputLabel: 'Reason',
-                              input: '',
-                              confirmText: 'Kill campaign',
-                              danger: true,
-                            });
-                            if (reason !== null) post(`/v1/admin/campaigns/${x.id}/kill`, { reason }, 'Campaign killed');
-                          },
-                          true,
-                        )}
-                      </>
+        <Table
+          loading={loading}
+          rows={campaigns}
+          cols={[
+            { h: 'Campaign', get: (x) => x.name },
+            { h: 'Promoter', get: (x) => x.promoter_name },
+            { h: 'Publisher', get: (x) => x.publisher_name },
+            { h: 'Rate', num: true, get: (x) => x.coin_rate },
+            // `scans`/`redemptions` are counted only by the admin listing, hence optional
+            { h: 'Scans', num: true, get: (x) => x.scans ?? 0 },
+            { h: 'Redemptions', num: true, get: (x) => x.redemptions ?? 0 },
+            {
+              h: 'Conv.',
+              num: true,
+              sort: (x) => (x.scans ? (x.redemptions ?? 0) / x.scans : -1),
+              get: (x) => (x.scans ? `${(((x.redemptions ?? 0) / x.scans) * 100).toFixed(0)}%` : '—'),
+            },
+            {
+              h: 'Budget',
+              num: true,
+              sort: (x) => x.budget,
+              get: (x) => (
+                <span className={x.budget < x.coin_rate ? 'text-bad' : ''}>{num(x.budget)}</span>
+              ),
+            },
+            {
+              h: 'Status',
+              sort: (x) => x.status,
+              get: (x) => (
+                <select
+                  className={cx(selectField, 'w-27.5 px-2 py-1.5 text-[13px]')}
+                  value={x.status}
+                  onChange={(e) => patch(`/v1/admin/campaigns/${x.id}`, { status: e.target.value }, 'Campaign updated')}
+                >
+                  {['active', 'paused', 'ended'].map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              ),
+            },
+            {
+              h: '',
+              get: (x) => (
+                <Actions>
+                  {item('Adjust budget', async () => {
+                    const v = await promptDialog({
+                      title: `Adjust budget for "${x.name}"`,
+                      body: `Current budget is ${num(x.budget)} coins. Negative claws back; the result cannot go below zero.`,
+                      inputLabel: 'Coins',
+                      input: '100',
+                      confirmText: 'Adjust',
+                    });
+                    if (v) post(`/v1/admin/campaigns/${x.id}/adjust`, { coins: +v }, 'Budget adjusted');
+                  })}
+                  {item('View its scans', () => {
+                    setCampaignFilter(x.id);
+                    setTab('Scans');
+                  })}
+                  {item('View its ledger', () => {
+                    setLedgerAccount(`campaign:${x.id}`);
+                    setTab('Ledger');
+                  })}
+                  {x.status !== 'ended' &&
+                    item(
+                      'Kill campaign',
+                      async () => {
+                        const reason = await promptDialog({
+                          title: `Kill "${x.name}"?`,
+                          body: 'Ends the campaign and voids every QR code it ever issued. Printed codes stop working immediately.',
+                          inputLabel: 'Reason',
+                          input: '',
+                          confirmText: 'Kill campaign',
+                          danger: true,
+                        });
+                        if (reason !== null) post(`/v1/admin/campaigns/${x.id}/kill`, { reason }, 'Campaign killed');
+                      },
+                      true,
                     )}
-                  </Actions>
-                ),
-              },
-            ]}
-          />
-        </>
+                </Actions>
+              ),
+            },
+          ]}
+        />
       )}
 
       {tab === 'Audience' && (
@@ -889,89 +882,85 @@ export default function Admin() {
       )}
 
       {tab === 'Redemptions' && (
-        <>
-          <Table
-            loading={loading}
-            rows={d.redemptions ?? []}
-            empty="No redemptions yet."
-            cols={[
-              { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-              { h: 'Campaign', get: (x) => x.campaign_name },
-              { h: 'Promoter', get: (x) => x.promoter_name },
-              { h: 'Publisher', get: (x) => x.publisher_name },
-              { h: 'Publisher user', sort: (x) => x.publisher_user_ref, get: (x) => <code>{x.publisher_user_ref}</code> },
-              { h: 'Kind', sort: (x) => x.identified, get: (x) => pill(x.identified ? 'identified' : 'guest') },
-              { h: 'Upgraded', sort: (x) => x.upgraded_at ?? '', get: (x) => when(x.upgraded_at) },
-              { h: 'Coins', num: true, sort: (x) => x.coins, get: (x) => num(x.coins) },
-              {
-                h: '',
-                get: (x) =>
-                  link('Ledger', () => {
-                    setLedgerAccount(`campaign:${x.campaign_id}`);
-                    setTab('Ledger');
-                  }),
-              },
-            ]}
-          />
-        </>
+        <Table
+          loading={loading}
+          rows={d.redemptions ?? []}
+          empty="No redemptions yet."
+          cols={[
+            { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
+            { h: 'Campaign', get: (x) => x.campaign_name },
+            { h: 'Promoter', get: (x) => x.promoter_name },
+            { h: 'Publisher', get: (x) => x.publisher_name },
+            { h: 'Publisher user', sort: (x) => x.publisher_user_ref, get: (x) => <code>{x.publisher_user_ref}</code> },
+            { h: 'Kind', sort: (x) => x.identified, get: (x) => pill(x.identified ? 'identified' : 'guest') },
+            { h: 'Upgraded', sort: (x) => x.upgraded_at ?? '', get: (x) => when(x.upgraded_at) },
+            { h: 'Coins', num: true, sort: (x) => x.coins, get: (x) => num(x.coins) },
+            {
+              h: '',
+              get: (x) =>
+                link('Ledger', () => {
+                  setLedgerAccount(`campaign:${x.campaign_id}`);
+                  setTab('Ledger');
+                }),
+            },
+          ]}
+        />
       )}
 
       {tab === 'QR codes' && (
-        <>
-          <Table
-            loading={loading}
-            rows={d.qrCodes ?? []}
-            empty="No codes issued."
-            cols={[
-              { h: 'Code', sort: (x) => x.code, get: (x) => <code>{x.code}</code> },
-              { h: 'Campaign', get: (x) => x.campaign_name ?? '' },
-              { h: 'Scans', num: true, sort: (x) => x.scans ?? 0, get: (x) => x.scans ?? 0 },
-              { h: 'Uses', sort: (x) => x.uses, get: (x) => `${x.uses}${x.max_uses ? ` / ${x.max_uses}` : ' / ∞'}` },
-              { h: 'Expires', sort: (x) => x.expires_at ?? '', get: (x) => (x.expires_at ? when(x.expires_at) : 'never') },
-              { h: 'Created', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-              { h: 'State', sort: (x) => x.voided, get: (x) => pill(x.voided ? 'suspended' : 'active') },
-              {
-                h: '',
-                get: (x) => (
-                  <Actions>
-                    <a className={menuItem()} href={x.scan_url} target="_blank" rel="noreferrer">
-                      Open the scan URL
-                    </a>
-                    {item('Copy scan URL', () => {
-                      navigator.clipboard.writeText(x.scan_url);
-                      toast.success('Scan URL copied');
-                    })}
-                    {item('Set expiry', async () => {
-                      const v = await promptDialog({
-                        title: `Expiry for /${x.code}`,
-                        body: 'ISO timestamp, or leave blank for a code that never expires.',
-                        inputLabel: 'Expires at',
-                        input: x.expires_at ? new Date(x.expires_at).toISOString() : '',
-                        confirmText: 'Save',
-                      });
-                      if (v !== null) patch(`/v1/admin/qr-codes/${x.id}`, { expires_at: v.trim() || null }, 'Expiry updated');
-                    })}
-                    {item('Set max uses', async () => {
-                      const v = await promptDialog({
-                        title: `Use limit for /${x.code}`,
-                        body: 'Leave blank for unlimited scans.',
-                        inputLabel: 'Max uses',
-                        input: String(x.max_uses ?? ''),
-                        confirmText: 'Save',
-                      });
-                      if (v !== null) patch(`/v1/admin/qr-codes/${x.id}`, { max_uses: v.trim() ? +v : null }, 'Max uses updated');
-                    })}
-                    {item(
-                      x.voided ? 'Restore this code' : 'Void this code',
-                      () => patch(`/v1/admin/qr-codes/${x.id}`, { voided: !x.voided }, x.voided ? 'Code restored' : 'Code voided'),
-                      !x.voided,
-                    )}
-                  </Actions>
-                ),
-              },
-            ]}
-          />
-        </>
+        <Table
+          loading={loading}
+          rows={d.qrCodes ?? []}
+          empty="No codes issued."
+          cols={[
+            { h: 'Code', sort: (x) => x.code, get: (x) => <code>{x.code}</code> },
+            { h: 'Campaign', get: (x) => x.campaign_name ?? '' },
+            { h: 'Scans', num: true, sort: (x) => x.scans ?? 0, get: (x) => x.scans ?? 0 },
+            { h: 'Uses', sort: (x) => x.uses, get: (x) => `${x.uses}${x.max_uses ? ` / ${x.max_uses}` : ' / ∞'}` },
+            { h: 'Expires', sort: (x) => x.expires_at ?? '', get: (x) => (x.expires_at ? when(x.expires_at) : 'never') },
+            { h: 'Created', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
+            { h: 'State', sort: (x) => x.voided, get: (x) => pill(x.voided ? 'suspended' : 'active') },
+            {
+              h: '',
+              get: (x) => (
+                <Actions>
+                  <a className={menuItem()} href={x.scan_url} target="_blank" rel="noreferrer">
+                    Open the scan URL
+                  </a>
+                  {item('Copy scan URL', () => {
+                    navigator.clipboard.writeText(x.scan_url);
+                    toast.success('Scan URL copied');
+                  })}
+                  {item('Set expiry', async () => {
+                    const v = await promptDialog({
+                      title: `Expiry for /${x.code}`,
+                      body: 'ISO timestamp, or leave blank for a code that never expires.',
+                      inputLabel: 'Expires at',
+                      input: x.expires_at ? new Date(x.expires_at).toISOString() : '',
+                      confirmText: 'Save',
+                    });
+                    if (v !== null) patch(`/v1/admin/qr-codes/${x.id}`, { expires_at: v.trim() || null }, 'Expiry updated');
+                  })}
+                  {item('Set max uses', async () => {
+                    const v = await promptDialog({
+                      title: `Use limit for /${x.code}`,
+                      body: 'Leave blank for unlimited scans.',
+                      inputLabel: 'Max uses',
+                      input: String(x.max_uses ?? ''),
+                      confirmText: 'Save',
+                    });
+                    if (v !== null) patch(`/v1/admin/qr-codes/${x.id}`, { max_uses: v.trim() ? +v : null }, 'Max uses updated');
+                  })}
+                  {item(
+                    x.voided ? 'Restore this code' : 'Void this code',
+                    () => patch(`/v1/admin/qr-codes/${x.id}`, { voided: !x.voided }, x.voided ? 'Code restored' : 'Code voided'),
+                    !x.voided,
+                  )}
+                </Actions>
+              ),
+            },
+          ]}
+        />
       )}
 
       {tab === 'Ledger' && (
@@ -1006,28 +995,26 @@ export default function Admin() {
       )}
 
       {tab === 'Audit log' && (
-        <>
-          <Table
-            loading={loading}
-            rows={d.audit ?? []}
-            empty="No admin actions recorded."
-            cols={[
-              { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-              { h: 'Actor', get: (x) => x.actor_name ?? 'system', sort: (x) => x.actor_name ?? '' },
-              { h: 'Action', sort: (x) => x.action, get: (x) => <code>{x.action}</code> },
-              { h: 'Target', sort: (x) => x.target, get: (x) => <code>{x.target}</code> },
-              {
-                h: 'Detail',
-                sort: (x) => JSON.stringify(x.detail),
-                get: (x) => (
-                  <span className={cx(muted, 'whitespace-pre-wrap')}>
-                    {JSON.stringify(x.detail)}
-                  </span>
-                ),
-              },
-            ]}
-          />
-        </>
+        <Table
+          loading={loading}
+          rows={d.audit ?? []}
+          empty="No admin actions recorded."
+          cols={[
+            { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
+            { h: 'Actor', get: (x) => x.actor_name ?? 'system', sort: (x) => x.actor_name ?? '' },
+            { h: 'Action', sort: (x) => x.action, get: (x) => <code>{x.action}</code> },
+            { h: 'Target', sort: (x) => x.target, get: (x) => <code>{x.target}</code> },
+            {
+              h: 'Detail',
+              sort: (x) => JSON.stringify(x.detail),
+              get: (x) => (
+                <span className={cx(muted, 'whitespace-pre-wrap')}>
+                  {JSON.stringify(x.detail)}
+                </span>
+              ),
+            },
+          ]}
+        />
       )}
     </Shell>
   );

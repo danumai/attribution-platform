@@ -4,6 +4,7 @@ import { strict as assert } from 'assert';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { ipHash, rateLimited, str, validateLandingUrl } from '../src/common/security';
+import { asOrgType } from '../src/modules/auth/tokens';
 
 // Bounded untrusted strings. Rejecting must be loud — a silently truncated
 // publisher_user_ref would collide with another user's and misroute an attribution.
@@ -97,6 +98,13 @@ assert.match(prodBootError({ BASE_URL: '' }), /BASE_URL must be set in productio
   'without BASE_URL every printed QR would point at localhost');
 assert.match(prodBootError({ DATABASE_URL: '' }), /DATABASE_URL must be set in production/,
   'the dev fallback would point a production deploy at a localhost database');
+
+// A session is minted from whatever `orgs.type` holds. Narrowing must reject anything the
+// CHECK constraint would not have allowed, rather than casting it into the claims blind.
+assert.equal(asOrgType('publisher'), 'publisher');
+assert.equal(asOrgType('admin'), 'admin');
+assert.throws(() => asOrgType('superuser'), /unknown org type/, 'an unknown role must not become a session');
+assert.throws(() => asOrgType('Admin'), /unknown org type/, 'role matching is exact, not case-folded');
 
 setTimeout(() => {
   assert.equal(rateLimited(k2, 1, 1), false, 'window should reset');

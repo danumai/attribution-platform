@@ -5,8 +5,19 @@ node_modules
 dist
 **/dist
 *.tsbuildinfo
-.env
+# Every variant, not just `.env`: anything matching this holds live credentials, and a build
+# context is copied into an image layer that anyone who can pull it can read back.
+.env*
 .git
+.gitignore
+.DS_Store
 .vscode
+.cursor
+.claude
+.superpowers
+**/.impeccable
+docs
+e2e-test.sh
+seed.sh
 *.md
 !backend/src/**/*.md

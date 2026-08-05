@@ -16,7 +16,7 @@ import {
 } from '../../common/attribution';
 import { clientIp, rateLimited, sha256, str, validateLandingUrl } from '../../common/security';
 import { prisma } from '../../database/prisma';
-import { newApiKey, signSession } from './tokens';
+import { asOrgType, newApiKey, signSession } from './tokens';
 
 /** A real bcrypt hash of a value nothing can match, so the no-such-account path costs the
  *  same as the wrong-password path. Cost 10 to match what `signup` writes. */
@@ -89,7 +89,7 @@ export class AuthController {
       throw e;
     }
     return {
-      token: signSession({ org_id: org.id, type: org.type as any }),
+      token: signSession({ org_id: org.id, type: asOrgType(org.type) }),
       org,
       // shown once — publisher must store it
       api_key: apiKey,
@@ -114,7 +114,7 @@ export class AuthController {
     if (!org || !ok) throw new UnauthorizedException('invalid credentials');
     if (org.suspended) throw new UnauthorizedException('account suspended');
     return {
-      token: signSession({ org_id: org.id, type: org.type as any }),
+      token: signSession({ org_id: org.id, type: asOrgType(org.type) }),
       org: { id: org.id, name: org.name, type: org.type },
     };
   }

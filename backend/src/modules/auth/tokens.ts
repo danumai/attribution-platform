@@ -10,9 +10,22 @@ if (process.env.NODE_ENV === 'production' && (process.env.JWT_SECRET ?? DEV_SECR
 // ponytail: HS256 shared secret; move to ES256 + KMS for production
 export const JWT_SECRET = process.env.JWT_SECRET ?? DEV_SECRET;
 
+/** The three roles, enforced by a CHECK on `orgs.type`. One definition, so a fourth role
+ *  cannot be added to the union without every `switch` and validator here seeing it. */
+export const ORG_TYPES = ['promoter', 'publisher', 'admin'] as const;
+export type OrgType = (typeof ORG_TYPES)[number];
+
+/** Narrow a role read out of the database. Throws rather than casting blind: an unknown
+ *  value here means the CHECK constraint was bypassed, and a session must not be minted for it. */
+export function asOrgType(type: string): OrgType {
+  if (!(ORG_TYPES as readonly string[]).includes(type))
+    throw new Error(`unknown org type: ${type}`);
+  return type as OrgType;
+}
+
 export interface SessionClaims {
   org_id: string;
-  type: 'promoter' | 'publisher' | 'admin';
+  type: OrgType;
 }
 
 export const signSession = (c: SessionClaims) =>

@@ -10,3 +10,16 @@ dist/
 
 # Prisma client is generated from prisma/schema.prisma at install/build time
 backend/src/generated/
+
+# Per-developer editor and assistant config. These name absolute paths on one machine and
+# rewrite themselves on every edit, so tracking them is a merge conflict per commit.
+.vscode/
+.cursor/
+.claude/
+.superpowers/
+# Contents, not the directory itself — git cannot re-include a file whose parent directory
+# is excluded, and the design system below has to survive the rule above it.
+**/.impeccable/*
+*.local.json
+# The design system describes the project rather than the developer, so it stays tracked.
+!.impeccable/design.json

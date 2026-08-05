@@ -72,9 +72,7 @@ echo "$LOC" | grep -qE '(^|[?&])(st|token|jwt|code)=' && fail "redirect leaks a 
   || pass "redirect carries no token the app could spend"
 REFERRER=$(printf '%s' "$LOC" | sed 's/.*&referrer=//' | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(decodeURIComponent(d.trim())))")
 
-LOC_IOS=$(curl -s -A "$IOS" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
-echo "$LOC_IOS" | grep -q '^https://apps.apple.com/app/id123456789$' \
-  && pass "iPhone scan redirects to the App Store listing, payload-free" || fail "ios redirect: $LOC_IOS"
+# The iOS leg is a two-hop flow now and is exercised in full in 6b, below.
 
 echo "6. Attribution (the money path) — guest tier, then confirm"
 # Deterministic path: the publisher's server replays the Play install referrer.
@@ -96,13 +94,59 @@ UP2=$(curl -s -XPOST $API/v1/attribution/$RED_ID/confirm -H "Authorization: Bear
 REM=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 [ "$REM" = "50" ] && pass "budget charged the delta exactly once (90→50)" || fail "budget_remaining=$REM"
 
-echo "6b. iOS path — no referrer exists, so the install is fingerprint-matched"
+echo "6b. iOS path — interstitial, then first-open and signup as separate stages"
+# iOS has no install-referrer channel, so an iPhone scan no longer 302s. It gets an
+# interstitial, which is the only moment this device's timezone, screen and locale can be
+# read — in a browser, before the App Store takes the session away.
+IOS_PAGE=$(curl -s -A "$IOS" "$API/r/$CODE")
+echo "$IOS_PAGE" | grep -q 'Opening the App' && pass "iPhone scan serves the signal interstitial" || fail "no interstitial served"
+echo "$IOS_PAGE" | grep -qE '(^|[^a-z])(st|token|jwt)=' && fail "interstitial leaks a redeemable token" \
+  || pass "interstitial carries nothing the app could spend"
+CLAIM=$(printf '%s' "$IOS_PAGE" | grep -o '/go/[A-Za-z0-9_-]\{6,\}' | head -1 | cut -d/ -f3)
+[ -n "$CLAIM" ] && pass "interstitial hands the browser a forwarding hop" || fail "no /go hop in the page"
+
+# What the page's script posts back, then the store hop itself.
+STORE=$(curl -s -A "$IOS" -o /dev/null -w '%{redirect_url}' \
+  "$API/go/$CLAIM?tz=Asia/Dhaka&sc=393x852@3&lang=en-US")
+echo "$STORE" | grep -q '^https://apps.apple.com/app/id123456789$' \
+  && pass "forwarding hop reaches the App Store listing, payload-free" || fail "go hop: $STORE"
+
+# Stage one. Minutes after the scan, the app opens for the first time and the publisher's
+# server presents the same signals. Nothing is paid here.
+FO=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"ip":"::1","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US"}')
+[ "$(echo "$FO" | j .attributed)" = "true" ] && pass "iOS first open matched on the full fingerprint" || fail "first-open: $FO"
+[ "$(echo "$FO" | j .confidence)" = "100" ] && pass "every signal agreeing scores 100" || fail "confidence: $FO"
+INSTALL_ID=$(echo "$FO" | j .install_id)
+FO_BUDGET=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+[ "$FO_BUDGET" = "50" ] && pass "first open moves no money (budget untouched at 50)" || fail "first-open charged: $FO_BUDGET"
+
+# Stage two, arbitrarily later: the user signs up and the fee is earned.
+SU=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_id\":\"$INSTALL_ID\",\"publisher_user_ref\":\"ios$S@x.com\"}")
+[ "$(echo "$SU" | j .attributed)" = "true" ] && pass "signup redeems the install banked at first open" || fail "signup: $SU"
+[ "$(echo "$SU" | j .match_method)" = "fingerprint" ] && pass "match method carries through from first open" || fail "method: $SU"
+[ "$(echo "$SU" | j .confidence)" = "100" ] && pass "the fee is paid on the confidence recorded at match time" || fail "confidence: $SU"
+DUPI=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_id\":\"$INSTALL_ID\",\"publisher_user_ref\":\"iostwo$S@x.com\"}" | j .reason)
+[ "$DUPI" = "already_claimed" ] && pass "one install pays exactly one signup" || fail "install reused: $DUPI"
+
+# The headline behaviour change. A scan whose interstitial never ran leaves only IP + platform,
+# which scores 55 against a floor of 70. That used to be paid. An IP is a postcode — carrier
+# NAT, café wifi, an airport, a corporate VPN — and this is the case that must now refuse.
 curl -s -A "$IOS" -o /dev/null "$API/r/$CODE"
-FP=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d "{\"publisher_user_ref\":\"ios$S@x.com\",\"ip\":\"::1\",\"platform\":\"ios\"}")
-[ "$(echo "$FP" | j .match_method)" = "fingerprint" ] && pass "iOS install matched on device fingerprint" || fail "fingerprint: $FP"
-MISS=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d "{\"publisher_user_ref\":\"organic$S@x.com\",\"ip\":\"203.0.113.99\",\"platform\":\"ios\"}")
+WEAK=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"ip":"::1","platform":"ios"}')
+[ "$(echo "$WEAK" | j .attributed)" = "false" ] && pass "IP + platform alone is refused, never paid" || fail "weak fingerprint paid: $WEAK"
+[ "$(echo "$WEAK" | j .confidence)" = "55" ] && pass "the refusal reports the score it refused on" || fail "score: $WEAK"
+
+# An emulator is the shape of every install farm, and the SDK says so before we look anything up.
+EMU=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"ip":"::1","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US","emulator":true}' | j .reason)
+[ "$EMU" = "device_integrity" ] && pass "a self-declared emulator is refused before matching" || fail "emulator: $EMU"
+
+MISS=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"ip":"203.0.113.99","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US"}')
 [ "$(echo "$MISS" | j .attributed)" = "false" ] && pass "an organic install is unattributed, not an error" || fail "organic: $MISS"
 [ "$(echo "$MISS" | j .reason)" = "no_match" ] && pass "unattributed answer names its reason" || fail "reason: $MISS"
 

@@ -13,6 +13,9 @@ import {
   EYE_BALLS,
   EYE_FRAMES,
   FRAMES,
+  Frame,
+  Gradient,
+  LogoShape,
   PRESETS,
   SHAPES,
   Style,
@@ -305,7 +308,7 @@ function LogoWell({ logo, onPick, onClear }: { logo?: string; onPick: (f: File) 
       <div className={logoWell('filled')}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          className="size-[62px] shrink-0 rounded-md border border-line bg-white object-contain p-1.5"
+          className="size-15.5 shrink-0 rounded-md border border-line bg-white object-contain p-1.5"
           src={logo}
           alt="Selected logo"
         />
@@ -612,7 +615,7 @@ export default function CampaignPage() {
                   }}
                 >
                   <code className={codeChip}>/{q.code}</code>
-                  <span className="text-[10.5px] font-bold tracking-[.1em] uppercase">
+                  <span className="text-[10.5px] font-bold tracking-widest uppercase">
                     {q.voided ? 'voided' : `${q.uses ?? 0} scans`}
                   </span>
                 </button>
@@ -724,7 +727,7 @@ export default function CampaignPage() {
                       <label className={labelClass}>
                         Error correction{style.logo ? ' — held at H while a logo covers the centre' : ''}
                       </label>
-                      <select className={selectField} value={style.ecc ?? 'M'} disabled={!!style.logo} onChange={(e) => set({ ecc: e.target.value as any })}>
+                      <select className={selectField} value={style.ecc ?? 'M'} disabled={!!style.logo} onChange={(e) => set({ ecc: e.target.value as Style['ecc'] })}>
                         <option value="L">L — 7% recovery, densest code</option>
                         <option value="M">M — 15% recovery</option>
                         <option value="Q">Q — 25% recovery</option>
@@ -759,7 +762,7 @@ export default function CampaignPage() {
                             <Color label="Gradient end" value={gradient.to} onChange={(to) => set({ gradient: { ...gradient, to } })} />
                           </div>
                           <label className={labelClass}>Gradient type</label>
-                          <select className={selectField} value={gradient.type ?? 'linear'} onChange={(e) => set({ gradient: { ...gradient, type: e.target.value as any } })}>
+                          <select className={selectField} value={gradient.type ?? 'linear'} onChange={(e) => set({ gradient: { ...gradient, type: e.target.value as Gradient['type'] } })}>
                             <option value="linear">Linear</option>
                             <option value="radial">Radial</option>
                           </select>
@@ -808,7 +811,7 @@ export default function CampaignPage() {
                           <p className={hint}>Past ~25% you are covering more than error correction can rebuild. Test the printed code before a run.</p>
 
                           <label className={labelClass}>Backdrop</label>
-                          <select className={selectField} value={style.logoShape ?? 'rounded'} onChange={(e) => set({ logoShape: e.target.value as any })}>
+                          <select className={selectField} value={style.logoShape ?? 'rounded'} onChange={(e) => set({ logoShape: e.target.value as LogoShape })}>
                             <option value="rounded">Rounded plate</option>
                             <option value="square">Square plate</option>
                             <option value="circle">Circle plate</option>
@@ -831,7 +834,7 @@ export default function CampaignPage() {
                   {panel === 'Frame' && (
                     <>
                       <label className={labelClass}>Frame</label>
-                      <select className={selectField} value={style.frame ?? 'none'} onChange={(e) => set({ frame: e.target.value as any, frameText: style.frameText ?? 'SCAN ME' })}>
+                      <select className={selectField} value={style.frame ?? 'none'} onChange={(e) => set({ frame: e.target.value as Frame, frameText: style.frameText ?? 'SCAN ME' })}>
                         {FRAMES.map((f) => (
                           <option key={f} value={f}>
                             {{ none: 'None', box: 'Outline box', label: 'Box with caption bar', ribbon: 'Caption ribbon' }[f]}
@@ -962,7 +965,7 @@ export default function CampaignPage() {
                           title={`Preview on ${b.name.toLowerCase()}`}
                           onClick={() => setBackdrop(b)}
                         >
-                          <span className="size-[22px] rounded-sm border border-line" style={{ background: b.css }} />
+                          <span className="size-5.5 rounded-sm border border-line" style={{ background: b.css }} />
                         </button>
                       ))}
                     </div>

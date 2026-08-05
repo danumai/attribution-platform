@@ -21,7 +21,7 @@ import { capped } from '../../common/paging';
 import { validateRates } from '../../common/rates';
 import { sha256, str, validateLandingUrl } from '../../common/security';
 import { scanAnalytics } from '../../database/analytics';
-import { audit, balance, balances, ledger } from '../../database/ledger';
+import { audit, balance, balances, ledger, lockedBalance } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
 import { AdminGuard, Session } from '../auth/auth.guard';
 import { SessionClaims, newApiKey } from '../auth/tokens';
@@ -384,10 +384,7 @@ export class AdminController {
     const campaign = await prisma.campaign.findUnique({ where: { id }, select: { id: true } });
     if (!campaign) throw new NotFoundException('campaign not found');
     await prisma.$transaction(async (tx: Tx) => {
-      // lock the balance row so two concurrent debits can't both pass the >= 0 check
-      const rows = await tx.$queryRaw<{ balance: number }[]>`
-        SELECT balance FROM account_balances WHERE account = ${`campaign:${id}`} FOR UPDATE`;
-      if ((rows[0]?.balance ?? 0) + b.coins < 0)
+      if ((await lockedBalance(tx, `campaign:${id}`)) + b.coins < 0)
         throw new BadRequestException('adjustment would push budget below zero');
       const ref = `admin-adjust:${id}:${Date.now()}`;
       await ledger(tx, 'external:funding', -b.coins, ref);

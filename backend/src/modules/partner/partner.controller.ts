@@ -24,10 +24,25 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { FINGERPRINT_WINDOW_MIN, REFERRER_WINDOW_DAYS } from '../../config';
-import { Platform, claimIdFromReferrer, detectPlatform } from '../../common/attribution';
+import {
+  DEVICE_DEDUPE_DAYS,
+  FINGERPRINT_WINDOW_MIN,
+  MIN_CONFIDENCE,
+  REFERRER_WINDOW_DAYS,
+  SIGNUP_WINDOW_DAYS,
+} from '../../config';
+import {
+  DeviceSignals,
+  Platform,
+  claimIdFromReferrer,
+  decide,
+  detectPlatform,
+  normLang,
+  normScreen,
+  normTz,
+} from '../../common/attribution';
 import { ipHash, rateLimited, sha256, str } from '../../common/security';
-import { ledger } from '../../database/ledger';
+import { ledger, lockedBalance } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
 
 async function publisherFromKey(auth: string) {
@@ -48,13 +63,6 @@ async function publisherFromKey(auth: string) {
   return publisher;
 }
 
-/** Lock a balance row for the rest of the transaction. Prisma has no `FOR UPDATE` builder. */
-async function lockedBalance(tx: Tx, account: string): Promise<number> {
-  const rows = await tx.$queryRaw<{ balance: number }[]>`
-    SELECT balance FROM account_balances WHERE account = ${account} FOR UPDATE`;
-  return rows[0]?.balance ?? 0;
-}
-
 interface ClaimableScan {
   id: string;
   campaign_id: string;
@@ -63,6 +71,10 @@ interface ClaimableScan {
   coin_rate: number;
   guest_rate: number;
   grace_days: number;
+  /** the scan's stored device signals, scored against the ones presented at first open */
+  tz: string | null;
+  screen: string | null;
+  language: string | null;
 }
 
 /**
@@ -76,7 +88,7 @@ interface ClaimableScan {
 const byReferrer = (tx: Tx, publisherId: string, claimId: string) =>
   tx.$queryRaw<ClaimableScan[]>`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
-           p.coin_rate, p.guest_rate, p.grace_days
+           p.coin_rate, p.guest_rate, p.grace_days, s.tz, s.screen, s.language
     FROM scans s
     JOIN campaigns c    ON c.id = s.campaign_id
     JOIN partnerships p ON p.id = c.partnership_id
@@ -90,19 +102,24 @@ const byReferrer = (tx: Tx, publisherId: string, claimId: string) =>
 /**
  * Probabilistic path — iOS, where no referrer channel exists at all.
  *
- * Matches on hashed IP plus platform only. Anything finer (full user agent, screen metrics)
- * differs between the mobile browser that scanned and the native app that opened, so it
- * would simply never match. Newest-first, because when a device shape does collide the most
- * recent scan is the likeliest true source.
+ * Hashed IP + platform is the *filter*, not the answer. It narrows the table to scans that
+ * could plausibly be this device; on carrier-grade NAT, café wifi or a corporate VPN that can
+ * still be dozens of unrelated handsets, which is precisely why the caller then scores the
+ * candidates on signals that describe the phone rather than the network it sat on.
  *
- * ponytail: two-signal fingerprint. Under carrier-grade NAT this will occasionally attribute
- * one household's install to a neighbour's scan. Tighten FINGERPRINT_WINDOW_MIN, or add
- * SKAdNetwork/AdAttributionKit as a third signal, if measured false-match rate matters.
+ * ponytail: 20-candidate ceiling. Behind a NAT busy enough to produce more unmatched scans
+ * than that in one window, the 21st is invisible — raise it, or narrow the window, if a
+ * deployment ever measures matches being lost here rather than merely being ambiguous.
  */
-const byFingerprint = (tx: Tx, publisherId: string, fingerprint: string, platform: Platform) =>
+const fingerprintCandidates = (
+  tx: Tx,
+  publisherId: string,
+  fingerprint: string,
+  platform: Platform,
+) =>
   tx.$queryRaw<ClaimableScan[]>`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
-           p.coin_rate, p.guest_rate, p.grace_days
+           p.coin_rate, p.guest_rate, p.grace_days, s.tz, s.screen, s.language
     FROM scans s
     JOIN campaigns c    ON c.id = s.campaign_id
     JOIN partnerships p ON p.id = c.partnership_id
@@ -113,15 +130,298 @@ const byFingerprint = (tx: Tx, publisherId: string, fingerprint: string, platfor
       AND p.status = 'active'
       AND s.scanned_at > now() - make_interval(mins => ${FINGERPRINT_WINDOW_MIN})
     ORDER BY s.scanned_at DESC
-    LIMIT 1
+    LIMIT 20
     FOR UPDATE OF s SKIP LOCKED`;
+
+/** Everything a publisher's server can tell us about a device at first open. */
+interface OpenSignals extends DeviceSignals {
+  claimId: string | null;
+  fingerprint: string | null;
+  platform: Platform;
+}
+
+/**
+ * Parse and bound the device half of a request body. Every field here crosses a trust
+ * boundary — it arrives from another company's server — so nothing is stored before it has
+ * been through `str()` for length and the `norm*` helpers for shape.
+ */
+function readSignals(b: Record<string, unknown>): OpenSignals {
+  const install_referrer = str(b.install_referrer, 'install_referrer', 1000, false);
+  const rawIp = str(b.ip, 'ip', 45, false); // 45 = longest possible IPv6 text form
+  const platform =
+    typeof b.platform === 'string' && ['android', 'ios', 'other'].includes(b.platform)
+      ? (b.platform as Platform)
+      : detectPlatform(str(b.user_agent, 'user_agent', 500, false) ?? '');
+  return {
+    claimId: claimIdFromReferrer(install_referrer),
+    // The publisher reports its own client's address; we hash it the same way the scan path
+    // did so the two are comparable and neither side ever stores a raw address.
+    fingerprint: rawIp ? ipHash(rawIp) : null,
+    platform,
+    tz: normTz(str(b.tz, 'tz', 64, false)),
+    screen: normScreen(str(b.screen, 'screen', 32, false)),
+    language: normLang(str(b.language, 'language', 32, false)),
+  };
+}
+
+/**
+ * One handset, as far as these signals can tell. Only ever computed for probabilistic
+ * matches — a claim id is already unique per scan, so the repeat-device question is answered
+ * there by the scan itself.
+ *
+ * ponytail: this is a *device shape*, not a device. Two identical handsets on one NAT with
+ * the same locale hash the same, which is why the repeat check it feeds refuses an install
+ * rather than banning anything, and why `DEVICE_DEDUPE_DAYS` can be turned off entirely.
+ */
+const deviceHash = (s: OpenSignals) =>
+  sha256([s.fingerprint, s.platform, s.tz, s.screen, s.language].join('|')).slice(0, 32);
+
+type Match =
+  | { scan: ClaimableScan; confidence: number; match_method: 'referrer' | 'fingerprint' }
+  | { reason: string; confidence?: number };
+
+/**
+ * Find the scan this install came from, or refuse.
+ *
+ * Deterministic first, and never a fallback from it: when a claim id is presented and does not
+ * resolve, the referrer named a scan that is gone, already claimed, or belongs to a different
+ * publisher. Quietly re-matching that device on IP would turn a failed exact lookup into a
+ * guess — which is the single thing this path must never do. Scoring lives in `decide()`.
+ */
+async function matchScan(tx: Tx, publisherId: string, open: OpenSignals): Promise<Match> {
+  if (open.claimId) {
+    const rows = await byReferrer(tx, publisherId, open.claimId);
+    return rows[0]
+      ? { scan: rows[0], confidence: 100, match_method: 'referrer' }
+      : { reason: 'no_match' };
+  }
+  const rows = await fingerprintCandidates(tx, publisherId, open.fingerprint!, open.platform);
+  const d = decide(rows, open, MIN_CONFIDENCE);
+  return 'reason' in d ? d : { ...d, match_method: 'fingerprint' };
+}
+
+/**
+ * Signup on the preferred path: the match already happened at first open, so this only has to
+ * check the install is still spendable and hand back the decision that was recorded then.
+ *
+ * `redeemed` is flipped inside the same `updateMany` that tests it, which is what makes two
+ * simultaneous signups for one install safe — the loser sees `count === 0`. Same trick the
+ * scan path uses with `consumed`, for the same reason.
+ *
+ * The scan is deliberately *not* re-matched here. Re-running the matcher at signup would
+ * reintroduce exactly the bug the install stage exists to fix, and the scan is long consumed.
+ */
+async function claimInstall(tx: Tx, publisherId: string, installId: string): Promise<Match> {
+  // `::uuid` on a caller-supplied string throws 22P02 on a malformed value rather than
+  // returning empty, so the shape is checked before Postgres is asked to parse it.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(installId))
+    return { reason: 'no_match' };
+
+  const rows = await tx.$queryRaw<
+    (ClaimableScan & { install_expired: boolean; confidence: number; match_method: string })[]
+  >`
+    SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
+           p.coin_rate, p.guest_rate, p.grace_days, s.tz, s.screen, s.language,
+           i.confidence, i.match_method, (i.expires_at <= now()) AS install_expired
+    FROM installs i
+    JOIN scans s        ON s.id = i.scan_id
+    JOIN campaigns c    ON c.id = i.campaign_id
+    JOIN partnerships p ON p.id = c.partnership_id
+    WHERE i.id = ${installId}::uuid
+      AND i.publisher_org_id = ${publisherId}::uuid
+      AND p.status = 'active'
+    FOR UPDATE OF i`;
+  const row = rows[0];
+  if (!row) return { reason: 'no_match' };
+  if (row.install_expired) return { reason: 'install_expired' };
+  // Checked again here, not just at first open. Ending or pausing a campaign has to stop
+  // spending immediately, and installs bound while it was live can otherwise keep drawing on
+  // a funded budget for the whole signup window after the promoter thought they had stopped.
+  if (row.status !== 'active') return { reason: 'campaign_not_active' };
+
+  const taken = await tx.install.updateMany({
+    where: { id: installId, redeemed: false },
+    data: { redeemed: true },
+  });
+  if (!taken.count) return { reason: 'already_claimed' };
+
+  return {
+    scan: row,
+    confidence: row.confidence,
+    match_method: row.match_method as 'referrer' | 'fingerprint',
+  };
+}
+
+/**
+ * Signup on the legacy single-call path: match and pay in one request, with no install row.
+ *
+ * Kept working for publishers already integrated, and it now runs the same scored matcher —
+ * so a bare IP + platform scores 55, falls under `MIN_CONFIDENCE` and is refused here exactly
+ * as it is at first open. That is a deliberate behaviour change: this path used to pay on it.
+ */
+async function claimAtSignup(tx: Tx, publisherId: string, open: OpenSignals): Promise<Match> {
+  const m = await matchScan(tx, publisherId, open);
+  if ('reason' in m) return m;
+  if (m.scan.status !== 'active') return { reason: 'campaign_not_active' };
+
+  // No install row to guard with, so the scan itself is the guard — same atomic test-and-set.
+  const consumed = await tx.scan.updateMany({
+    where: { id: m.scan.id, consumed: false },
+    data: { consumed: true },
+  });
+  if (!consumed.count) return { reason: 'already_claimed' };
+  return m;
+}
 
 @ApiTags('Partner API')
 @ApiBearerAuth('apiKey')
 @Controller('v1/attribution')
 export class PartnerController {
   /**
-   * Called once, from the publisher's server, when a new user finishes signing up in the app.
+   * Stage one: the app has just opened for the first time. Nothing is paid here.
+   *
+   * This exists because matching and paying happen at different moments and the old single
+   * call pretended otherwise. First open is minutes after the scan — while the device is
+   * still on the same network, still in the same timezone, still the same shape. Signup is
+   * whenever the user gets round to it, which on a content app is routinely the next day.
+   * Matching at signup forced one window to cover both, and the fingerprint path could not
+   * survive that: short enough to be honest meant it matched almost nothing.
+   *
+   * So the publisher's server calls this at launch, banks the `install_id`, and presents it
+   * again at signup. The scan is consumed here — the claim is bound — but no ledger entry
+   * exists until somebody actually signs up.
+   *
+   * Idempotent by construction: a second call for the same device finds the scan already
+   * consumed and comes back `no_match`, so the SDK must persist `install_id` locally rather
+   * than re-deriving it. An install that is never signed up simply expires.
+   */
+  @Post('first-open')
+  @HttpCode(200)
+  async firstOpen(
+    @Headers('authorization') auth: string,
+    @Body()
+    b: {
+      /** raw string from Play's Install Referrer API — the deterministic path */
+      install_referrer?: string;
+      /** device signals seen at first open — the probabilistic path */
+      ip?: string;
+      user_agent?: string;
+      platform?: string;
+      /** IANA zone, e.g. `Asia/Dhaka` */
+      tz?: string;
+      /** `{short}x{long}@{dpr}`, orientation-normalised */
+      screen?: string;
+      language?: string;
+      /** device integrity, as asserted by the SDK. See the handling note below. */
+      emulator?: boolean;
+      rooted?: boolean;
+      vpn?: boolean;
+    },
+  ) {
+    const publisher = await publisherFromKey(auth);
+    const open = readSignals(b as Record<string, unknown>);
+    if (!open.claimId && !open.fingerprint)
+      throw new BadRequestException('install_referrer or ip required to attribute an install');
+
+    /**
+     * Device integrity is *asserted* by the SDK, never observed by us, so it is graded rather
+     * than trusted uniformly:
+     *
+     *   emulator  blocks. Nobody installs a consumer content app on an emulator by accident;
+     *             this is the shape of every install farm and the signal is cheap to act on.
+     *   rooted    recorded only. Rooted and jailbroken handsets have a large honest
+     *             population, and refusing them would deny real users a real reward.
+     *   vpn       recorded only — and note it is not really a fraud signal here at all. A VPN
+     *             changes the address between scan and open, so the fingerprint simply fails
+     *             to match. Recording it is what lets someone reviewing a `no_match` rate see
+     *             why, rather than concluding the matcher is broken.
+     *
+     * All three are stored on accepted installs too. The pattern worth finding is the one
+     * that got paid.
+     */
+    const risk = {
+      emulator: b.emulator === true,
+      rooted: b.rooted === true,
+      vpn: b.vpn === true,
+    };
+    if (risk.emulator) return { attributed: false, reason: 'device_integrity' };
+
+    return prisma.$transaction(async (tx) => {
+      const m = await matchScan(tx, publisher.id, open);
+      if ('reason' in m) return { attributed: false, reason: m.reason, confidence: m.confidence };
+      const { scan, confidence, match_method } = m;
+      if (scan.status !== 'active') return { attributed: false, reason: 'campaign_not_active' };
+
+      // Bind nothing against a campaign that cannot pay. The signup that follows would only
+      // fail on budget anyway, and it would have burned the scan getting there — leaving a
+      // real scanner permanently unattributable once the promoter tops the budget back up.
+      if ((await lockedBalance(tx, `campaign:${scan.campaign_id}`)) < scan.guest_rate)
+        return { attributed: false, reason: 'budget_exhausted' };
+
+      // The repeat-device check, and only on the probabilistic path: a referrer match already
+      // names one specific scan, so two family members scanning the same poster on the same
+      // wifi are two legitimate claim ids that must not be collapsed into one "device".
+      const device_hash = match_method === 'fingerprint' ? deviceHash(open) : null;
+      if (device_hash && DEVICE_DEDUPE_DAYS > 0) {
+        const repeats = await tx.install.count({
+          where: {
+            campaign_id: scan.campaign_id,
+            device_hash,
+            first_open_at: { gt: new Date(Date.now() - DEVICE_DEDUPE_DAYS * 86_400_000) },
+          },
+        });
+        if (repeats) return { attributed: false, reason: 'duplicate_device', confidence };
+      }
+
+      // One install per scan. The row is already locked by the matcher; this is the same
+      // re-check the old code did, kept because it is what makes the guarantee independent
+      // of the lock rather than a consequence of it.
+      const consumed = await tx.scan.updateMany({
+        where: { id: scan.id, consumed: false },
+        data: { consumed: true },
+      });
+      if (!consumed.count) return { attributed: false, reason: 'already_claimed' };
+
+      const expires_at = new Date(Date.now() + SIGNUP_WINDOW_DAYS * 86_400_000);
+      const install = await tx.install.create({
+        data: {
+          scan_id: scan.id,
+          campaign_id: scan.campaign_id,
+          publisher_org_id: publisher.id,
+          match_method,
+          confidence,
+          device_hash,
+          risk,
+          expires_at,
+        },
+        select: { id: true },
+      });
+
+      return {
+        attributed: true,
+        /** present this at signup. Not a credential and not spendable — it names an install. */
+        install_id: install.id,
+        campaign_id: scan.campaign_id,
+        campaign_name: scan.campaign_name,
+        match_method,
+        /** 0–100. 100 is Play's referrer; below that, how many device signals agreed. */
+        confidence,
+        signup_deadline: expires_at.toISOString(),
+        bonus_label: publisher.bonus_label,
+      };
+    });
+  }
+
+  /**
+   * Stage two: a new user finished signing up, so the fee is earned.
+   *
+   * Preferred shape is `{ install_id, publisher_user_ref }` — the match already happened at
+   * first open and this call only turns it into money.
+   *
+   * The device fields are the legacy single-call shape, kept working for publishers already
+   * integrated against it. They run the same matcher at signup time, which means the same
+   * short fingerprint window now has to stretch across onboarding: on Android the referrer
+   * makes that irrelevant, on iOS it is why this path barely attributed anything. Move.
    *
    * Unattributed is a normal answer, not an error: most installs are organic. It returns 200
    * with `attributed: false` so the publisher's signup path never has to treat this call as
@@ -134,12 +434,17 @@ export class PartnerController {
     @Body()
     b: {
       publisher_user_ref: string;
-      /** raw string from Play's Install Referrer API — the deterministic path */
+      /** preferred: the id `first-open` returned for this device */
+      install_id?: string;
+      /** legacy single-call shape: raw string from Play's Install Referrer API */
       install_referrer?: string;
-      /** device IP and UA seen at the app's first open — the iOS fallback path */
+      /** legacy single-call shape: device signals seen at first open */
       ip?: string;
       user_agent?: string;
       platform?: string;
+      tz?: string;
+      screen?: string;
+      language?: string;
       /** the publisher asserting this user cleared its own verification bar */
       identified?: boolean;
     },
@@ -148,21 +453,13 @@ export class PartnerController {
     // Bounded before anything is parsed or stored: `publisher_user_ref` becomes a unique-index
     // entry, and the rest are attacker-shaped strings from another company's server.
     const publisher_user_ref = str(b.publisher_user_ref, 'publisher_user_ref', 200)!;
-    const install_referrer = str(b.install_referrer, 'install_referrer', 1000, false);
-    const rawIp = str(b.ip, 'ip', 45, false); // 45 = longest possible IPv6 text form
+    const install_id = str(b.install_id, 'install_id', 36, false);
 
-    const claimId = claimIdFromReferrer(install_referrer);
-    // The publisher reports its own client's signals; we hash the IP the same way the scan
-    // path did so the two are comparable and neither side ever stores a raw address.
-    const fingerprint = rawIp ? ipHash(rawIp) : null;
-    const platform = (
-      b.platform && ['android', 'ios', 'other'].includes(b.platform)
-        ? b.platform
-        : detectPlatform(str(b.user_agent, 'user_agent', 500, false) ?? '')
-    ) as Platform;
-
-    if (!claimId && !fingerprint)
-      throw new BadRequestException('install_referrer or ip required to attribute an install');
+    const open = install_id ? null : readSignals(b as Record<string, unknown>);
+    if (open && !open.claimId && !open.fingerprint)
+      throw new BadRequestException(
+        'install_id, or install_referrer/ip, required to attribute a signup',
+      );
 
     const unattributed = (reason: string) => ({
       attributed: false,
@@ -175,12 +472,11 @@ export class PartnerController {
     let replayCampaignId: string | null = null;
 
     const fresh = await prisma.$transaction(async (tx) => {
-      const rows = claimId
-        ? await byReferrer(tx, publisher.id, claimId)
-        : await byFingerprint(tx, publisher.id, fingerprint!, platform);
-      const scan = rows[0];
-      if (!scan) return unattributed('no_match');
-      if (scan.status !== 'active') return unattributed('campaign_not_active');
+      const resolved = install_id
+        ? await claimInstall(tx, publisher.id, install_id)
+        : await claimAtSignup(tx, publisher.id, open!);
+      if ('reason' in resolved) return unattributed(resolved.reason);
+      const { scan, confidence, match_method } = resolved;
 
       const identified = b.identified === true;
       const fee = identified ? scan.coin_rate : scan.guest_rate;
@@ -190,24 +486,18 @@ export class PartnerController {
       if ((await lockedBalance(tx, `campaign:${scan.campaign_id}`)) < fee)
         return unattributed('budget_exhausted');
 
-      // One install per scan. Guarded by the row lock above and re-checked here so a claim
-      // can never be counted twice even if the lock were ever weakened.
-      const consumed = await tx.scan.updateMany({
-        where: { id: scan.id, consumed: false },
-        data: { consumed: true },
-      });
-      if (!consumed.count) return unattributed('already_claimed');
-
       let red;
       try {
         red = await tx.redemption.create({
           data: {
             campaign_id: scan.campaign_id,
             scan_id: scan.id,
+            install_id,
             publisher_user_ref,
             coins: fee,
             identified,
-            match_method: claimId ? 'referrer' : 'fingerprint',
+            match_method,
+            confidence,
           },
           select: { id: true },
         });
@@ -231,7 +521,8 @@ export class PartnerController {
         attribution_id: red.id,
         campaign_id: scan.campaign_id,
         campaign_name: scan.campaign_name,
-        match_method: claimId ? 'referrer' : 'fingerprint',
+        match_method,
+        confidence,
         identified,
         /** marketing fee earned by the publisher, in platform credits. Not user currency. */
         fee,
@@ -275,6 +566,7 @@ export class PartnerController {
       campaign_id: prior.campaign_id,
       campaign_name: prior.campaign.name,
       match_method: prior.match_method,
+      confidence: prior.confidence,
       identified: prior.identified,
       fee: prior.coins,
       pending_fee: prior.identified ? 0 : coin_rate - prior.coins,

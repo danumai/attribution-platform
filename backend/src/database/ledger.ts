@@ -22,6 +22,17 @@ export async function audit(
   });
 }
 
+/**
+ * Read a balance and hold its row for the rest of the transaction, so two concurrent debits
+ * cannot both pass the same `>= 0` check. Every money path that spends goes through this;
+ * Prisma has no `FOR UPDATE` builder, which is why it is raw.
+ */
+export async function lockedBalance(tx: Tx, account: string): Promise<number> {
+  const rows = await tx.$queryRaw<{ balance: number }[]>`
+    SELECT balance FROM account_balances WHERE account = ${account} FOR UPDATE`;
+  return rows[0]?.balance ?? 0;
+}
+
 export async function balance(account: string): Promise<number> {
   const r = await prisma.accountBalance.findUnique({ where: { account } });
   return r?.balance ?? 0;

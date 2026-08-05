@@ -64,6 +64,37 @@ export const REFERRER_WINDOW_DAYS = int('REFERRER_WINDOW_DAYS', 30, 1, 90);
 export const FINGERPRINT_WINDOW_MIN = int('FINGERPRINT_WINDOW_MIN', 60, 1, 1440);
 
 /**
+ * Both windows above are measured scan → *first open*, not scan → signup. That distinction is
+ * the whole reason `installs` exists: an install lands minutes after a scan, a signup can land
+ * days later, and forcing one window to cover both is what made the fingerprint path useless.
+ * This is the second leg — how long a matched install stays convertible into a paid signup.
+ */
+export const SIGNUP_WINDOW_DAYS = int('SIGNUP_WINDOW_DAYS', 30, 1, 180);
+
+/**
+ * The accept/reject line for a probabilistic match, in the same 0–100 units as `score()`.
+ *
+ * Hashed IP + platform alone scores 55, so this default of 70 refuses them. That is the point:
+ * an IP is not an identity. Carrier-grade NAT, café wifi, airport wifi and corporate VPNs all
+ * put thousands of unrelated handsets behind one address, and "same NAT, both on iOS" describes
+ * a postcode. At least one real device signal — timezone plus locale, or the screen geometry —
+ * has to agree before anyone is paid.
+ *
+ * Raise it toward 80 to demand the screen match; there is no honest value below 60.
+ */
+export const MIN_CONFIDENCE = int('MIN_CONFIDENCE', 70, 60, 100);
+
+/**
+ * How far back the repeat-device check looks. One handset installing the same app for a second
+ * campaign reward is the cheapest fraud there is, and the only one a device signal can catch.
+ *
+ * 0 disables it. Worth doing in markets where the fingerprint is coarse enough that unrelated
+ * households collide — a blocked honest install is a publisher support ticket, and this trades
+ * that risk against the farm.
+ */
+export const DEVICE_DEDUPE_DAYS = int('DEVICE_DEDUPE_DAYS', 7, 0, 90);
+
+/**
  * Which upstream hops may set `X-Forwarded-For`. Every per-IP control in this system —
  * login throttling, scan limits, the global ceiling, and the iOS fingerprint itself — reads
  * `req.ip`, and `req.ip` is whatever this setting says to believe.

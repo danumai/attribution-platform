@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { prisma } from '../../database/prisma';
-import { JWT_SECRET, SessionClaims } from './tokens';
+import { JWT_SECRET, SessionClaims, asOrgType } from './tokens';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -29,7 +29,8 @@ export class AuthGuard implements CanActivate {
     });
     if (!org || org.suspended) throw new UnauthorizedException('account suspended');
     // trust the DB over the token for role, so a demotion takes effect immediately too
-    req.session = { org_id: claims.org_id, type: org.type };
+    const session: SessionClaims = { org_id: claims.org_id, type: asOrgType(org.type) };
+    req.session = session;
     return true;
   }
 }

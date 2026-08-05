@@ -14,8 +14,16 @@ import { ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { BASE_URL, FRONTEND_URL } from '../../config';
 import { QrStyle, isAdvanced, renderPng, renderSvg, validateStyle } from '../../common/qr';
-import { detectPlatform, storeUrl } from '../../common/attribution';
+import {
+  detectPlatform,
+  normLang,
+  normScreen,
+  normTz,
+  storeUrl,
+} from '../../common/attribution';
 import { clientIp, ipHash, rateLimited } from '../../common/security';
+import { interstitialHtml } from './interstitial';
+import { randomBytes } from 'crypto';
 import { scanSignals } from '../../common/signals';
 import { balance } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
@@ -60,6 +68,9 @@ export class PublicController {
                 status: true,
                 publisher: {
                   select: {
+                    // `name` is printed on the interstitial as the destination field — the
+                    // scanner is told where they are being sent before they get sent there.
+                    name: true,
                     landing_url: true,
                     android_package: true,
                     ios_app_id: true,
@@ -124,9 +135,120 @@ export class PublicController {
     if (!claimed)
       return end(qr.expires_at && qr.expires_at <= new Date() ? 'expired' : 'used_up');
 
+    // iOS has no install-referrer channel, so this scan will have to be matched on device
+    // signals — and the only moment we can read them is right now, in a browser, before the
+    // App Store takes over. One interstitial hop buys the timezone, screen geometry and
+    // locale that lift this match from "someone on this NAT" to "this handset".
+    //
+    // Android with a Play listing deliberately skips it: the referrer already names the exact
+    // scan, so a hop would cost conversion and buy nothing. Desktop and app-less publishers
+    // skip it too — there is no install to attribute either way.
+    if (platform === 'ios' && campaign.partnership.publisher.ios_app_id)
+      return this.interstitial(res, claim_id, campaign.partnership.publisher.name);
+
     // Straight to the store listing. No token, no code, no query the app can read and spend —
     // on Android the claim id travels only inside Play's install-referrer channel, which is
     // install attribution, not app content.
+    res.redirect(destination);
+  }
+
+  /**
+   * The only page in this API that runs script, so it is also the only one with a relaxed CSP.
+   *
+   * Everything about it is a fallback around a fallback, because the failure mode is silent —
+   * a scanner who never reaches the store is a scanner the publisher never hears about:
+   *   - script runs             → signals collected, `location.replace` after a short hold
+   *   - script blocked / errors → `<meta refresh>` at 3s, no signals, so the match falls back
+   *                               to IP + platform and is then correctly refused as too weak
+   *   - both fail               → the Continue key is a real anchor to a real URL
+   *
+   * `claim_id` is base64url out of `randomBytes`, so it cannot carry markup — but it is
+   * interpolated into an href and a script literal, so the shape is asserted rather than
+   * assumed. A change to the generator must fail here, not open an injection point.
+   */
+  private interstitial(res: Response, claim_id: string, destination: string) {
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(claim_id)) throw new Error('malformed claim id');
+    const nonce = randomBytes(16).toString('base64');
+    // Overrides the global `default-src 'none'`, which would otherwise block the inline script
+    // this page exists for. A nonce rather than 'unsafe-inline': the markup is ours, and the
+    // nonce means any future injection still cannot execute. `data:` is for the fibre tile.
+    res.setHeader(
+      'Content-Security-Policy',
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; ` +
+        `img-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
+    );
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    // Never cached: every render carries a different claim id and a single-use nonce.
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(
+      interstitialHtml({ destination, go: `${BASE_URL}/go/${claim_id}`, nonce }),
+    );
+  }
+
+  /**
+   * Second half of the interstitial: record what the browser measured, then hand the scanner
+   * on to the store. A GET so the no-script `<meta refresh>` and the visible link reach it too.
+   *
+   * The QR use was already burned at `/r/:code` — a scanner who bails here still scanned, and
+   * re-checking campaign status two seconds later would only add a way for this to fail.
+   */
+  @Get('go/:claimId')
+  async go(
+    @Param('claimId') claimId: string,
+    @Query('tz') tz: string,
+    @Query('sc') sc: string,
+    @Query('lang') lang: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const end = (reason: string) =>
+      res.redirect(`${FRONTEND_URL}/campaign-ended?reason=${reason}`);
+    if (rateLimited(`go:${clientIp(req)}`, 30)) return end('rate_limited');
+
+    const scan = await prisma.scan.findUnique({
+      where: { claim_id: claimId },
+      select: {
+        id: true,
+        platform: true,
+        consumed: true,
+        campaign: {
+          select: {
+            partnership: {
+              select: {
+                publisher: {
+                  select: { landing_url: true, android_package: true, ios_app_id: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!scan) return end('invalid');
+
+    // Normalised here rather than at match time so the column only ever holds comparable
+    // values — a scan and a first-open that spell the same screen differently never match.
+    const signals = {
+      tz: normTz(tz),
+      screen: normScreen(sc),
+      language: normLang(lang),
+    };
+    // `consumed` guard: once an install is bound to this scan the signals are evidence of what
+    // that decision was made on, and a replayed link must not rewrite them after the fact.
+    if (!scan.consumed && (signals.tz || signals.screen || signals.language))
+      await prisma.scan.updateMany({
+        where: { id: scan.id, consumed: false },
+        // language already holds the Accept-Language value; navigator.language overwrites it
+        // deliberately, because that is the string the native SDK will report at first open.
+        data: Object.fromEntries(Object.entries(signals).filter(([, v]) => v !== null)),
+      });
+
+    const destination = storeUrl(
+      scan.platform as ReturnType<typeof detectPlatform>,
+      scan.campaign.partnership.publisher,
+      claimId,
+    );
+    if (!destination) return end('no_destination');
     res.redirect(destination);
   }
 

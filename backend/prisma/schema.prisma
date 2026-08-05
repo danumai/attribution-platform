@@ -140,9 +140,18 @@ model Scan {
   /// mobile | tablet | desktop — enforced by CHECK
   device_type  String?
 
+  /// Fingerprint signals collected by the interstitial, NULL when it was skipped (Android,
+  /// desktop) or when JS never ran. Unlike the reporting columns above these DO feed matching,
+  /// so both sides — browser at scan, SDK at first open — must spell them the same way.
+  /// IANA zone, e.g. `Asia/Dhaka`.
+  tz           String?
+  /// `{short}x{long}@{dpr}` in CSS px / points, orientation-normalised: `393x852@3`.
+  screen       String?
+
   qr_code    QrCode      @relation(fields: [qr_code_id], references: [id])
   campaign   Campaign    @relation(fields: [campaign_id], references: [id])
   redemption Redemption?
+  install    Install?
 
   @@index([campaign_id])
   @@index([scanned_at(sort: Desc)])
@@ -153,21 +162,69 @@ model Scan {
   @@map("scans")
 }
 
+/// The middle stage: the app opened for the first time and we tied that open back to a scan.
+///
+/// This is where matching now happens, and the reason it is its own table. First open is
+/// minutes after the scan; signup can be days later. Matching at signup meant the iOS
+/// fingerprint window had to cover install + onboarding + registration, which no honest
+/// window can — so it either missed every real install or was wide enough to match strangers.
+/// Binding here keeps the window tight, and the signup below can then take as long as it likes.
+///
+/// Nothing is paid at this stage. An install with no signup earns nobody anything.
+model Install {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scan_id          String   @unique @db.Uuid
+  campaign_id      String   @db.Uuid
+  /// denormalised from the partnership: every fraud query filters by it, and the join to
+  /// get there is three tables deep
+  publisher_org_id String   @db.Uuid
+  /// referrer | fingerprint
+  match_method     String
+  /// 0–100. 100 = Play handed us the exact claim id; below that, how many fingerprint
+  /// signals agreed. Stored rather than recomputed so a review months later sees what the
+  /// decision was actually made on.
+  confidence       Int
+  /// hash of the signals that identify one handset, for the repeat-device check. Only ever
+  /// set on the probabilistic path — a deterministic claim id is already unique per scan.
+  device_hash      String?
+  /// SDK-asserted device integrity (emulator/rooted/vpn) plus whatever else was rejected on.
+  /// Recorded on accepted installs too: the interesting fraud pattern is the one that passed.
+  risk             Json     @default("{}")
+  /// true once a signup consumed it — the race-proof one-signup-per-install guard
+  redeemed         Boolean  @default(false)
+  first_open_at    DateTime @default(now()) @db.Timestamptz(6)
+  /// after this the install can no longer be turned into a signup
+  expires_at       DateTime @db.Timestamptz(6)
+
+  scan       Scan        @relation(fields: [scan_id], references: [id])
+  redemption Redemption?
+
+  /// the repeat-device check: one campaign, one handset, a recent window
+  @@index([campaign_id, device_hash, first_open_at(sort: Desc)])
+  @@index([publisher_org_id])
+  @@map("installs")
+}
+
 model Redemption {
   id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   campaign_id         String    @db.Uuid
   scan_id             String    @unique @db.Uuid
+  /// NULL only for signups that arrived on the legacy single-call path
+  install_id          String?   @unique @db.Uuid
   publisher_user_ref  String
   coins               Int
   identified          Boolean   @default(true)
   /// referrer | fingerprint — how the install was tied back to the scan. Deterministic
   /// matches are auditable; probabilistic ones are the ones to sample for fraud.
   match_method        String    @default("referrer")
+  /// copied off the install rather than joined: every fraud-review list renders it per row
+  confidence          Int       @default(100)
   upgraded_at         DateTime? @db.Timestamptz(6)
   created_at          DateTime  @default(now()) @db.Timestamptz(6)
 
   campaign Campaign @relation(fields: [campaign_id], references: [id])
   scan     Scan     @relation(fields: [scan_id], references: [id])
+  install  Install? @relation(fields: [install_id], references: [id])
 
   /// one reward per user per campaign, race-proof
   @@unique([campaign_id, publisher_user_ref])
