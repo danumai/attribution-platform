@@ -146,8 +146,25 @@ turns the user away with an explanation rather than a broken page.
              not expired AND uses < max_uses  ──► expired / used_up
        ──► record the pending claim
              (claim_id, platform, hashed IP, truncated UA)
-       ──► 302 to the store listing
+       ──► iOS with a registered App Store id?
+             yes → 200, the interstitial (collects tz/screen/locale,
+                   then forwards via GET /go/:claim_id)
+             no  → 302 straight to the store listing
 ```
+
+**Why iOS gets an extra hop.** Android's referrer names the exact scan, so an interstitial
+there would cost conversion and buy nothing — it is skipped. iOS has no referrer channel at
+all, and the browser is the *only* place this device's timezone, screen geometry and locale
+can ever be read. Skip the hop and the match is left with hashed IP + platform, which now
+scores 55 against a floor of 70 and is refused. The hop is what makes iOS attribution work.
+
+The page holds for ~900ms, forwards itself with `location.replace`, and degrades in two
+stages: a `<meta refresh>` at 3s if script is blocked, and a real anchor if both fail. It
+runs the only inline script in this API, under its own nonce CSP.
+
+`GET /go/:claim_id` writes the signals onto the still-unconsumed scan and redirects to the
+store. It refuses to overwrite them once an install has been bound, so a replayed link
+cannot rewrite the evidence a payment decision was made on.
 
 Two details carry the whole compliance argument:
 
@@ -158,6 +175,11 @@ app and no web fallback would otherwise eat a print run's uses redirecting nobod
 inside Play's `referrer` parameter — an install-attribution channel, not app content. On
 iOS there is no such channel, so the URL is the bare store listing and the match happens on
 device fingerprint instead. Either way the app receives no code it could redeem.
+
+The interstitial does not weaken this. It lives on our origin, never reaches the app, and
+deliberately prints no reference number — it shows a timestamp instead, so there is nothing
+on screen a user could mistake for a code to type in. Its own copy says so: *"No code to
+enter. Nothing to copy."*
 
 Each turn-away reason renders its own message on `/campaign-ended` — a dead end looks like
 a broken sticker, so the user always learns which of these happened.
@@ -172,8 +194,31 @@ take the last use of a code.
 The phone left our control at the store listing. Getting it back is the part every mobile
 measurement partner solves the same two ways, and so do we — deterministic first.
 
+The lifecycle has **four stages, and each is its own row**. That separation is the point:
+
 ```
-  ANDROID  (deterministic, window 30 days)
+  Scan  ──►  Install  ──►  Signup  ──►  Reward
+ (scans)   (installs)  (redemptions)  (ledger_entries)
+```
+
+### Why matching moved to first open
+
+Matching used to happen at signup, in the same call that paid the fee. For Android that was
+harmless — the referrer names the exact scan whenever it arrives. For iOS it was fatal.
+
+A scan and a first open are minutes apart: same network, same timezone, same handset. A scan
+and a *signup* are routinely a day apart, because install, onboarding and registration all sit
+between them. One window cannot cover both. Set short enough to be honest it matched almost
+nothing; set wide enough to catch real installs it would have been matching strangers behind
+the same NAT.
+
+So the publisher's server now calls **`first-open`** at launch, which binds the claim and
+returns an `install_id`, and calls **`claim`** whenever the signup actually happens. The
+short fingerprint window applies to the first leg only; the second leg has its own,
+generous window (`SIGNUP_WINDOW_DAYS`, default 30). No money moves until signup.
+
+```
+  ANDROID  (deterministic, scan → first open within 30 days)
 
     scan ──► Play listing ?referrer=…&qrm_claim=Ab3x…
                   │
@@ -181,37 +226,97 @@ measurement partner solves the same two ways, and so do we — deterministic fir
                   │
              app reads it via the Install Referrer API
                   │
+             app's OWN BACKEND ──► POST /v1/attribution/first-open
+                                    { install_referrer, … }
+                  │
+             exact match on claim_id ──► install bound, confidence 100
+
+
+  iOS  (probabilistic, scan → first open within 60 minutes)
+
+    scan ──► INTERSTITIAL on our origin        ← this is the new hop
+                  │
+             browser reports timezone, screen geometry, locale
+             (the App Store has no referrer channel; this is the only
+              moment these can be read at all)
+                  │
+                  ▼
+             App Store listing                 (still carries no payload)
+                  │
+             user installs and opens; the SDK re-presents the same
+             signals from the native side
+                  │
+             app's OWN BACKEND ──► POST /v1/attribution/first-open
+                                    { ip, platform, tz, screen, language }
+                  │
+             candidates scored ──► best one, if it clears the floor
+
+
+  BOTH, later — whenever the user actually registers
+
              app's OWN BACKEND ──► POST /v1/attribution/claim
-                                    { install_referrer, publisher_user_ref }
+                                    { install_id, publisher_user_ref }
                   │
-             exact match on claim_id ──► attributed
-
-
-  iOS  (probabilistic, window 60 minutes)
-
-    scan ──► App Store listing            (no payload exists to carry)
-                  │
-             at scan time we kept: hashed IP + platform + timestamp
-                  │
-             user installs and opens; the app's backend reports the
-             first-open IP and UA
-                  │
-             app's OWN BACKEND ──► POST /v1/attribution/claim
-                                    { ip, user_agent, publisher_user_ref }
-                  │
-             newest unclaimed scan with the same device shape ──► attributed
+             fee posted to the ledger ──► attributed
 ```
 
-An unmatched install is a **normal answer, not an error** — most installs are organic. The
-call returns `200 { attributed: false, reason }`, so a publisher's signup path never breaks
+### The confidence score
+
+An IP is not an identity. Carrier-grade NAT, café wifi, an airport and a corporate VPN all put
+thousands of unrelated handsets behind one address, so "same address, both on iOS" describes a
+postcode. Hashed IP + platform is therefore the **filter** that produces candidates, not the
+evidence that picks one. Each candidate is scored:
+
+| Signal | Weight | Why |
+|---|---|---|
+| hashed IP + platform | 55 (base) | narrows the field; never sufficient alone |
+| screen geometry | +25 | the only signal with real entropy — splits a country by handset model |
+| timezone | +10 | a whole country shares one |
+| locale | +10 | a whole country shares one |
+
+`MIN_CONFIDENCE` (default **70**) is the accept line, so a bare IP + platform match scores 55
+and is **refused**. The score is stored on the install and copied onto the redemption, so a
+fraud review months later sees what the decision was actually made on rather than a bare
+`referrer`/`fingerprint` label.
+
+Two refusals are deliberate answers rather than errors:
+
+- **`low_confidence`** — the network said "maybe" and no signal from the handset agreed.
+- **`ambiguous`** — two scans fit the evidence equally well. Newest-first would break the tie,
+  and that is exactly the temptation being refused: picking one invents a fact and pays one
+  publisher for another's scan.
+
+Screen geometry is comparable across the browser/native boundary because both report the same
+numbers — CSS pixels in Safari, points in `UIScreen.bounds` — normalised to
+`{short}x{long}@{dpr}` so a phone held sideways at scan time still matches itself upright at
+first open. Anything finer (user-agent string, browser version, fonts, canvas) does *not*
+survive that crossing, and would drag real matches below the accept line rather than help.
+
+An unmatched install is a **normal answer, not an error** — most installs are organic. Both
+calls return `200 { attributed: false, reason }`, so a publisher's signup path never breaks
 over our accounting.
 
 Both lookups take the scan row with `FOR UPDATE … SKIP LOCKED`, so two concurrent claims
 can never both proceed against it; the loser comes back unattributed, which is correct.
 
-The iOS window is short on purpose. Where a whole neighbourhood shares one carrier-grade
-NAT address, hashed IP plus platform collide quickly, and the window is the main control on
-how often that mis-attributes. It is `FINGERPRINT_WINDOW_MIN`, tunable per deployment.
+### Fraud checks at first open
+
+| Check | Behaviour |
+|---|---|
+| claim already consumed | refused (`already_claimed`) — one install per scan, DB-enforced |
+| one install, two signups | refused (`already_claimed`) — atomic test-and-set on `redeemed` |
+| same handset, same campaign | refused (`duplicate_device`), fingerprint path only, `DEVICE_DEDUPE_DAYS` |
+| emulator (SDK-asserted) | refused (`device_integrity`) before any lookup runs |
+| rooted / jailbroken | **recorded, not refused** — large honest population |
+| VPN | **recorded, not refused** — it breaks the IP match anyway, so this explains a `no_match` |
+| two publishers, one install | impossible — every query is scoped to the calling publisher |
+| campaign ended or paused | refused at both stages, so ending a campaign stops spend immediately |
+| budget exhausted | refused at first open too, so a scan is not burned against a budget that cannot pay |
+| expiry | `installs.expires_at`; scans age out of both match windows |
+
+The repeat-device check runs **only on the fingerprint path**. A referrer match already names
+one specific scan, so two family members scanning the same poster on the same wifi are two
+legitimate claim ids that must not be collapsed into one "device".
 
 ---
 
@@ -264,9 +369,18 @@ is [Part III](#part-iii--security-model).
       — a UNIQUE (campaign_id, publisher_user_ref) constraint, so it holds under a race,
         not just under a check
 
-  ✔  One attribution per scan
-      — the scan row is taken FOR UPDATE SKIP LOCKED and marked consumed inside the paying
-        transaction, so a replayed claim id attributes nothing a second time
+  ✔  One install per scan
+      — the scan row is taken FOR UPDATE SKIP LOCKED and marked consumed inside the
+        binding transaction, and installs.scan_id is UNIQUE, so a replayed claim id
+        attributes nothing a second time
+
+  ✔  One signup per install
+      — installs.redeemed is flipped by the same UPDATE that tests it, so two simultaneous
+        signups for one install cannot both proceed; the loser is told already_claimed
+
+  ✔  A probabilistic match is never a guess
+      — hashed IP + platform scores 55 against a floor of 70, and an exact tie between two
+        candidates is refused rather than resolved by recency
 
   ✔  A campaign can never overspend
       — the budget row is locked FOR UPDATE and the payout refused if it falls short
@@ -428,6 +542,7 @@ anything that looks like a spendable token fails the build.
 |---|---|---|
 | `POST /v1/auth/signup`, `/login` | none | Anyone creating or using an account |
 | `GET /r/:code` | none | Phones, on scan |
+| `GET /go/:claim_id` | none | The iOS interstitial forwarding itself to the store (30/min per IP) |
 | `GET /v1/qr-codes/:id/image` | none | The QR preview and print downloads (120/min per IP) |
 | `GET /healthz` | none | Load balancer — reports 503 if Postgres is unreachable |
 | `/v1/*` portal routes | session JWT (12h) | Promoter and publisher dashboards |
@@ -738,40 +853,111 @@ curl -X POST https://api.example.com/v1/attribution/claim \
 Pass the referrer string **raw and whole**. We parse `qrm_claim` out of it ourselves; you do
 not need to URL-decode, split, or extract anything.
 
-Window: `REFERRER_WINDOW_DAYS`, default **30 days** from scan. Long on purpose — people scan a
-poster, install that evening on wifi, and open it the next day.
+Window: `REFERRER_WINDOW_DAYS`, default **30 days** from scan to **first open**. Long on
+purpose — people scan a poster, install that evening on wifi, and open it the next day.
+
+The two-call flow in §4 works on Android too, and is the recommended shape for both platforms:
+one integration path, and the referrer is captured at launch where the Install Referrer API
+actually hands it to you. Android tolerates the single call because the referrer names the
+exact scan whenever it arrives; iOS does not.
 
 ## 4. iOS — the fingerprint fallback
 
-There is no install-referrer channel on iOS. Nothing can survive the App Store transition, so
-the match is necessarily probabilistic.
+There is no install-referrer channel on iOS. Nothing survives the App Store transition, so the
+match is necessarily probabilistic — and it has to happen **at first open, not at signup**.
+
+### 4.1 Call `first-open` when the app launches
+
+```bash
+curl -X POST https://api.example.com/v1/attribution/first-open \
+  -H "Authorization: Bearer $QRM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "ip": "203.0.113.7",
+    "platform": "ios",
+    "tz": "Asia/Dhaka",
+    "screen": "393x852@3",
+    "language": "en-US"
+  }'
+```
+
+```json
+{ "attributed": true, "install_id": "9f2c…", "match_method": "fingerprint",
+  "confidence": 100, "signup_deadline": "2026-09-04T…Z" }
+```
+
+Store `install_id` on the device (Keychain) **and** against the user record once they register.
+Nothing is paid at this stage. Call it once per install; a second call finds the scan already
+consumed and returns `no_match`, which is why the id must be persisted rather than re-derived.
+
+### 4.2 Call `claim` when they actually sign up
 
 ```bash
 curl -X POST https://api.example.com/v1/attribution/claim \
   -H "Authorization: Bearer $QRM_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{
-    "publisher_user_ref": "user_84214",
-    "ip": "203.0.113.7",
-    "platform": "ios",
-    "identified": true
-  }'
+  -d '{ "install_id": "9f2c…", "publisher_user_ref": "user_84214", "identified": true }'
 ```
 
-**`ip` must be the real client IP your server saw at the app's first open** — not your load
-balancer's address, not a server-side egress IP. If you terminate TLS behind a proxy, read it
-from `X-Forwarded-For` and pass the client entry. Getting this wrong doesn't error; it just
-silently attributes nothing.
+This can be minutes or weeks later — `SIGNUP_WINDOW_DAYS`, default 30.
 
-IPv4 and IPv6 are both fine, in any spelling — `::ffff:203.0.113.7`, `203.0.113.7`,
-`2001:0db8::0001` and `2001:db8::1` are normalised server-side before hashing, so your
-representation does not have to match ours. Raw addresses are never stored on either side.
+### 4.3 Getting the signals right
 
-Window: `FINGERPRINT_WINDOW_MIN`, default **60 minutes**. Call `/claim` promptly at signup
-rather than batching it overnight.
+This is the whole integration on iOS. Send all four fields; each one you omit costs
+confidence, and below the floor nothing is attributed at all.
+
+| Field | Native source | Notes |
+|---|---|---|
+| `ip` | client IP **your server saw at first open** | not your load balancer, not an egress IP |
+| `platform` | `"ios"` | |
+| `tz` | `TimeZone.current.identifier` | IANA, e.g. `Asia/Dhaka` |
+| `screen` | `UIScreen.main.bounds` + `scale` | `"{short}x{long}@{dpr}"`, e.g. `393x852@3` |
+| `language` | `Locale.current.identifier` | `en-US` or `en_US`, either is fine |
+
+`screen` must be **orientation-normalised** — shorter dimension first — because the browser
+that scanned may have been sideways. Points, not pixels: `393x852@3`, not `1179x2556@3`. Get
+this wrong and it will not error, it will simply never match.
+
+`ip` accepts IPv4 and IPv6 in any spelling — `::ffff:203.0.113.7`, `203.0.113.7`,
+`2001:0db8::0001` and `2001:db8::1` all normalise server-side before hashing, so your
+representation need not match ours. Raw addresses are never stored on either side.
+
+Optionally send `emulator`, `rooted` and `vpn` booleans if your SDK detects them. `emulator`
+refuses the install outright; the other two are recorded for review and do not block.
+
+### 4.4 Confidence and refusals
+
+| Signals agreeing | Score | Result (floor = 70) |
+|---|---|---|
+| IP + platform only | 55 | **refused** — `low_confidence` |
+| \+ timezone | 65 | refused |
+| \+ timezone, locale | 75 | attributed |
+| \+ screen | 80 | attributed |
+| all four | 100 | attributed |
+
+**`ip` alone is no longer enough.** It was in the previous single-call API; it is not now. An
+IP is a postcode — carrier NAT, café wifi, an airport, a corporate VPN — and paying on it
+attributes strangers to each other.
+
+`ambiguous` means two scans fit equally well and neither was chosen. Both refusals are normal
+answers on a 200, not errors.
+
+### 4.5 Window
+
+`FINGERPRINT_WINDOW_MIN`, default **60 minutes**, now measured scan → **first open** rather
+than scan → signup. That is the point of the split: an install lands minutes after a scan, a
+signup can land days later, and one window could never honestly cover both.
 
 **Expect a lower match rate on iOS than Android.** That is inherent to the platform, not a bug
 in the integration.
+
+### 4.6 Migrating from the single-call API
+
+`POST /claim` still accepts `{ ip, install_referrer, … }` without an `install_id`, so existing
+integrations keep working — but that path now runs the same scored matcher at signup time, so
+a bare `ip` scores 55 and is refused where it used to pay. On Android the referrer makes this
+irrelevant. On iOS, move to the two-call flow or iOS attribution will drop to near zero. You
+can also send `tz`/`screen`/`language` on the legacy single call as a stopgap.
 
 ## 5. The response
 
@@ -956,7 +1142,8 @@ Full request/response schemas: the live Swagger UI at `/docs`.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `POST` | `/v1/attribution/claim` | `pk_` API key | Is this signup attributable? |
+| `POST` | `/v1/attribution/first-open` | `pk_` API key | Bind this install to a scan. Pays nothing. |
+| `POST` | `/v1/attribution/claim` | `pk_` API key | Is this signup attributable? Pays the fee. |
 | `POST` | `/v1/attribution/{id}/confirm` | `pk_` API key | Release the held-back fee |
 | `GET` | `/v1/attribution/{id}` | `pk_` API key | Look up one attribution |
 | `POST` | `/v1/auth/signup` · `/login` | none | Create account / get session token |
@@ -1163,12 +1350,34 @@ sampled; campaign budgets cap total loss; every attribution is reconcilable agai
 anonymous users** — this is a contractual control with technical support, not the reverse.
 
 ### 9.2 iOS fingerprint false matches
-Matching on hashed IP + platform will occasionally attribute one household's install to a
-neighbour's scan under carrier-grade NAT. This is inherent to iOS having no referrer channel.
+Still probabilistic, and inherently so — iOS has no referrer channel. But the exposure is now
+much narrower than "hashed IP + platform": the interstitial adds timezone, screen geometry and
+locale, `MIN_CONFIDENCE` refuses anything scoring below 70, and an exact tie between two
+candidates is refused outright rather than resolved by recency.
 
-*Levers:* `FINGERPRINT_WINDOW_MIN` (default 60) is the main dial. Adding
-SKAdNetwork/AdAttributionKit as a third signal is the real upgrade if measured false-match
-rate starts costing money.
+What remains: two people on one NAT, on the same handset model, in the same locale, scanning
+within the same 60-minute window, both score 100 — and are then correctly refused as
+`ambiguous`, which costs a real attribution rather than paying a wrong one. The system now
+errs toward under-attributing. That is the right direction for a system that pays out on its
+own answers, but it means **the measured match rate is not the true install rate**, and
+publishers should be told so rather than left to infer a bug.
+
+The device fingerprint is a *device shape*, not a device: identical handsets on one network
+with the same locale hash identically. That is why `DEVICE_DEDUPE_DAYS` refuses a repeat
+install rather than banning anything, and why it can be turned off in high-NAT markets.
+
+*Levers:* `MIN_CONFIDENCE` (70) is now the main dial, `FINGERPRINT_WINDOW_MIN` (60) the
+second. Adding SKAdNetwork/AdAttributionKit remains the real upgrade if the refused-as-
+ambiguous rate ever costs more than the false matches would have.
+
+### 9.2b The interstitial is a conversion cost
+The iOS scan path now has an extra hop and a ~900ms hold before the App Store. It is the only
+way to read the signals that make iOS attribution work at all, but it is not free: every
+scanner who abandons on that page is an install nobody gets paid for. Nothing currently
+measures that drop-off — scans and installs are counted, the hop between them is not.
+
+*Lever:* `HOLD_MS` in `interstitial.ts`. Instrumenting `/go/:claim_id` hits against `/r/:code`
+hits would turn this from a guess into a number.
 
 ### 9.3 The rate limiter is per-process
 In-process fixed windows. Running N instances multiplies every limit by N, and a restart

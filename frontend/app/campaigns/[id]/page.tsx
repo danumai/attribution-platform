@@ -6,7 +6,7 @@ import { API, api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
 import { Analytics, Audience } from '@/lib/audience';
 import type { CampaignStats, QrCode } from '@/lib/types';
-import { LoadError, confirmDialog, toast } from '@/lib/ui';
+import { Figures, LoadError, confirmDialog, toast } from '@/lib/ui';
 import { num } from '@/lib/fmt';
 import {
   DEFAULT_STYLE,
@@ -40,7 +40,6 @@ import {
   colorwell,
   cx,
   field,
-  figure,
   hint,
   label as labelClass,
   link,
@@ -570,22 +569,15 @@ export default function CampaignPage() {
       actions={backToCampaigns}
     >
       <h2 className={sectionHead}>Performance</h2>
-      <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
-        {[
-          ['scans', stats.scans],
-          ['rewards granted', stats.redemptions],
-          ['coins granted', stats.coins_granted],
-          ['budget left', stats.budget_remaining],
-        ].map(([k, v]) => (
-          <div
-            className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt max-[600px]:px-3 max-[600px]:py-2.5"
-            key={k as string}
-          >
-            <b className={cx(figure, 'max-[600px]:text-[23px]')}>{num(v as number)}</b>
-            <span className={cx(stamp, 'mt-0.5 block')}>{k as string}</span>
-          </div>
-        ))}
-      </div>
+      <Figures
+        className="mt-3"
+        items={[
+          { k: 'scans', v: num(stats.scans) },
+          { k: 'rewards granted', v: num(stats.redemptions) },
+          { k: 'coins granted', v: num(stats.coins_granted) },
+          { k: 'budget left', v: num(stats.budget_remaining) },
+        ]}
+      />
 
       {/* The numbers above say how much this campaign did. This says where to spend the next
           print run — which is the decision the promoter actually came here to make. */}

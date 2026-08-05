@@ -10,7 +10,8 @@
  */
 import { ReactNode, useMemo, useState } from 'react';
 import { num } from './fmt';
-import { card, cx, figure, muted, sectionHead, select as selectField, stamp } from './tw';
+import { Figures } from './ui';
+import { card, cx, muted, sectionHead, select as selectField, stamp } from './tw';
 
 export interface Bucket {
   key: string;
@@ -118,30 +119,54 @@ function BarList({
  * A time series as columns. Used for the three dimensions where the *order* carries the
  * meaning — hour of day, day of week, and the daily trend — so they must never be re-sorted
  * into a ranking the way the bar lists are.
+ *
+ * The bars are drawn between two printed rules: a perforated one at the peak carrying the
+ * figure it stands for, and a solid one the columns sit on. Without a scale a bar height is
+ * a proportion of nothing — the reader can see that Tuesday beat Monday but has no way to
+ * tell whether that is nine scans or nine hundred.
  */
 function Columns({ dim, rows, empty }: { dim: string; rows: Bucket[]; empty: string }) {
   const top = Math.max(...rows.map((r) => r.scans), 1);
   if (!rows.length) return <p className={cx(muted, 'px-1 py-2')}>{empty}</p>;
+
+  // Print as many ticks as can actually be read: every column for a week or a fortnight,
+  // otherwise an evenly spaced six. The old rule labelled only the two ends and reserved a
+  // blank line of height under all thirty — a tick under a 9px column is not a label.
+  const step = rows.length <= 8 ? 1 : Math.ceil(rows.length / 6);
+
   return (
-    <div className="flex items-end gap-[3px] overflow-x-auto pb-1" style={{ height: 96 }}>
-      {rows.map((r) => (
-        <div
-          key={r.key}
-          className="flex min-w-[9px] flex-1 flex-col justify-end self-stretch"
-          title={`${labelFor(dim, r.key)} — ${num(r.scans)} scans, ${num(r.conversions)} converted`}
-        >
+    <div>
+      {/* the ceiling is a perforation, the system's own hairline, so it reads as printed
+          furniture rather than as a second axis competing with the baseline */}
+      <div className="mb-1.5 flex items-center gap-2.5">
+        <span className={stamp}>peak</span>
+        <span className="h-0.5 flex-1 bg-[image:var(--perf-h)]" aria-hidden="true" />
+        <span className="font-mono text-[11.5px] tabular-nums text-ink-soft">{num(top)}</span>
+      </div>
+      <div className="flex h-21 items-end gap-0.75 border-b border-line">
+        {rows.map((r) => (
           <div
-            className="rounded-t-[3px] bg-accent"
-            style={{ height: `${Math.max((r.scans / top) * 100, 3)}%` }}
+            key={r.key}
+            className="min-w-1.5 flex-1 rounded-t-[3px] bg-accent"
+            style={{ height: `${Math.max((r.scans / top) * 100, 2)}%` }}
+            title={`${labelFor(dim, r.key)} — ${num(r.scans)} scans, ${num(r.conversions)} converted`}
           />
-          {/* Only the ends and the peak get a tick — 30 rotated date labels is noise, not data. */}
-          <span className={cx(stamp, 'mt-1 block truncate text-center text-[10px] leading-none')}>
-            {rows.length <= 12 || r.key === rows[0].key || r.key === rows[rows.length - 1].key
-              ? labelFor(dim, r.key)
-              : ' '}
+        ))}
+      </div>
+      <div className="flex gap-0.75">
+        {rows.map((r, i) => (
+          // Every column keeps its slot so the ticks stay registered under the bars they
+          // name; only the labelled ones print, and they run past their slot rather than
+          // truncating themselves to nothing.
+          <span key={r.key} className="min-w-1.5 flex-1">
+            {i % step === 0 && (
+              <span className={cx(stamp, 'mt-1.5 block whitespace-nowrap leading-none')}>
+                {labelFor(dim, r.key)}
+              </span>
+            )}
           </span>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -149,9 +174,11 @@ function Columns({ dim, rows, empty }: { dim: string; rows: Bucket[]; empty: str
 function Panel({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
   return (
     <div className={card}>
+      {/* the panel's name never wraps: it is the thing being scanned for, and a two-line
+          "QR / CODE" reads as two panels. The note gives way instead. */}
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <b className={stamp}>{title}</b>
-        {note && <span className={cx(muted, 'text-[12px]')}>{note}</span>}
+        <b className={cx(stamp, 'shrink-0')}>{title}</b>
+        {note && <span className={cx(muted, 'min-w-0 flex-1 text-right text-[12px]')}>{note}</span>}
       </div>
       {children}
     </div>
@@ -183,15 +210,14 @@ export function Audience({
   const geoOff = Boolean(t && t.scans > 0 && t.geo_known === 0);
 
   const headline = useMemo(
-    () =>
-      [
-        ['scans', num(t?.scans)],
-        ['devices', num(t?.devices)],
-        ['repeat scans', num(t?.repeat_scans)],
-        ['signups', num(t?.conversions)],
-        ['scan → signup', `${((t?.conversion_rate ?? 0) * 100).toFixed(1)}%`],
-        ['coins granted', num(t?.coins)],
-      ] as const,
+    () => [
+      { k: 'scans', v: num(t?.scans) },
+      { k: 'devices', v: num(t?.devices) },
+      { k: 'repeat scans', v: num(t?.repeat_scans) },
+      { k: 'signups', v: num(t?.conversions) },
+      { k: 'scan → signup', v: `${((t?.conversion_rate ?? 0) * 100).toFixed(1)}%` },
+      { k: 'coins granted', v: num(t?.coins) },
+    ],
     [t],
   );
 
@@ -217,17 +243,7 @@ export function Audience({
         </span>
       </div>
 
-      <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
-        {headline.map(([k, v]) => (
-          <div
-            className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt"
-            key={k}
-          >
-            <b className={figure}>{v}</b>
-            <span className={cx(stamp, 'mt-0.5 block')}>{k}</span>
-          </div>
-        ))}
-      </div>
+      <Figures className="mt-3" items={headline} />
 
       {!t?.scans && (
         <p className={cx(muted, 'mt-3')}>

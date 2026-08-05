@@ -11,9 +11,10 @@ export const cx = (...parts: (string | false | null | undefined)[]) =>
 
 /* ---- surfaces ---- */
 
-export const card =
-  'relative rounded-lg border border-line bg-card p-[22px] shadow-contact-sm ' +
-  'transition-colors duration-200 ease-press hover:border-[color-mix(in_srgb,var(--color-ink)_14%,var(--color-line))]';
+/* A panel is flat stock with a 1px rule for its edge. It carries no hover: a static panel
+   that reacts to the cursor is reactive chrome on a surface nothing can be done to, and a
+   page of twelve of them flickers as the pointer crosses it. */
+export const card = 'relative rounded-lg border border-line bg-card p-[22px] shadow-contact-sm';
 
 /** the stamped caps field name — a printed label, never a sentence */
 export const stamp = 'text-stamp uppercase text-mut';
@@ -139,17 +140,64 @@ export const empty = 'px-5.5 py-8.5 text-center [&_p]:text-mut';
 
 /* ---- the numbers worth glancing at ---- */
 
-/** a KPI plate: the figure first, its name stamped under it */
-export const kpi = cx(
-  btnBase,
-  'block rounded-lg border-line bg-card px-5 py-4.5 text-left shadow-contact-sm',
-  'enabled:hover:bg-card-alt',
+/**
+ * The figure strip: one bordered container subdivided by perforations, per DESIGN.md's
+ * Layout rule, never a grid of separate cards.
+ *
+ * It replaces a `flex-wrap` run of `flex-auto` cells, where every cell sized itself to the
+ * width of its own number — so a six-digit figure printed a cell twice as wide as a
+ * two-digit one, nothing shared a left edge, and the wrap row stretched whatever was left
+ * across the whole card. Equal columns put the stamped names on one baseline and the
+ * figures on another, which is the whole reason a strip of numbers is worth glancing at.
+ */
+export const figureStrip = 'grid overflow-hidden rounded-lg border border-line bg-card shadow-contact-sm';
+
+/**
+ * How many columns a strip of `n` figures breaks into.
+ *
+ * `auto-fit` picks the count from a minimum width, which is how a strip of seven ends up as
+ * six across and one alone on a row with five cells of empty card beside it. These counts
+ * are chosen so a wrapped row is never a single orphan: seven goes four-and-three, five goes
+ * three-and-two. Anything past seven falls back to fitting what it can.
+ */
+export function figureColumns(n: number) {
+  return (
+    {
+      1: 'grid-cols-1',
+      2: 'grid-cols-2 max-[440px]:grid-cols-1',
+      3: 'grid-cols-3 max-[680px]:grid-cols-1',
+      4: 'grid-cols-4 max-[880px]:grid-cols-2 max-[380px]:grid-cols-1',
+      5: 'grid-cols-5 max-[1080px]:grid-cols-3 max-[680px]:grid-cols-2 max-[380px]:grid-cols-1',
+      6: 'grid-cols-6 max-[1260px]:grid-cols-3 max-[680px]:grid-cols-2 max-[380px]:grid-cols-1',
+      // Seven never goes seven across. It fits, but only just: a seven-digit scan count
+      // lands ~2px off the tear line beside it, and a figure crowding its own divider is
+      // the crampedness this strip exists to remove. Four-and-three reads calmer.
+      7: 'grid-cols-4 max-[880px]:grid-cols-3 max-[560px]:grid-cols-2 max-[380px]:grid-cols-1',
+    }[n] ?? 'grid-cols-[repeat(auto-fit,minmax(158px,1fr))]'
+  );
+}
+
+/* The subdivision is drawn, not bordered: a tear line down the left of every cell and
+   across the top of every wrapped row. Both are laid 1px outside the cell so the strip's
+   own `overflow-hidden` clips the ones that would otherwise print over the card's edge —
+   which is what lets the rules survive an `auto-fit` grid that reflows its column count. */
+const cellRules =
+  "before:absolute before:inset-y-2 before:-left-px before:w-px before:content-[''] " +
+  'before:bg-[image:var(--perf-v)] before:bg-[length:1px_11px] ' +
+  "after:absolute after:inset-x-2 after:-top-px after:h-px after:content-[''] " +
+  'after:bg-[image:var(--perf-h)] after:bg-[length:11px_1px]';
+
+export const figureCell = `relative px-4.5 py-4 text-left ${cellRules}`;
+
+/** the same cell when it is also the jump to the section the figure was counted from */
+export const figureCellLink = cx(
+  'group relative cursor-pointer border-0 bg-transparent px-4.5 py-4 text-left',
+  'transition-colors duration-150 ease-press hover:bg-card-alt active:translate-y-px',
+  cellRules,
 );
 
-export const kpiFigure = 'block font-mono text-[28px] font-semibold tracking-[-0.04em] tabular-nums';
-
 /** a printed field's value: mono, tight, tabular — the figure the row is read for */
-export const fact = 'mt-0.75 font-mono text-[23px] font-semibold tracking-[-0.04em] tabular-nums';
+export const fact = 'mt-1 font-mono text-[23px] font-semibold tracking-[-0.04em] tabular-nums';
 
 /** a work queue row: count, what it is, and where it takes you */
 export const queueRow = cx(
@@ -199,9 +247,16 @@ export function pill(status?: string | null) {
   return pillNeutral;
 }
 
-/** a figure the page is read for: mono, tight, tabular */
+/** a figure the page is read for: mono, tight, tabular.
+ *
+ *  The size gives way before the number does. A seven-digit coin total is ~118px at 28px
+ *  mono, which is wider than a cell gets once a dense strip meets the console's 248px rail —
+ *  and a figure that overruns its cell is worse than a figure set slightly smaller.
+ *
+ *  No entrance of its own either: the section it sits in already rises once, and seven
+ *  numbers each counting themselves in is decoration, which this world does not do. */
 export const figure =
-  'block font-mono text-[28px] font-semibold tracking-[-0.04em] tabular-nums animate-count';
+  'block font-mono text-[clamp(21px,1.9vw,28px)] font-semibold tracking-[-0.04em] tabular-nums';
 
 export const skeleton =
   'h-3 rounded-full animate-shimmer ' +
@@ -220,6 +275,18 @@ export const search =
 
 export const searchInput =
   'w-full border-0 bg-transparent py-2.25 text-[14.5px] text-ink outline-none placeholder:text-mut/75';
+
+/** the line above a table that says what is being shown and what is narrowing it */
+export const filterBar = 'mt-3 flex flex-wrap items-center gap-2.5';
+
+/** an applied filter, printed as a field with a tear-off — never state hidden in a heading */
+export const filterChip =
+  'inline-flex items-center gap-1.5 rounded-sm border border-accent-line bg-accent-soft ' +
+  'py-1 pr-1 pl-2.5 text-accent [&_code]:font-mono [&_code]:text-[12.5px]';
+
+export const filterChipDrop =
+  'grid size-5 shrink-0 cursor-pointer place-items-center rounded-sm border-0 bg-transparent ' +
+  'text-accent transition-colors duration-150 ease-press hover:bg-accent-line [&_svg]:size-3';
 
 /* row action menu — one control per row instead of a run of links */
 export const menu = 'group relative inline-block';

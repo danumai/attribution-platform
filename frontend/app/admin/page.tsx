@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
 import { Analytics, Audience } from '@/lib/audience';
-import { LoadError, confirmDialog, promptDialog, toast } from '@/lib/ui';
+import { Figure, Figures, LoadError, confirmDialog, promptDialog, toast } from '@/lib/ui';
 import type {
   AdminOrg,
   AdminOverview,
@@ -26,12 +26,11 @@ import {
   codeKey,
   empty as emptyBox,
   field,
-  figure,
+  filterBar,
+  filterChip,
+  filterChipDrop,
   health,
   healthMark,
-  kpi,
-  kpiFigure,
-  label as labelClass,
   link as linkClass,
   linkish,
   menu,
@@ -49,7 +48,6 @@ import {
   sectionHead,
   select as selectField,
   skeleton,
-  stamp,
   table,
   tableFoot,
   tableWrap,
@@ -304,19 +302,42 @@ function Table<T extends object>({
   );
 }
 
-/** A row of plain counts — the Coins and Platform strips, which are the same shape twice. */
-function Figures({ items }: { items: [string, number | undefined][] }) {
+/** Counts, ready for the shared strip. */
+const counts = (items: [string, number | undefined][]): Figure[] =>
+  items.map(([k, v]) => ({ k, v: num(v ?? 0) }));
+
+/**
+ * Whether the platform's coins still sum to zero.
+ *
+ * It leads the Overview and it opens the Ledger, because those are the two places an
+ * operator looks before authorising anything, and a integrity check that is only on one of
+ * them is a check the other page silently claims to have passed.
+ */
+function LedgerHealth({ ok, sum, onOpen }: { ok: boolean; sum: number; onOpen?: () => void }) {
   return (
-    <div className={cx(card, 'mt-3 flex flex-wrap items-center justify-between gap-3')}>
-      {items.map(([k, v]) => (
-        <div
-          className="flex-auto rounded-md px-4.5 py-3.5 transition-colors duration-200 ease-press hover:bg-card-alt"
-          key={k}
-        >
-          <b className={figure}>{num(v ?? 0)}</b>
-          <span className={cx(stamp, 'mt-0.5 block')}>{k}</span>
-        </div>
-      ))}
+    <div className={health(ok)}>
+      <div className={healthMark(ok)} aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          {ok ? <path d="m5 10.5 3.2 3L15 6.5" /> : <path d="M10 5.5v5.5M10 14v.1" />}
+        </svg>
+      </div>
+      <div>
+        <b className="font-[650] tracking-[-0.015em]">
+          {ok ? 'Ledger balanced' : `Ledger off by ${num(sum)}`}
+        </b>
+        <p className={cx(muted, 'mt-0.75 max-w-[62ch]')}>
+          {ok
+            ? 'Every entry sums to zero — no coins have been created or lost.'
+            : 'Entries do not sum to zero. Coins have been created or destroyed outside the ledger — investigate before any payout.'}
+        </p>
+      </div>
+      {!ok && onOpen && (
+        <span className="ml-auto self-center whitespace-nowrap">
+          <button className={linkish} onClick={onOpen}>
+            Open the ledger
+          </button>
+        </span>
+      )}
     </div>
   );
 }
@@ -536,42 +557,26 @@ export default function Admin() {
           <>
             {/* The one thing a platform operator has to know before anything else: does the
                 money add up. It leads the page rather than sitting in a footnote row. */}
-            <div className={health(o.ledger_balanced)}>
-              <div className={healthMark(o.ledger_balanced)} aria-hidden="true">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  {o.ledger_balanced ? <path d="m5 10.5 3.2 3L15 6.5" /> : <path d="M10 5.5v5.5M10 14v.1" />}
-                </svg>
-              </div>
-              <div>
-                <b className="font-[650] tracking-[-0.015em]">
-                  {o.ledger_balanced ? 'Ledger balanced' : `Ledger off by ${num(o.ledger_sum)}`}
-                </b>
-                <p className={cx(muted, 'mt-0.75 max-w-[62ch]')}>
-                  {o.ledger_balanced
-                    ? 'Every entry sums to zero — no coins have been created or lost.'
-                    : 'Entries do not sum to zero. Coins have been created or destroyed outside the ledger — investigate before any payout.'}
-                </p>
-              </div>
-              {!o.ledger_balanced && (
-                <span className="ml-auto self-center whitespace-nowrap">
-                  {link('Open the ledger', () => setTab('Ledger'))}
-                </span>
-              )}
-            </div>
+            <LedgerHealth
+              ok={o.ledger_balanced}
+              sum={o.ledger_sum}
+              onOpen={() => setTab('Ledger')}
+            />
 
             <h2 className={sectionHead}>Live now</h2>
-            <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-3">
-              {[
-                ['Scans, last 24h', o.scans_24h, 'Audience'],
-                ['Active campaigns', o.active_campaigns, 'Campaigns'],
-                ['Scan → signup', `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`, 'Audience'],
-              ].map(([k, v, go]) => (
-                <button className={kpi} key={k as string} onClick={() => setTab(go as Tab)}>
-                  <b className={kpiFigure}>{typeof v === 'number' ? num(v) : (v ?? 0)}</b>
-                  <span className={stamp}>{k as string}</span>
-                </button>
-              ))}
-            </div>
+            <Figures
+              className="mt-3"
+              onPick={(go) => setTab(go as Tab)}
+              items={[
+                { k: 'Scans, last 24h', v: num(o.scans_24h), go: 'Audience' },
+                { k: 'Active campaigns', v: num(o.active_campaigns), go: 'Campaigns' },
+                {
+                  k: 'Scan → signup',
+                  v: `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`,
+                  go: 'Audience',
+                },
+              ]}
+            />
 
             <h2 className={sectionHead}>Needs attention</h2>
             <div className={cx(card, 'mt-3 p-2')}>
@@ -595,18 +600,20 @@ export default function Admin() {
 
             <h2 className={sectionHead}>Coins</h2>
             <Figures
-              items={[
+              className="mt-3"
+              items={counts([
                 ['funded', o.total_funded],
                 ['granted', o.coins_granted],
                 ['unspent', (o.total_funded ?? 0) - (o.coins_granted ?? 0)],
                 ['identified', o.identified_redemptions],
                 ['guest', o.guest_redemptions],
-              ]}
+              ])}
             />
 
             <h2 className={sectionHead}>Platform</h2>
             <Figures
-              items={[
+              className="mt-3"
+              items={counts([
                 ['promoters', o.promoters],
                 ['publishers', o.publishers],
                 ['partnerships', o.partnerships],
@@ -614,7 +621,7 @@ export default function Admin() {
                 ['QR codes', o.qr_codes],
                 ['scans', o.scans],
                 ['redemptions', o.redemptions],
-              ]}
+              ])}
             />
           </>
         ))}
@@ -965,6 +972,11 @@ export default function Admin() {
 
       {tab === 'Ledger' && (
         <>
+          {/* The integrity check leads this tab as it leads the Overview. An operator who
+              deep-links straight here would otherwise read balances with no way to know
+              whether they still sum to zero. */}
+          {o && <LedgerHealth ok={o.ledger_balanced} sum={o.ledger_sum} />}
+
           <h2 className={sectionHead}>Account balances</h2>
           <Table
             loading={loading}
@@ -972,14 +984,49 @@ export default function Admin() {
             empty="No accounts."
             cols={[
               { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
-              { h: 'Balance', num: true, sort: (x) => x.balance, get: (x) => num(x.balance) },
+              {
+                h: 'Balance',
+                num: true,
+                sort: (x) => x.balance,
+                // A balance carries its own sign: coins drawn out of an account are a debit,
+                // and printing them in the same ink as a credit hides the direction.
+                get: (x) => (
+                  <span className={x.balance < 0 ? 'text-bad' : x.balance > 0 ? 'text-ok' : ''}>
+                    {num(x.balance)}
+                  </span>
+                ),
+              },
               { h: '', get: (x) => link('Entries', () => setLedgerAccount(x.account)) },
             ]}
           />
-          <h2 className={sectionHead}>
-            Entries {ledgerAccount ? <>for <code>{ledgerAccount}</code></> : '(last 300, all accounts)'}
-          </h2>
-          {ledgerAccount && link('Clear account filter', () => setLedgerAccount(''))}
+
+          <h2 className={sectionHead}>Entries</h2>
+          {/* What is narrowing the table is a control above it, not a clause inside the
+              heading — a filter you cannot see is a filter you forget you set. */}
+          <div className={filterBar}>
+            {ledgerAccount ? (
+              <>
+                <span className={filterChip}>
+                  <code>{ledgerAccount}</code>
+                  <button
+                    className={filterChipDrop}
+                    onClick={() => setLedgerAccount('')}
+                    aria-label="Show every account"
+                    title="Show every account"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <path d="m4.5 4.5 7 7m0-7-7 7" />
+                    </svg>
+                  </button>
+                </span>
+                <span className={muted}>Every entry posted against this account.</span>
+              </>
+            ) : (
+              <span className={muted}>
+                The 300 newest entries, every account. Pick one above to see all of its.
+              </span>
+            )}
+          </div>
           <Table
             loading={loading}
             rows={d.ledger?.entries ?? []}
@@ -987,7 +1034,7 @@ export default function Admin() {
             cols={[
               { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
               { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
-              { h: 'Amount', num: true, sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'text-bad' : 'text-ok'}>{x.amount}</span> },
+              { h: 'Amount', num: true, sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'text-bad' : 'text-ok'}>{num(x.amount)}</span> },
               { h: 'Ref', sort: (x) => x.ref, get: (x) => <code>{x.ref}</code> },
             ]}
           />

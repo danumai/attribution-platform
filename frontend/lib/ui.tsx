@@ -1,13 +1,31 @@
 'use client';
 /**
- * Toasts + modal dialogs, no dependencies.
+ * The console primitives every signed-in surface shares: toasts, modal dialogs, the failed
+ * load, and the figure strip.
  *
  * A module-level store so any page can call `toast.success(...)` or
  * `await confirmDialog(...)` without threading a context through props.
  * <UI /> is mounted once in the root layout and renders both.
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { alertErr, btn, btnDanger, btnGhost, card, cx, field, h3, label, muted } from '@/lib/tw';
+import { ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  alertErr,
+  btn,
+  btnDanger,
+  btnGhost,
+  card,
+  cx,
+  field,
+  figure,
+  figureCell,
+  figureCellLink,
+  figureColumns,
+  figureStrip,
+  h3,
+  label,
+  muted,
+  stamp,
+} from '@/lib/tw';
 
 type Kind = 'success' | 'error' | 'info';
 type Toast = { id: number; kind: Kind; text: string; leaving?: boolean };
@@ -90,6 +108,60 @@ export function LoadError({ message, onRetry }: { message: string; onRetry: () =
       <button className={cx(btn, 'mt-4')} onClick={onRetry}>
         Try again
       </button>
+    </div>
+  );
+}
+
+/** One printed figure. `go` marks the section this number was counted from. */
+export type Figure = { k: string; v: ReactNode; go?: string };
+
+/**
+ * A run of figures printed as one strip.
+ *
+ * Every console surface used to spell this out for itself, and each one drifted: the admin
+ * overview, the audience panel and the campaign page all built a `flex-wrap` row of
+ * `flex-auto` cells whose widths came out of the numbers inside them, while the two "Live
+ * now" rows built the same figures again as separate bordered plates. Four vocabularies for
+ * "a number" on surfaces an operator reads side by side.
+ *
+ * The name is stamped above the value, per the Stamped Field Rule — which also happens to be
+ * what makes a strip scannable, since the labels then share a baseline and so do the figures.
+ */
+export function Figures({
+  items,
+  onPick,
+  className,
+}: {
+  items: Figure[];
+  onPick?: (go: string) => void;
+  /** margins belong to the call site, the way every other primitive in `tw` works */
+  className?: string;
+}) {
+  return (
+    <div className={cx(figureStrip, figureColumns(items.length), className)}>
+      {items.map(({ k, v, go }) => {
+        const body = (
+          <>
+            {/* The label leads, so a reader scanning for one figure finds it by name. On a
+                cell that jumps somewhere, it takes the validation ink on hover — that plus
+                the cell filling is the affordance, so the strip needs no arrow per cell.
+                There is no `group` on a static cell, so the variant never fires there. */}
+            <span className={cx(stamp, 'block transition-colors duration-150 ease-press group-hover:text-accent')}>
+              {k}
+            </span>
+            <b className={cx(figure, 'mt-1')}>{v}</b>
+          </>
+        );
+        return go && onPick ? (
+          <button key={k} className={figureCellLink} onClick={() => onPick(go)} title={`Open ${k}`}>
+            {body}
+          </button>
+        ) : (
+          <div key={k} className={figureCell}>
+            {body}
+          </div>
+        );
+      })}
     </div>
   );
 }

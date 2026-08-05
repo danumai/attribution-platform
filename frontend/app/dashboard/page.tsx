@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
-import { confirmDialog, promptDialog, toast } from '@/lib/ui';
+import { Figures, confirmDialog, promptDialog, toast } from '@/lib/ui';
 import { ago, num } from '@/lib/fmt';
 import type { Campaign, Me, Partnership, PublisherOption, Redemption } from '@/lib/types';
 import {
@@ -20,8 +20,6 @@ import {
   fact,
   field,
   hint,
-  kpi,
-  kpiFigure,
   label,
   linkish,
   muted,
@@ -196,15 +194,15 @@ export default function Dashboard() {
   // not a count. Print it as one rather than overstating certainty.
   const capped = redemptions.length >= 100;
   const coinsGranted = redemptions.reduce((n, x) => n + (x.coins ?? 0), 0);
-  const kpis: [string, string, string][] = [
-    ['Active campaigns', num(campaigns.filter((c) => c.status === 'active').length), 'campaigns'],
-    ['Active partnerships', num(activePartnerships.length), 'partnerships'],
-    ['Redemptions', capped ? `${num(100)}+` : num(redemptions.length), 'redemptions'],
+  const kpis = [
+    { k: 'Active campaigns', v: num(campaigns.filter((c) => c.status === 'active').length), go: 'campaigns' },
+    { k: 'Active partnerships', v: num(activePartnerships.length), go: 'partnerships' },
+    { k: 'Redemptions', v: capped ? `${num(100)}+` : num(redemptions.length), go: 'redemptions' },
     // A promoter's own figure is a floor derived from the newest 100 rows; a publisher's is
     // its whole earned balance off the ledger, so it is exact and needs no "≥".
     isPromoter
-      ? ['Coins granted', `${capped ? '≥ ' : ''}${num(coinsGranted)}`, 'redemptions']
-      : ['Coins earned', num(profile?.earnings ?? 0), 'redemptions'],
+      ? { k: 'Coins granted', v: `${capped ? '≥ ' : ''}${num(coinsGranted)}`, go: 'redemptions' }
+      : { k: 'Coins earned', v: num(profile?.earnings ?? 0), go: 'redemptions' },
   ];
 
   // A publisher with no destination registered redirects nobody: every scan of every campaign
@@ -248,14 +246,7 @@ export default function Dashboard() {
           {!loaded ? (
             <Loading lines={3} />
           ) : (
-          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-3">
-            {kpis.map(([k, v, go]) => (
-              <button className={kpi} key={k} onClick={() => setSec(go)}>
-                <b className={kpiFigure}>{v}</b>
-                <span className={stamp}>{k}</span>
-              </button>
-            ))}
-          </div>
+          <Figures className="mt-3" items={kpis} onPick={setSec} />
           )}
 
           <h2 className={sectionHead}>Needs attention</h2>

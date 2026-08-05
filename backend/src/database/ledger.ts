@@ -1,13 +1,26 @@
 import { Tx, prisma } from './prisma';
 
-/** Credit/debit an account inside an open transaction, keeping the balance in sync. */
+/**
+ * Credit/debit an account inside an open transaction, keeping the balance in sync.
+ *
+ * Seed-then-update rather than the obvious `upsert`, and the reason is subtle enough to be
+ * worth stating: Postgres evaluates a table's CHECK constraints against the tuple an
+ * `INSERT ... ON CONFLICT DO UPDATE` *proposes*, before it detects the conflict and switches
+ * to the update. So `upsert` with `create: { balance: -10 }` is tested as a standalone
+ * `balance = -10` row and rejected by `account_balances_non_negative_check` — even when the
+ * account holds 100 and the resulting balance would be a perfectly legal 90.
+ *
+ * That made every debit in the system fail: claim, the confirm upgrade, and the admin
+ * adjustment all route through here. Seeding the row at 0 first means the floor is only ever
+ * checked against the value that actually lands.
+ */
 export async function ledger(tx: Tx, account: string, amount: number, ref: string) {
   await tx.ledgerEntry.create({ data: { account, amount, ref } });
-  await tx.accountBalance.upsert({
-    where: { account },
-    create: { account, balance: amount },
-    update: { balance: { increment: amount } },
-  });
+  await tx.$executeRaw`
+    INSERT INTO account_balances (account, balance) VALUES (${account}, 0)
+    ON CONFLICT (account) DO NOTHING`;
+  await tx.$executeRaw`
+    UPDATE account_balances SET balance = balance + ${amount} WHERE account = ${account}`;
 }
 
 /** Every privileged override is recorded, so rule changes are explainable after the fact. */
