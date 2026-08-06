@@ -49,7 +49,7 @@ function Icon({ name, className }: { name: keyof typeof ICONS; className?: strin
 /* One rail row. Each state prints its own hover ink rather than layering a second
    hover rule over the first — two utilities on one property would race. */
 const railRow =
-  'my-px flex w-full items-center gap-2.5 rounded-md px-2.75 py-2 text-left text-sm ' +
+  'my-px flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13.5px] ' +
   'font-medium no-underline';
 
 function railItem(state: 'idle' | 'current' | 'out') {
@@ -57,9 +57,9 @@ function railItem(state: 'idle' | 'current' | 'out') {
     btnBase,
     railRow,
     state === 'current'
-      ? 'border-accent-line bg-accent-soft font-semibold text-accent'
+      ? 'border-transparent bg-accent-soft font-semibold text-accent'
       : state === 'out'
-        ? 'mt-2 rounded-none border-transparent bg-transparent pt-3 text-ink-soft enabled:hover:text-bad'
+        ? 'mt-2 border-transparent bg-transparent text-mut enabled:hover:bg-bad-soft enabled:hover:text-bad'
         : 'border-transparent bg-transparent text-ink-soft enabled:hover:bg-card-alt enabled:hover:text-ink',
   );
 }
@@ -91,7 +91,7 @@ export function Shell({
     const head = it.group && it.group !== items[i - 1]?.group && (
       <span
         key={`${it.group}-h`}
-        className={`${stamp} block px-3 pt-3.5 pb-1.5 text-[9.5px]`}
+        className={`${stamp} block px-3 pt-4 pb-1.5 text-[11.5px] font-semibold`}
       >
         {it.group}
       </span>
@@ -101,7 +101,7 @@ export function Shell({
         <Icon name={it.icon} className={current ? 'text-accent' : 'text-mut'} />
         <span className="flex-1 truncate">{it.label}</span>
         {it.badge ? (
-          <span className="min-w-5 shrink-0 rounded-sm border border-warn-line bg-warn-soft px-1.5 py-px text-center font-mono text-[11px] font-bold text-warn">
+          <span className="min-w-5 shrink-0 rounded-full bg-warn-soft px-1.5 py-px text-center text-[11px] font-semibold text-warn tabular-nums">
             {it.badge}
           </span>
         ) : null}
@@ -140,33 +140,31 @@ export function Shell({
       <button
         className={cx(
           'hidden',
-          open && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-55 max-[900px]:block max-[900px]:bg-[color-mix(in_srgb,#2a2113_45%,transparent)]',
+          open && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-55 max-[900px]:block max-[900px]:bg-[color-mix(in_srgb,#0d1117_45%,transparent)] max-[900px]:backdrop-blur-sm',
         )}
         aria-label="Close menu"
         onClick={() => setOpen(false)}
       />
 
-      {/* the rail is a ticket stub: perforated inner edge, stamped group labels */}
       <aside
         className={cx(
-          'sticky top-0 flex h-dvh flex-col self-start border-r border-line bg-card px-3.5 pt-5 pb-4',
-          "after:pointer-events-none after:absolute after:inset-y-0 after:-right-px after:w-px after:bg-[image:var(--perf-v)] after:bg-[length:1px_11px] after:content-['']",
+          'sticky top-0 flex h-dvh flex-col self-start border-r border-line bg-card px-3 pt-4 pb-3',
           'max-[900px]:fixed max-[900px]:left-0 max-[900px]:z-60 max-[900px]:w-66 max-[900px]:shadow-contact',
           'max-[900px]:transition-transform max-[900px]:duration-[.24s] max-[900px]:ease-press',
           open ? 'max-[900px]:translate-x-0' : 'max-[900px]:-translate-x-[101%]',
         )}
       >
-        <div className="flex items-center gap-2.5 border-b border-line-soft px-2 pb-4">
+        <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
           <span
-            className="grid size-8 shrink-0 place-items-center rounded-sm bg-ink text-card [&_svg]:size-[19px] [&_svg]:fill-current"
+            className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-ink [&_svg]:size-4.5 [&_svg]:fill-current"
             aria-hidden="true"
           >
             <TicketMark />
           </span>
-          <div className="min-w-0 leading-[1.25]">
-            <b className="block truncate text-sm font-[650] tracking-[-0.015em]">{org.name}</b>
-            <span className={`${stamp} tracking-[.13em]`}>
-              {org.type === 'admin' ? 'super admin' : org.type}
+          <div className="min-w-0 leading-[1.3]">
+            <b className="block truncate text-[13.5px] font-semibold tracking-[-0.012em]">{org.name}</b>
+            <span className={`${stamp} block capitalize`}>
+              {org.type === 'admin' ? 'Super admin' : org.type}
             </span>
           </div>
         </div>
@@ -178,7 +176,10 @@ export function Shell({
         <button
           className={cx(railItem('out'), 'border-t border-t-line-soft')}
           onClick={() => {
-            localStorage.clear();
+            // Only the session. `localStorage.clear()` also wiped `api_key:<org>`, which the
+            // server stores as a hash and can never show again — signing out lost it forever.
+            localStorage.removeItem('token');
+            localStorage.removeItem('org');
             r.push('/login');
           }}
         >
@@ -192,8 +193,7 @@ export function Shell({
       </aside>
 
       <div className="flex min-w-0 flex-col">
-        {/* solid band, never translucent or blurred — see DESIGN.md, Navigation */}
-        <header className="sticky top-0 z-20 flex items-center gap-3.5 border-b border-line bg-paper px-7.5 pt-4.5 pb-4 max-[900px]:p-4">
+        <header className="sticky top-0 z-20 flex items-center gap-3.5 border-b border-line bg-paper/85 px-8 pt-5 pb-4 backdrop-blur-xl max-[900px]:p-4">
           <button
             className={cx(btnBase, inkAccent, 'hidden size-9 shrink-0 p-0 max-[900px]:grid max-[900px]:place-items-center')}
             aria-label="Open menu"
@@ -211,9 +211,9 @@ export function Shell({
         </header>
         <main
           className={cx(
-            'w-full max-w-[1180px] px-7.5 pt-1 pb-24 max-[900px]:px-4 max-[900px]:pb-20',
+            'w-full max-w-[1180px] px-8 pt-2 pb-24 max-[900px]:px-4 max-[900px]:pb-20',
             /* the first section head sits under the page header, so it needs no top rule */
-            '[&>h2:first-child]:mt-4.5',
+            '[&>h2:first-child]:mt-6',
             riseStagger,
           )}
         >

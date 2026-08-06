@@ -63,7 +63,7 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 4000);
   await app.listen(port); // dual-stack :: — browsers resolve localhost to ::1 first
-  console.log(`backend on port ${port}, swagger docs on /docs`);
+  console.log(`backend on port ${port}${ENABLE_DOCS ? ', swagger docs on /docs' : ''}`);
 
   // Drain in-flight requests before the process dies: a redeploy mid-transaction would
   // otherwise leave a scan use claimed with no redemption written against it.

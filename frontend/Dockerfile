@@ -27,6 +27,13 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY frontend/package.json frontend/
 RUN pnpm install --frozen-lockfile --prod --filter qrreward-frontend...
 COPY --from=build /app/frontend/.next frontend/.next
+# `next start` serves public/ off the filesystem rather than from .next, so without this the
+# landing page's journey video and its poster 404 in the built image only — never in dev.
+COPY --from=build /app/frontend/public frontend/public
+# `next start` re-reads the config at runtime. Build-time settings survive inside .next
+# (headers() is baked into the routes manifest), which is what made this look fine — but the
+# runtime-only ones silently revert to defaults, starting with poweredByHeader.
+COPY frontend/next.config.js frontend/
 USER node
 EXPOSE 3000
 WORKDIR /app/frontend

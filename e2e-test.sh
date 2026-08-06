@@ -12,6 +12,12 @@ j() { node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{conso
 # One line out of .env, not the whole file: its values are unquoted, which Node's env-file
 # parser accepts and `source` does not.
 : "${DATABASE_URL:=$([ -f .env ] && sed -n 's/^DATABASE_URL=//p' .env | head -1)}"
+# ...except when it points at the container's own host-mapped port. `localhost:5436` is the
+# host's view; inside the container Postgres is on :5432 and 5436 is nothing, so passing the
+# URL through unchanged fails to connect on exactly the default setup the README documents.
+case "${DATABASE_URL:-}" in
+  *@localhost:*|*@127.0.0.1:*|*@'[::1]':*) DATABASE_URL='' ;;
+esac
 q() {
   if [ -n "${DATABASE_URL:-}" ]; then docker exec qrreward-db psql "$DATABASE_URL" -tAc "$1"
   else docker exec qrreward-db psql -U qrreward -tAc "$1"; fi
@@ -192,6 +198,24 @@ WON=$(grep -l '"attributed":true' "$RACE_DIR"/* 2>/dev/null | wc -l | tr -d ' ')
 [ "$WON" = "1" ] && pass "20 simultaneous claims on one scan: exactly one is attributed" || fail "concurrent double-spend: $WON claims attributed, expected 1"
 RACE_AFTER=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 [ "$RACE_AFTER" = "$((RACE_BEFORE - 10))" ] && pass "budget charged exactly one guest-tier fee under contention" || fail "budget $RACE_BEFORE -> $RACE_AFTER, expected $((RACE_BEFORE - 10))"
+
+# The SDK's own shape: it banked the claim id on device rather than replaying Play's whole
+# referrer string, and it asserts whether the signup actually created an account.
+LOC5=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+CLAIM5=$(printf '%s' "$LOC5" | sed 's/.*qrm_claim%3D//')
+NEW_BEFORE=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+OLDUSER=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"claim_id\":\"$CLAIM5\",\"publisher_user_ref\":\"returning$S@x.com\",\"is_new_user\":false}" | j .reason)
+[ "$OLDUSER" = "not_a_new_user" ] && pass "a returning account earns no fee, however it was matched" || fail "paid a returning user: $OLDUSER"
+NEW_MID=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+[ "$NEW_MID" = "$NEW_BEFORE" ] && pass "the refusal costs the budget nothing" || fail "returning user charged: $NEW_BEFORE -> $NEW_MID"
+# Same claim id still works, which is the point of refusing before anything is consumed.
+BARE=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"claim_id\":\"$CLAIM5\",\"publisher_user_ref\":\"bare$S@x.com\",\"is_new_user\":true}")
+[ "$(echo "$BARE" | j .match_method)" = "referrer" ] && pass "a bare claim_id matches deterministically, no referrer string needed" || fail "bare claim_id: $BARE"
+BADCLAIM=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"claim_id\":\"../../etc/passwd\",\"ip\":\"203.0.113.7\",\"publisher_user_ref\":\"path$S@x.com\"}")
+[ "$BADCLAIM" = "400" ] && pass "a malformed claim_id is a 400, never quietly re-matched on IP" || fail "bad claim_id: $BADCLAIM"
 rm -rf "$RACE_DIR"
 
 # The exception filter's own stated purpose: a malformed uuid in the URL is a client mistake,

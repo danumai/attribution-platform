@@ -147,13 +147,24 @@ interface OpenSignals extends DeviceSignals {
  */
 function readSignals(b: Record<string, unknown>): OpenSignals {
   const install_referrer = str(b.install_referrer, 'install_referrer', 1000, false);
+  // An SDK that banked the claim id itself, rather than the whole referrer string, can present
+  // it bare. Wrapped back into referrer shape instead of re-validated here, so there is exactly
+  // one definition of what a claim id may look like.
+  //
+  // A malformed one is a 400, never a silent drop: falling through to the fingerprint path
+  // would turn a broken deterministic lookup into a guess, which is precisely what `matchScan`
+  // refuses to do a few lines down.
+  const raw = str(b.claim_id, 'claim_id', 64, false);
+  const bare = raw ? claimIdFromReferrer(`qrm_claim=${raw}`) : null;
+  if (raw && !bare)
+    throw new BadRequestException('claim_id must be the opaque id from the install referrer');
   const rawIp = str(b.ip, 'ip', 45, false); // 45 = longest possible IPv6 text form
   const platform =
     typeof b.platform === 'string' && ['android', 'ios', 'other'].includes(b.platform)
       ? (b.platform as Platform)
       : detectPlatform(str(b.user_agent, 'user_agent', 500, false) ?? '');
   return {
-    claimId: claimIdFromReferrer(install_referrer),
+    claimId: bare ?? claimIdFromReferrer(install_referrer),
     // The publisher reports its own client's address; we hash it the same way the scan path
     // did so the two are comparable and neither side ever stores a raw address.
     fingerprint: rawIp ? ipHash(rawIp) : null,
@@ -303,6 +314,8 @@ export class PartnerController {
     b: {
       /** raw string from Play's Install Referrer API — the deterministic path */
       install_referrer?: string;
+      /** the claim id alone, if the SDK already parsed or stored it — same deterministic path */
+      claim_id?: string;
       /** device signals seen at first open — the probabilistic path */
       ip?: string;
       user_agent?: string;
@@ -438,6 +451,8 @@ export class PartnerController {
       install_id?: string;
       /** legacy single-call shape: raw string from Play's Install Referrer API */
       install_referrer?: string;
+      /** legacy single-call shape: the claim id alone, as the SDK stored it */
+      claim_id?: string;
       /** legacy single-call shape: device signals seen at first open */
       ip?: string;
       user_agent?: string;
@@ -445,6 +460,12 @@ export class PartnerController {
       tz?: string;
       screen?: string;
       language?: string;
+      /**
+       * The publisher asserting this signup created a brand-new account. Only `false` acts —
+       * an omitted field stays attributable, so publishers integrated before this existed are
+       * unaffected. See the refusal note in the handler.
+       */
+      is_new_user?: boolean;
       /** the publisher asserting this user cleared its own verification bar */
       identified?: boolean;
     },
@@ -466,6 +487,17 @@ export class PartnerController {
       reason,
       bonus_label: publisher.bonus_label,
     });
+
+    /**
+     * The fee buys an *acquisition*, so an existing account signing in again is not one. Only
+     * the publisher can know that — we see a `publisher_user_ref`, not an account age — so it
+     * is asserted here, and refused before the install is spent: an install burned on a
+     * returning user would be unclaimable afterwards for no reason.
+     *
+     * The UNIQUE on (campaign, publisher_user_ref) still catches the same *ref* twice; this
+     * catches the case that constraint cannot see — a returning user handed a fresh ref.
+     */
+    if (b.is_new_user === false) return unattributed('not_a_new_user');
 
     // Set when the UNIQUE below fires, so the replay can be answered after the transaction
     // has rolled back — inside an aborted Postgres transaction no further query can run.
