@@ -1,8 +1,16 @@
-/* Design system: modern light SaaS.
-   Clean neutral surfaces, one saturated accent, real elevation instead of letterpress.
-   Everything expressible as a utility lives in the TSX; this file holds only the theme
-   tokens Tailwind generates those utilities from, plus the few things the utility layer
-   cannot reach (keyframes, global motion opt-out). */
+/* Design system: Gallery.
+   A mid-tone warm grey canvas — roughly an 18% gallery wall — with a madder-red
+   pigment accent and bone type. Dark by default, with a warm-grey-paper light
+   counterpart; both live in one declaration per token via light-dark().
+
+   The mid-tone base is the point. Because the canvas sits in the middle of the
+   value range, surfaces are available both lighter AND darker than it, so depth is
+   expressed as value rather than as shadow. Near-black and near-white themes can
+   only go one way and have to fake the other with a drop shadow.
+
+   Everything expressible as a utility lives in the TSX; this file holds only the
+   theme tokens Tailwind generates those utilities from, plus the few things the
+   utility layer cannot reach (keyframes, scheme wiring, global motion opt-out). */
 
 @import "tailwindcss";
 
@@ -11,61 +19,80 @@
 @source "../components";
 
 @theme {
-  /* ---- surfaces ---- */
-  --color-paper: #f7f8fa;        /* app canvas */
-  --color-bg-deep: #eef0f4;      /* recessed canvas */
-  --color-card: #ffffff;         /* raised surface */
-  --color-card-alt: #f7f8fa;     /* hover / table zebra */
-  --color-card-sunk: #f1f3f6;    /* inset trough */
-
-  /* ---- text ---- */
-  --color-ink: #0d1117;
-  --color-ink-soft: #414b58;
-  --color-mut: #737e8c;
+  /* ---- surfaces ----
+     Five levels, not three. `sunk` is genuinely darker than the page and cards are
+     genuinely lighter, in both schemes. */
+  --color-canvas:    light-dark(#E7E2DA, #2B2825);
+  --color-sunk:      light-dark(#DCD6CC, #211E1B);
+  --color-card:      light-dark(#F6F3ED, #35312C);
+  --color-card-alt:  light-dark(#EFEBE3, #3D3831);
+  --color-card-high: light-dark(#FFFFFF, #454039);
 
   /* ---- edges ---- */
-  --color-line: #e4e7ec;
-  --color-line-soft: #eff1f4;
+  --color-line:      light-dark(#D3CCC1, #4A443C);
+  --color-line-soft: light-dark(#E0DAD1, #3B3630);
 
-  /* ---- accent ---- */
-  --color-accent: #4f46e5;
-  --color-accent-hover: #4338ca;
-  --color-accent-ink: #ffffff;
-  --color-accent-soft: #eef2ff;
-  --color-accent-line: #c7d2fe;
-  --color-press-deep: #3730a3;
+  /* ---- text ----
+     Checked against canvas, sunk, card AND card-alt — in dark mode card-alt is the
+     lightest surface and therefore the worst case, in light mode sunk is. */
+  --color-ink:      light-dark(#2B2825, #F2EEE7);
+  --color-ink-soft: light-dark(#56504A, #C8C1B6);
+  --color-mut:      light-dark(#625B50, #ADA598);
+
+  /* ---- accent: madder, split in two ----
+     `accent` is a FILL. Against the dark canvas it measures 2.5:1 — fine under bone
+     type on a button, illegible as text or as a chart stroke. Anything drawn *on* a
+     surface uses `accent-text` instead. Collapsing these two back into one token is
+     the single easiest way to ship this theme inaccessible; the contrast test exists
+     to catch exactly that. */
+  --color-accent:       light-dark(#93332A, #B04034);
+  --color-accent-hover: light-dark(#7E2B23, #C24A3D);
+  --color-accent-on:    light-dark(#FBF8F2, #FBF8F2);
+  --color-accent-text:  light-dark(#93332A, #E68C80);
+  --color-accent-soft:  light-dark(#F0E4E0, #3A2A26);
+  --color-accent-line:  light-dark(#D9BDB6, #5C332C);
 
   /* ---- semantic ---- */
-  --color-ok: #047857;
-  --color-ok-soft: #ecfdf5;
-  --color-ok-line: #a7f3d0;
+  --color-ok:      light-dark(#3F6230, #8FAE7C);
+  --color-ok-soft: light-dark(#E4EADD, #262E22);
+  --color-ok-line: light-dark(#BFCFB2, #3D4A35);
 
-  --color-bad: #dc2626;
-  --color-bad-soft: #fef2f2;
-  --color-bad-line: #fecaca;
+  --color-warn:      light-dark(#7E520F, #D9A441);
+  --color-warn-lit:  light-dark(#9A660F, #E8B65C);
+  --color-warn-soft: light-dark(#F2E9D6, #332A18);
+  --color-warn-line: light-dark(#DCC79A, #4E4126);
 
-  --color-warn: #b45309;
-  --color-warn-lit: #d97706;
-  --color-warn-soft: #fffbeb;
-  --color-warn-line: #fde68a;
+  --color-bad:      light-dark(#A83226, #EA887A);
+  --color-bad-soft: light-dark(#F3E1DE, #3A2523);
+  --color-bad-line: light-dark(#DCB6B0, #5A3730);
+
+  /* the scrim behind the mobile rail and modal dialogs */
+  --color-scrim: light-dark(rgb(43 40 37 / .42), rgb(0 0 0 / .60));
 
   /* ---- type ---- */
-  --font-sans: var(--font-inter), -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-schibsted), -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* the small field label — sentence case, not a stamped caps field name */
+  /* Two label tokens. The console keeps sentence case — still right for labels read
+     fast and repeatedly. The landing page gets the wide-tracked caps that carry much
+     of this direction's character. */
   --text-stamp: 12px;
   --text-stamp--line-height: 1.4;
   --text-stamp--letter-spacing: 0;
   --text-stamp--font-weight: 500;
 
-  /* One scale, two ranges. The landing page reads from the top of it, the console from the
-     bottom, so a heading is spelled once instead of as a clamp() at every call site. Tracking
-     tightens as size grows, which is what keeps a 72px line from looking loose beside a 15px
-     one set in the same face. */
+  --text-stamp-caps: 10.5px;
+  --text-stamp-caps--line-height: 1.4;
+  --text-stamp-caps--letter-spacing: 0.13em;
+  --text-stamp-caps--font-weight: 600;
+
+  /* One scale, two ranges. The landing page reads from the top of it, the console from
+     the bottom, so a heading is spelled once instead of as a clamp() at every call site.
+     Tracking is a touch looser than it was under Inter — Schibsted Grotesk is narrower,
+     and the old -0.035em closed the hero up too far. */
   --text-hero: clamp(38px, 5.6vw, 68px);
   --text-hero--line-height: 1.03;
-  --text-hero--letter-spacing: -0.035em;
+  --text-hero--letter-spacing: -0.03em;
   --text-hero--font-weight: 680;
 
   --text-display: clamp(27px, 3.4vw, 40px);
@@ -82,25 +109,26 @@
   --text-lede--line-height: 1.6;
   --text-lede--letter-spacing: -0.008em;
 
-  /* ---- geometry ---- */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* ---- geometry: cut edges, not soft SaaS ---- */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
 
-  /* ---- elevation: real, soft, neutral ---- */
-  --shadow-contact-sm: 0 1px 2px rgba(16, 24, 40, .05);
-  --shadow-contact: 0 4px 16px -4px rgba(16, 24, 40, .1), 0 1px 2px rgba(16, 24, 40, .05);
-  --shadow-pass: 0 12px 40px -12px rgba(16, 24, 40, .16), 0 2px 4px rgba(16, 24, 40, .04);
-  --shadow-board: 0 4px 16px -4px rgba(16, 24, 40, .1);
-  --shadow-strip: 0 8px 28px -10px rgba(16, 24, 40, .12);
-  --shadow-rules: 0 1px 2px rgba(16, 24, 40, .05);
-  --shadow-key: 0 1px 2px rgba(79, 70, 229, .24);
-  --shadow-key-lit: 0 6px 16px -6px rgba(79, 70, 229, .5);
-  --shadow-key-down: 0 1px 2px rgba(79, 70, 229, .3);
+  /* ---- elevation ----
+     Ten tokens became three. Depth is carried by the five surface values; a shadow
+     now only marks something that genuinely floats above the page. The accent-tinted
+     glows are gone entirely — coloured glow under a button is the loudest generic
+     tell there is, and on a mid-grey canvas it also just muddies.
 
-  /* the lift a card takes on hover — one token so a grid of them cannot drift apart */
-  --shadow-lift: 0 12px 32px -14px rgba(16, 24, 40, .22), 0 2px 6px -2px rgba(16, 24, 40, .06);
+     light-dark() returns a colour, so it cannot switch a whole box-shadow. The tint
+     is a variable the shadows compose from instead. */
+  --shadow-tint:      light-dark(rgb(43 40 37 / .13), rgb(0 0 0 / .40));
+  --shadow-tint-deep: light-dark(rgb(43 40 37 / .22), rgb(0 0 0 / .62));
+
+  --shadow-contact-sm: 0 1px 2px var(--shadow-tint);
+  --shadow-contact:    0 4px 16px -4px var(--shadow-tint);
+  --shadow-pass:       0 18px 48px -16px var(--shadow-tint-deep);
 
   --ease-press: cubic-bezier(.2, .7, .3, 1);
   --ease-out: cubic-bezier(.16, 1, .3, 1);
@@ -130,22 +158,27 @@
   @keyframes lp-ink { from { opacity: .2; } }
 }
 
-/* The paper world is fully gone. Its grain, fibre, distress, guilloche and perforation vars
-   were all resolving to `none` or to a plain hairline, so every utility reading them painted
-   nothing while still reading as intent. Anything that wanted a rule now asks for `border-line`
-   directly. */
+/* The scheme is driven entirely by `color-scheme`, which is what every light-dark()
+   token above resolves against. The toggle stamps data-theme on <html> and layout.tsx
+   restores a stored choice before first paint, so nothing swaps classes at runtime and
+   there is no flash. Absent the attribute, the theme is dark. */
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 }
+:root:not([data-theme="light"]) { color-scheme: dark; }
+:root[data-theme="light"]       { color-scheme: light; }
 
 @layer base {
   html { -webkit-text-size-adjust: 100%; }
 
   /* Preflight drops the native focus ring; this restores one system-wide rather
-     than asking every interactive element to carry the same three utilities. */
-  :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+     than asking every interactive element to carry the same three utilities.
 
-  ::selection { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+     Ink, not accent: madder is 2.5:1 on the dark canvas, under the 3:1 a non-text
+     indicator needs. An achromatic ring also suits the restraint of the theme. */
+  :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+
+  ::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 
   /* A global opt-out has to outrank every utility, so it cannot be one. */
   @media (prefers-reduced-motion: reduce) {
