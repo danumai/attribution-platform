@@ -43,6 +43,12 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
       # the reverse proxy in front of this container sets X-Forwarded-For
       TRUST_PROXY: '1'
+      # Shared rate-limit counters. Required before scaling `api` past one replica: the per-IP
+      # limits are security controls counted per process, so two instances without this is
+      # two times every limit. Optional at one replica, which is what this file describes.
+      REDIS_URL: ${REDIS_URL:-}
+      # Set to serve GET /metrics; absent, the endpoint 404s.
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     ports:
       - '4000:4000'
     healthcheck:

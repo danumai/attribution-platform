@@ -43,6 +43,7 @@ import {
   normScreen,
   normTz,
 } from '../../common/attribution';
+import { recordDecision } from '../../common/obs';
 import { ipHash, rateLimited, sha256, str } from '../../common/security';
 import { ledger, lockedBalance } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
@@ -53,7 +54,7 @@ async function publisherFromKey(auth: string) {
   const hash = sha256(key);
   // ponytail: in-process per-key ceiling, generous enough that no honest signup flow hits it.
   // Move to the shared Redis limiter when >1 instance runs, or it becomes N× this number.
-  if (rateLimited(`partner:${hash}`, 600))
+  if (await rateLimited(`partner:${hash}`, 600))
     throw new UnauthorizedException('rate limit exceeded, slow down');
   const publisher = await prisma.org.findFirst({
     // `suspended` matters here as much as it does at login: offboarding a publisher has to
@@ -390,9 +391,12 @@ export class PartnerController {
       rooted: b.rooted === true,
       vpn: b.vpn === true,
     };
-    if (risk.emulator) return { attributed: false, reason: 'device_integrity' };
+    if (risk.emulator) {
+      recordDecision('first_open', { reason: 'device_integrity' }, { publisher_org_id: publisher.id });
+      return { attributed: false, reason: 'device_integrity' };
+    }
 
-    return prisma.$transaction(async (tx) => {
+    const outcome = await prisma.$transaction(async (tx) => {
       const m = await matchScan(tx, publisher.id, open);
       if ('reason' in m) return { attributed: false, reason: m.reason, confidence: m.confidence };
       const { scan, confidence, match_method } = m;
@@ -456,6 +460,20 @@ export class PartnerController {
         bonus_label: publisher.bonus_label,
       };
     });
+
+    // One record per first-open, refused or bound. This is the series that makes a
+    // misconfigured store target visible: it produces no errors and writes no rows, so without
+    // this the only symptom is a publisher quietly earning nothing.
+    recordDecision(
+      'first_open',
+      {
+        reason: outcome.attributed ? undefined : outcome.reason,
+        match_method: outcome.match_method,
+        confidence: outcome.confidence,
+      },
+      { publisher_org_id: publisher.id, campaign_id: outcome.campaign_id },
+    );
+    return outcome;
   }
 
   /**
@@ -515,11 +533,12 @@ export class PartnerController {
         'install_id, or install_referrer/ip, required to attribute a signup',
       );
 
-    const unattributed = (reason: string) => ({
-      attributed: false,
-      reason,
-      bonus_label: publisher.bonus_label,
-    });
+    // Every refusal in this handler funnels through here, which is what makes it the one place
+    // worth counting them — including the ones raised inside a transaction that then rolls back.
+    const unattributed = (reason: string) => {
+      recordDecision('claim', { reason }, { publisher_org_id: publisher.id });
+      return { attributed: false, reason, bonus_label: publisher.bonus_label };
+    };
 
     /**
      * The fee buys an *acquisition*, so an existing account signing in again is not one. Only
@@ -582,6 +601,20 @@ export class PartnerController {
       await ledger(tx, `campaign:${scan.campaign_id}`, -fee, ref);
       await ledger(tx, `publisher:${publisher.id}`, fee, ref);
 
+      // The fee is the number worth being able to sum from logs alone when the ledger is the
+      // thing under question.
+      recordDecision(
+        'claim',
+        { match_method, confidence },
+        {
+          publisher_org_id: publisher.id,
+          campaign_id: scan.campaign_id,
+          attribution_id: red.id,
+          fee,
+          identified,
+        },
+      );
+
       return {
         attributed: true,
         attribution_id: red.id,
@@ -629,6 +662,13 @@ export class PartnerController {
     // Gone only if the campaign was deleted between the two calls; nothing left to replay.
     if (!prior) throw new ConflictException('duplicate_user');
     const { coin_rate, grace_days } = prior.campaign.partnership;
+    // Counted separately from a fresh attribution: a replay moved no money, and a publisher
+    // whose replay rate is climbing is one whose retry logic is firing, which is worth seeing.
+    recordDecision(
+      'claim',
+      { reason: 'replay', match_method: prior.match_method, confidence: prior.confidence },
+      { publisher_org_id: publisher.id, campaign_id: prior.campaign_id, attribution_id: prior.id },
+    );
     return {
       attributed: true,
       attribution_id: prior.id,

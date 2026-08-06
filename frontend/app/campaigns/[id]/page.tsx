@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { API, api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
-import { Analytics, Audience } from '@/lib/audience';
+import { Analytics, Audience, dailySeries } from '@/lib/audience';
 import type { CampaignStats, QrCode } from '@/lib/types';
 import { Figures, LoadError, Meter, SkeletonStrip, confirmDialog, toast } from '@/lib/ui';
 import { num } from '@/lib/fmt';
@@ -534,6 +534,9 @@ export default function CampaignPage() {
      The stats endpoint gives both halves, which is what makes the burn-down a measurement
      rather than a bar against an invented ceiling. */
   const funded = stats ? stats.coins_granted + stats.budget_remaining : 0;
+  // The daily shape behind the two counting figures, from the same window the Audience panel
+  // below is showing — so a rising trace and a rising line are the same rise.
+  const shape = dailySeries(audience);
 
   const items: NavItem[] = [
     { id: 'overview', label: 'Overview', icon: 'overview', href: '/dashboard' },
@@ -573,11 +576,14 @@ export default function CampaignPage() {
       actions={backToCampaigns}
     >
       <h2 className={sectionHead}>Performance</h2>
+      {/* The two counting figures carry their own shape. The two coin figures do not: a
+          budget is a level rather than a rate, and a trace of it would be a different
+          measurement wearing the same mark as the two beside it. */}
       <Figures
         className="mt-3"
         items={[
-          { k: 'scans', v: num(stats.scans) },
-          { k: 'rewards granted', v: num(stats.redemptions) },
+          { k: 'scans', v: num(stats.scans), spark: shape.scans },
+          { k: 'rewards granted', v: num(stats.redemptions), spark: shape.signups },
           { k: 'coins granted', v: num(stats.coins_granted) },
           { k: 'budget left', v: num(stats.budget_remaining) },
         ]}

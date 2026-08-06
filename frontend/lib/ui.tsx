@@ -8,6 +8,7 @@
  * <UI /> is mounted once in the root layout and renders both.
  */
 import { ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Spark } from '@/lib/chart';
 import {
   alertErr,
   btn,
@@ -15,6 +16,7 @@ import {
   btnGhost,
   card,
   cx,
+  delta as deltaChip,
   field,
   figure,
   figureCell,
@@ -154,8 +156,22 @@ export function LoadError({ message, onRetry }: { message: string; onRetry: () =
   );
 }
 
-/** One printed figure. `go` marks the section this number was counted from. */
-export type Figure = { k: string; v: ReactNode; go?: string };
+/**
+ * One printed figure.
+ *
+ * `go` marks the section this number was counted from. The two optional halves are the rest
+ * of the stat-tile contract: `delta` is the signed change against a named period, and
+ * `spark` is the shape that change came out of — neither is ever invented, so a caller with
+ * no history to compare against simply omits them.
+ */
+export type Figure = {
+  k: string;
+  v: ReactNode;
+  go?: string;
+  /** `pct` as a fraction; `goodUp` says which direction is the good news */
+  delta?: { pct: number; since: string; goodUp?: boolean };
+  spark?: number[];
+};
 
 /**
  * A run of figures printed as one strip.
@@ -181,7 +197,11 @@ export function Figures({
 }) {
   return (
     <div className={cx(figureStrip, figureColumns(items.length), className)}>
-      {items.map(({ k, v, go }) => {
+      {items.map(({ k, v, go, delta, spark }) => {
+        // Up is not automatically the good news — a caller says which direction it wanted,
+        // and the arrow carries the direction even where the colour cannot be seen.
+        const up = (delta?.pct ?? 0) >= 0;
+        const good = up === (delta?.goodUp ?? true);
         const body = (
           <>
             {/* The label leads, so a reader scanning for one figure finds it by name. On a
@@ -191,7 +211,25 @@ export function Figures({
             <span className={cx(stamp, 'block transition-colors duration-150 ease-press group-hover:text-accent')}>
               {k}
             </span>
-            <b className={cx(figure, 'mt-1')}>{v}</b>
+            {/* the trace sits beside the figure, not under it: a stat cell is one line of
+                information, and stacking the shape below the number doubles the strip's height
+                to say the same thing */}
+            <span className="mt-1 flex items-end justify-between gap-3">
+              <b className={figure}>{v}</b>
+              {spark && spark.length > 1 && (
+                <Spark className="mb-1 shrink-0 opacity-80" values={spark} />
+              )}
+            </span>
+            {delta && (
+              <span className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5">
+                <span className={deltaChip(good)}>
+                  <span aria-hidden="true">{up ? '↑' : '↓'}</span>
+                  {Math.abs(delta.pct * 100).toFixed(0)}%
+                  <span className="sr-only">{up ? 'up' : 'down'}</span>
+                </span>
+                <span className="text-[12px] text-mut">{delta.since}</span>
+              </span>
+            )}
           </>
         );
         return go && onPick ? (

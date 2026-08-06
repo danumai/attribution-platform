@@ -236,6 +236,18 @@
     .lp .lp-class-guest { --fig: var(--color-warn-lit); }
     .lp .lp-class-verified { --fig: var(--color-ok); }
 
+    /* the questions land one after another, same stagger idiom as the coupon strip */
+    .lp-faq .lp-faq-item {
+      animation: lp-enter-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 2% entry 42%;
+    }
+    .lp-faq .lp-faq-item:nth-child(2) { animation-range: entry 5% entry 45%; }
+    .lp-faq .lp-faq-item:nth-child(3) { animation-range: entry 8% entry 48%; }
+    .lp-faq .lp-faq-item:nth-child(4) { animation-range: entry 11% entry 51%; }
+    .lp-faq .lp-faq-item:nth-child(5) { animation-range: entry 14% entry 54%; }
+    .lp-faq .lp-faq-item:nth-child(6) { animation-range: entry 17% entry 57%; }
+
     /* generic section entrance: fade + rise, reused everywhere a card or class
        block scrolls into place — the same idiom .lp-leg already uses */
     .lp .lp-enter {
@@ -245,6 +257,145 @@
     }
     @keyframes lp-enter-rise {
       from { opacity: 0; transform: translateY(18px); filter: blur(3px); }
+    }
+  }
+}
+
+/* --- pointer-level polish ---------------------------------------------------
+   Everything below is hover/press feel on a marketing page, so it is gated to a
+   real pointer: a touch tap fires a synthetic :hover that then sticks. */
+
+@media (hover: hover) and (pointer: fine) {
+  /* A card lights faintly under the cursor. The sheen is a background-image layer
+     rather than a ::before, so it sits above the surface and below the text with
+     no z-index bookkeeping. Spotlight.tsx feeds --mx/--my; --spot is animatable
+     because it is a registered property, so the light fades in and out instead of
+     snapping. */
+  @property --spot {
+    syntax: "<percentage>";
+    inherits: false;
+    initial-value: 0%;
+  }
+  .lp [data-spot] {
+    --spot: 0%;
+    background-image: radial-gradient(
+      260px circle at var(--mx, 50%) var(--my, 0px),
+      color-mix(in srgb, var(--color-accent) var(--spot), transparent),
+      transparent 68%
+    );
+    background-repeat: no-repeat;
+    transition: --spot 0.3s var(--ease-out);
+  }
+  .lp [data-spot]:hover { --spot: 9%; }
+
+  /* One pass of light across the primary action. The button is the page's whole
+     purpose, so it gets the one flourish nothing else has. */
+  .lp .lp-btn::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(
+      100deg,
+      transparent 42%,
+      rgb(255 255 255 / 0.32) 50%,
+      transparent 58%
+    );
+    background-size: 260% 100%;
+    background-position: 140% 0;
+    opacity: 0;
+    transition: background-position 0.6s var(--ease-out), opacity 0.18s ease;
+  }
+  .lp .lp-btn:hover::after {
+    background-position: -40% 0;
+    opacity: 1;
+  }
+}
+
+/* --- the budget planner's sliders ---
+   Native <input type="range">; only the track and thumb need drawing, and both are
+   pseudo-elements no utility can reach. --pct comes from the component. */
+
+.lp .lp-range {
+  --track: 6px;
+  --thumb: 20px;
+  height: var(--thumb);
+}
+.lp .lp-range:focus-visible { outline: none; }
+
+/* Vendor track/thumb pseudo-elements cannot share a selector list — one engine not
+   recognising the other's pseudo-element drops the whole rule. Hence the duplication. */
+.lp .lp-range::-webkit-slider-runnable-track {
+  height: var(--track);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) var(--pct, 0%),
+    var(--color-card-sunk) var(--pct, 0%)
+  );
+}
+.lp .lp-range::-moz-range-track {
+  height: var(--track);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) var(--pct, 0%),
+    var(--color-card-sunk) var(--pct, 0%)
+  );
+}
+
+.lp .lp-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc((var(--track) - var(--thumb)) / 2);
+  border-radius: 999px;
+  border: 2px solid var(--color-accent);
+  background: var(--color-card);
+  box-shadow: var(--shadow-contact);
+  transition: transform 0.14s var(--ease-out), box-shadow 0.14s var(--ease-out);
+}
+.lp .lp-range::-moz-range-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  border-radius: 999px;
+  border: 2px solid var(--color-accent);
+  background: var(--color-card);
+  box-shadow: var(--shadow-contact);
+  transition: transform 0.14s var(--ease-out), box-shadow 0.14s var(--ease-out);
+}
+.lp .lp-range:active::-webkit-slider-thumb { transform: scale(1.18); box-shadow: var(--shadow-key-lit); }
+.lp .lp-range:active::-moz-range-thumb { transform: scale(1.18); box-shadow: var(--shadow-key-lit); }
+.lp .lp-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 24%, transparent); }
+.lp .lp-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 24%, transparent); }
+
+/* --- the questions ---
+   <details> is the whole component. Where ::details-content exists the browser
+   animates the open/close for us; where it does not, the panel simply appears —
+   which is the same content, just without the easing. */
+
+.lp-faq details[open] > summary .lp-faq-mark {
+  transform: rotate(45deg);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+@supports selector(::details-content) {
+  @media (prefers-reduced-motion: no-preference) {
+    .lp-faq { interpolate-size: allow-keywords; }
+    .lp-faq details::details-content {
+      block-size: 0;
+      opacity: 0;
+      overflow: hidden;
+      transition:
+        block-size 0.28s var(--ease-out),
+        opacity 0.22s var(--ease-out),
+        content-visibility 0.28s allow-discrete;
+    }
+    .lp-faq details[open]::details-content {
+      block-size: auto;
+      opacity: 1;
     }
   }
 }

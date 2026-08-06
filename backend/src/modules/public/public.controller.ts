@@ -53,7 +53,7 @@ export class PublicController {
       res.redirect(`${FRONTEND_URL}/campaign-ended?reason=${reason}`);
 
     const ip = clientIp(req);
-    if (rateLimited(`scan:${ip}`, 30)) return end('rate_limited');
+    if (await rateLimited(`scan:${ip}`, 30)) return end('rate_limited');
 
     const qr = await prisma.qrCode.findUnique({
       where: { code },
@@ -206,7 +206,7 @@ export class PublicController {
   ) {
     const end = (reason: string) =>
       res.redirect(`${FRONTEND_URL}/campaign-ended?reason=${reason}`);
-    if (rateLimited(`go:${clientIp(req)}`, 30)) return end('rate_limited');
+    if (await rateLimited(`go:${clientIp(req)}`, 30)) return end('rate_limited');
 
     const scan = await prisma.scan.findUnique({
       where: { claim_id: claimId },
@@ -270,7 +270,7 @@ export class PublicController {
     @Res() res: Response,
   ) {
     // unauthenticated and CPU-bound (QR encode + SVG build), so it needs its own budget
-    if (rateLimited(`qr-image:${clientIp(req)}`, 120))
+    if (await rateLimited(`qr-image:${clientIp(req)}`, 120))
       throw new BadRequestException('too many image requests, try again shortly');
     const qr = await prisma.qrCode.findUnique({ where: { id } });
     if (!qr) throw new NotFoundException();
@@ -304,7 +304,7 @@ export class PublicController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    if (rateLimited(`qr-image:${clientIp(req)}`, 120))
+    if (await rateLimited(`qr-image:${clientIp(req)}`, 120))
       throw new BadRequestException('too many image requests, try again shortly');
     const qr = await prisma.qrCode.findUnique({ where: { id }, select: { code: true } });
     if (!qr) throw new NotFoundException();

@@ -1,11 +1,25 @@
 import { BadRequestException } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
 import { createHash } from 'crypto';
+import type Redis from 'ioredis';
+import { getRedis } from '../database/redis';
+import { count, log } from './obs';
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 // ---------- rate limiting ----------
-// ponytail: in-process fixed window. Swap for a Redis sliding window once >1 instance runs.
+/**
+ * A fixed window, counted in Redis when `REDIS_URL` is set and in this process when it is not.
+ *
+ * The distinction is the whole point. Every per-IP control in this system — login throttling,
+ * credential stuffing, the signup and scan ceilings, the partner API budget — is a *security*
+ * control, not a performance one, and an in-process counter silently multiplies every one of
+ * them by the replica count. Two instances behind a load balancer means twice the login
+ * attempts before anyone is throttled. So running more than one instance is gated on there
+ * being somewhere shared to count, and that is the only thing Redis is used for here.
+ *
+ * Left unset, the in-process window below is unchanged and correct — for exactly one instance.
+ */
 const buckets = new Map<string, { n: number; reset: number }>();
 
 setInterval(() => {
@@ -13,7 +27,7 @@ setInterval(() => {
   for (const [k, b] of buckets) if (b.reset < now) buckets.delete(k);
 }, 60_000).unref(); // bounded memory: expired keys swept once a minute, never on the hot path
 
-export function rateLimited(key: string, max: number, windowMs = 60_000): boolean {
+function localRateLimited(key: string, max: number, windowMs: number): boolean {
   const now = Date.now();
   const b = buckets.get(key);
   if (!b || b.reset < now) {
@@ -21,6 +35,49 @@ export function rateLimited(key: string, max: number, windowMs = 60_000): boolea
     return false;
   }
   return ++b.n > max;
+}
+
+/**
+ * `INCR` then `PEXPIRE` on the first hit of a window — the standard fixed-window counter, and
+ * atomic without a Lua script because `INCR` is itself the read and the write.
+ *
+ * A pipeline rather than two round trips: this runs on the scan hot path, and the second call
+ * would otherwise double the latency this adds.
+ */
+async function redisRateLimited(
+  redis: Redis,
+  key: string,
+  max: number,
+  windowMs: number,
+): Promise<boolean> {
+  const res = await redis.pipeline().incr(key).pexpire(key, windowMs, 'NX').exec();
+  /**
+   * `exec()` reports a failed command as *data* — a `[error, result]` tuple — instead of
+   * rejecting, and returns `null` outright when the connection is gone. Reading the count
+   * without checking both is how this stopped limiting anything the moment Redis went away:
+   * `undefined > 300` is `false`, so every request passed and nothing was logged. Fail loudly
+   * here so the caller's fallback actually runs.
+   */
+  const [err, n] = res?.[0] ?? [new Error('redis connection unavailable'), null];
+  if (err || typeof n !== 'number') throw err ?? new Error('redis returned no count');
+  return n > max;
+}
+
+/**
+ * Counting is best-effort; refusing to serve because the counter is unreachable is not. On a
+ * Redis outage this falls back to the in-process window rather than failing open — degraded to
+ * per-instance limits, which is what the deployment had before Redis existed, instead of no
+ * limits at all. The log line is warn because it silently weakens a security control.
+ */
+export async function rateLimited(key: string, max: number, windowMs = 60_000): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) return localRateLimited(key, max, windowMs);
+  try {
+    return await redisRateLimited(redis, key, max, windowMs);
+  } catch (e: any) {
+    log.warn('ratelimit.redis_unavailable', { error: e?.message });
+    return localRateLimited(key, max, windowMs);
+  }
 }
 
 export const clientIp = (req: Request) => req.ip ?? req.socket.remoteAddress ?? 'unknown';
@@ -36,11 +93,13 @@ export const clientIp = (req: Request) => req.ip ?? req.socket.remoteAddress ?? 
  * Deliberately keyed on IP alone rather than on the session: an attacker without a valid
  * token is exactly the one to slow down, and they have no session to key on.
  */
-export function globalRateLimit(req: Request, res: Response, next: NextFunction) {
+export async function globalRateLimit(req: Request, res: Response, next: NextFunction) {
   // Health checks are what the load balancer uses to decide this process is alive. Throttling
-  // them would turn a traffic spike into a pulled-from-rotation outage.
-  if (req.path === '/healthz') return next();
-  if (rateLimited(`global:${clientIp(req)}`, 300)) {
+  // them would turn a traffic spike into a pulled-from-rotation outage. Metrics likewise: a
+  // scrape that gets 429ed blinds the monitoring exactly when the traffic is interesting.
+  if (req.path === '/healthz' || req.path === '/metrics') return next();
+  if (await rateLimited(`global:${clientIp(req)}`, 300)) {
+    count('rate_limited_total', { limit: 'global' });
     res.setHeader('Retry-After', '60');
     return res.status(429).json({ statusCode: 429, message: 'too many requests' });
   }

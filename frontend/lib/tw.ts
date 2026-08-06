@@ -238,16 +238,34 @@ export function pill(status?: string | null) {
   return pillNeutral;
 }
 
-/** a figure the page is read for: tight, tabular.
+/** a figure the page is read for: tight, set in the sans everything else uses.
  *
  *  The size gives way before the number does. A seven-digit coin total is wider than a cell
  *  gets once a dense strip meets the console's rail — and a figure that overruns its cell is
  *  worse than a figure set slightly smaller.
  *
+ *  Proportional figures, not tabular: equal-width digits are what make a column of table rows
+ *  line up, and at this size they only make a number like 121 look loose. Nothing in a strip
+ *  of stat cells aligns vertically, so there is nothing for them to buy.
+ *
  *  No entrance of its own either: the section it sits in already rises once, and seven
  *  numbers each counting themselves in is decoration. */
-export const figure =
-  'block text-[clamp(21px,1.9vw,28px)] font-semibold tracking-[-0.03em] tabular-nums';
+export const figure = 'block text-[clamp(21px,1.9vw,28px)] font-semibold tracking-[-0.03em]';
+
+/**
+ * The signed change under a figure.
+ *
+ * Colour is direction × whether up is the good news, which is why the caller declares
+ * `goodUp` rather than the chip assuming green-is-up: scans rising is good, and a budget
+ * burning down faster is not. The arrow carries the direction on its own, so the chip
+ * still reads correctly with the colour taken away.
+ */
+export function delta(good: boolean) {
+  return cx(
+    'inline-flex items-center gap-0.75 text-[12px] font-medium tabular-nums',
+    good ? 'text-ok' : 'text-bad',
+  );
+}
 
 export const skeleton =
   'h-3 rounded-full animate-shimmer ' +

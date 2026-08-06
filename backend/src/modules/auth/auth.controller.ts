@@ -47,7 +47,7 @@ export class AuthController {
       bonus_label?: string;
     },
   ) {
-    if (rateLimited(`signup:${clientIp(req)}`, 10))
+    if (await rateLimited(`signup:${clientIp(req)}`, 10))
       throw new BadRequestException('too many signups, try again shortly');
     if (!b.name || !b.email || !b.password || !['promoter', 'publisher'].includes(b.type))
       throw new BadRequestException('name, email, password, type(promoter|publisher) required');
@@ -109,8 +109,8 @@ export class AuthController {
     // until the sweep runs. 254 is the address ceiling `signup` enforces, so no real login
     // is ever truncated into somebody else's bucket.
     if (
-      rateLimited(`login-ip:${clientIp(req)}`, 20) ||
-      rateLimited(`login-acct:${email.slice(0, 254)}`, 10)
+      (await rateLimited(`login-ip:${clientIp(req)}`, 20)) ||
+      (await rateLimited(`login-acct:${email.slice(0, 254)}`, 10))
     )
       throw new UnauthorizedException('too many attempts, try again shortly');
     const org = await prisma.org.findUnique({ where: { email } });

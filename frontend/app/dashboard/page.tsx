@@ -6,6 +6,7 @@ import { api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
 import {
   Empty,
+  type Figure,
   Figures,
   SkeletonCard,
   SkeletonStrip,
@@ -16,7 +17,9 @@ import {
   promptDialog,
   toast,
 } from '@/lib/ui';
-import { ago, num } from '@/lib/fmt';
+import { Chart } from '@/lib/chart';
+import { INK } from '@/lib/audience';
+import { ago, change, num } from '@/lib/fmt';
 import type { Campaign, Me, Partnership, PublisherOption, Redemption } from '@/lib/types';
 import {
   alertWarn,
@@ -74,6 +77,49 @@ function Redemptions({ rows }: { rows: Redemption[] }) {
       </table>
     </div>
   );
+}
+
+/**
+ * Redemptions per day, counted off the rows this page already has.
+ *
+ * There is no scan-analytics endpoint scoped to a whole promoter — only per campaign — so the
+ * only history available here is the redemption list itself, and that arrives capped at the
+ * newest hundred. The cap is handled by refusing to plot past it: the axis starts at the
+ * oldest row on hand, so every day drawn is a day the window fully covers. A series that
+ * began before that would slope up out of nothing and read as growth.
+ */
+function perDay(rows: Redemption[]) {
+  if (!rows.length) return null;
+  const key = (t: string) => new Date(t).toISOString().slice(0, 10);
+  const from = rows.map((r) => key(r.created_at)).reduce((a, b) => (a < b ? a : b));
+
+  const slots: string[] = [];
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.now(); t += 86_400_000)
+    slots.push(new Date(t).toISOString().slice(0, 10));
+  // A promoter two years in would otherwise get a 700-point plot in a 900px card, where a
+  // day is a third of a pixel. The tail is the part anyone is reading for anyway.
+  const days = slots.slice(-90);
+
+  const total = new Map(days.map((k) => [k, 0]));
+  const verified = new Map(days.map((k) => [k, 0]));
+  for (const r of rows) {
+    const k = key(r.created_at);
+    if (!total.has(k)) continue;
+    total.set(k, total.get(k)! + 1);
+    if (r.identified) verified.set(k, verified.get(k)! + 1);
+  }
+
+  return {
+    labels: days.map((k) =>
+      new Date(`${k}T00:00:00Z`).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+      }),
+    ),
+    total: days.map((k) => total.get(k)!),
+    verified: days.map((k) => verified.get(k)!),
+  };
 }
 
 const HEAD: Record<string, { title: string; lede: string }> = {
@@ -284,10 +330,21 @@ export default function Dashboard() {
   const coinsGranted = redemptions.reduce((n, x) => n + (x.coins ?? 0), 0);
   const verified = redemptions.filter((x) => x.identified).length;
   const guests = redemptions.length - verified;
-  const kpis = [
+  const daily = perDay(redemptions);
+  // Half the plotted span against the other half — the only comparison rows this capped
+  // can honestly support, and `change` returns null rather than inventing one when they cannot.
+  const half = daily ? Math.max(Math.floor(daily.labels.length / 2), 1) : 0;
+  const drift = daily && change(daily.total, half);
+  const kpis: Figure[] = [
     { k: 'Active campaigns', v: num(campaigns.filter((c) => c.status === 'active').length), go: 'campaigns' },
     { k: 'Active partnerships', v: num(activePartnerships.length), go: 'partnerships' },
-    { k: 'Redemptions', v: capped ? `${num(100)}+` : num(redemptions.length), go: 'redemptions' },
+    {
+      k: 'Redemptions',
+      v: capped ? `${num(100)}+` : num(redemptions.length),
+      go: 'redemptions',
+      spark: daily?.total,
+      ...(drift == null ? {} : { delta: { pct: drift, since: `vs previous ${half} days`, goodUp: true } }),
+    },
     // A promoter's own figure is a floor derived from the newest 100 rows; a publisher's is
     // its whole earned balance off the ledger, so it is exact and needs no "≥".
     isPromoter
@@ -337,6 +394,29 @@ export default function Dashboard() {
         <>
           <h2 className={sectionHead}>Live now</h2>
           {!loaded ? <SkeletonStrip className="mt-3" /> : <Figures className="mt-3" items={kpis} onPick={setSec} />}
+
+          {/* Counts say where this account is; the line says which way it is going, and it is
+              the only history a promoter has on this page. Both series count redemptions, so
+              they share one axis — the coins those redemptions cost is a different measure and
+              would need a second scale, which is how a chart invents a correlation. */}
+          {loaded && daily && daily.labels.length > 1 && (
+            <div className={cx(card, 'mt-3')}>
+              <div className="mb-3 flex items-baseline justify-between gap-3">
+                <b className={cx(stamp, 'shrink-0')}>Redemptions per day</b>
+                <span className={cx(muted, 'text-[12px]')}>
+                  {capped ? 'as far back as the newest 100 reach' : `last ${daily.labels.length} days`}
+                </span>
+              </div>
+              <Chart
+                labels={daily.labels}
+                caption="Day"
+                series={[
+                  { label: 'redemptions', color: INK.scans, values: daily.total },
+                  { label: 'verified', color: INK.signups, values: daily.verified },
+                ]}
+              />
+            </div>
+          )}
 
           {/* The split is real — `identified` is per row — but it is drawn from the same capped
               window as the counts above it, so it says so rather than implying a total. */}

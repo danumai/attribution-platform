@@ -9,9 +9,14 @@
  * ranking, and animating fourteen of them at once would be the page moving, not a bar growing.
  */
 import { ReactNode, useMemo, useState } from 'react';
-import { num } from './fmt';
+import { change, num } from './fmt';
+import { Chart } from './chart';
 import { Figures } from './ui';
 import { card, cx, muted, sectionHead, select as selectField, stamp } from './tw';
+
+/** The two inks every plot in the console is drawn in. Validated as a pair: ΔE 23.9 under
+ *  deuteranopia, 28.6 in normal vision, both clear of the surface at better than 3:1. */
+export const INK = { scans: 'var(--color-accent)', signups: 'var(--color-ok)' };
 
 export interface Bucket {
   key: string;
@@ -57,6 +62,14 @@ function labelFor(dim: string, key: string): string {
   }
   if (dim === 'weekday') return WEEKDAYS[+key] ?? key;
   if (dim === 'hour') return `${key}:00`;
+  // An axis of thirty `2026-08-06`s is a wall. The year is the same on every tick in any
+  // window this product offers, so it is the part that goes.
+  if (dim === 'day') {
+    const d = new Date(`${key}T00:00:00Z`);
+    return Number.isNaN(+d)
+      ? key
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  }
   // `393x852@3` is a storage format, not a label. Printed as geometry it reads as a handset.
   if (dim === 'screen') {
     const m = /^(\d+)x(\d+)@([\d.]+)$/.exec(key);
@@ -124,57 +137,117 @@ function BarList({
 }
 
 /**
- * A time series as columns. Used for the three dimensions where the *order* carries the
- * meaning — hour of day, day of week, and the daily trend — so they must never be re-sorted
- * into a ranking the way the bar lists are.
+ * A time series, with its gaps put back.
  *
- * The bars are drawn between two printed rules: a perforated one at the peak carrying the
- * figure it stands for, and a solid one the columns sit on. Without a scale a bar height is
- * a proportion of nothing — the reader can see that Tuesday beat Monday but has no way to
- * tell whether that is nine scans or nine hundred.
+ * The server only returns buckets it counted something in, so a quiet Tuesday is simply
+ * absent from the array. Plotted as-is that Tuesday does not flatten the line, it *removes*
+ * it — thirty days of traffic with four quiet ones draws as a twenty-six-point series whose
+ * x-axis silently compresses, and a fortnight's dip reads as a plateau. Every time series
+ * here is expanded against the slots it should have had, so a zero is drawn as a zero.
  */
-function Columns({ dim, rows, empty }: { dim: string; rows: Bucket[]; empty: string }) {
-  const top = Math.max(...rows.map((r) => r.scans), 1);
+function fill(rows: Bucket[], keys: string[]): Bucket[] {
+  const by = new Map(rows.map((r) => [r.key, r]));
+  return keys.map((key) => by.get(key) ?? { key, scans: 0, conversions: 0 });
+}
+
+/** Every day in the window, in the database's clock (UTC), oldest first. */
+function dayKeys(days: number) {
+  const out: string[] = [];
+  const t = Date.now();
+  for (let i = days - 1; i >= 0; i--)
+    out.push(new Date(t - i * 86_400_000).toISOString().slice(0, 10));
+  return out;
+}
+
+const HOUR_KEYS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const WEEKDAY_KEYS = ['1', '2', '3', '4', '5', '6', '7'];
+
+/** The two daily series, every slot present, for callers plotting them outside this panel. */
+export function dailySeries(data: Analytics | null) {
+  const rows = fill(data?.dims.day ?? [], dayKeys(data?.days ?? 30));
+  return { scans: rows.map((r) => r.scans), signups: rows.map((r) => r.conversions) };
+}
+
+/**
+ * One dimension of the scan data, plotted.
+ *
+ * `scans` and `conversions` are both counts of scans, so they share one axis and belong on
+ * one plot — a second scale here would invent a correlation the data does not contain.
+ * The daily window carries both as lines; the clock and calendar panels carry scans as
+ * columns and hand the conversion count to the hover readout, because forty-eight bars in
+ * a half-width panel is a texture rather than a comparison.
+ */
+function Series({
+  dim,
+  rows,
+  keys,
+  kind,
+  caption,
+  empty,
+}: {
+  dim: string;
+  rows: Bucket[];
+  keys: string[];
+  kind: 'line' | 'bar';
+  caption: string;
+  empty: string;
+}) {
+  const full = useMemo(() => fill(rows, keys), [rows, keys]);
   if (!rows.length) return <p className={cx(muted, 'px-1 py-2')}>{empty}</p>;
 
-  // Print as many ticks as can actually be read: every column for a week or a fortnight,
-  // otherwise an evenly spaced six. The old rule labelled only the two ends and reserved a
-  // blank line of height under all thirty — a tick under a 9px column is not a label.
-  const step = rows.length <= 8 ? 1 : Math.ceil(rows.length / 6);
+  const labels = full.map((r) => labelFor(dim, r.key));
+  const scans = { label: 'scans', color: INK.scans, values: full.map((r) => r.scans) };
+  const signups = { label: 'signups', color: INK.signups, values: full.map((r) => r.conversions) };
 
   return (
-    <div>
-      {/* the ceiling is the system's own hairline, so it reads as a reference line rather than
-          as a second axis competing with the baseline */}
-      <div className="mb-1.5 flex items-center gap-2.5">
-        <span className={stamp}>peak</span>
-        <span className="h-px flex-1 bg-line" aria-hidden="true" />
-        <span className="font-mono text-[11.5px] tabular-nums text-ink-soft">{num(top)}</span>
+    <Chart
+      kind={kind}
+      labels={labels}
+      caption={caption}
+      series={kind === 'bar' ? [scans] : [scans, signups]}
+      note={
+        kind === 'bar'
+          ? (i) => {
+              const r = full[i];
+              return r.scans
+                ? `${num(r.conversions)} signups · ${((r.conversions / r.scans) * 100).toFixed(0)}% converted`
+                : null;
+            }
+          : (i) => {
+              const r = full[i];
+              return r.scans ? `${((r.conversions / r.scans) * 100).toFixed(0)}% converted` : null;
+            }
+      }
+    />
+  );
+}
+
+/**
+ * The daily plot on its own, for a surface that is not the full audience panel.
+ *
+ * The admin overview is read to answer "is the platform moving", and three integers cannot
+ * answer that — a number says where traffic is, only a line says which way it is going. It
+ * is the same component, the same query and the same window as the Audience tab, so the two
+ * cannot disagree about a day.
+ */
+export function ScanTrend({ data, className }: { data: Analytics | null; className?: string }) {
+  const days = data?.days ?? 30;
+  const keys = useMemo(() => dayKeys(days), [days]);
+  if (!data) return null;
+  return (
+    <div className={cx(card, className)}>
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <b className={cx(stamp, 'shrink-0')}>Scans and signups per day</b>
+        <span className={cx(muted, 'text-[12px]')}>last {days} days</span>
       </div>
-      <div className="flex h-21 items-end gap-0.75 border-b border-line">
-        {rows.map((r) => (
-          <div
-            key={r.key}
-            className="min-w-1.5 flex-1 rounded-t-[3px] bg-accent"
-            style={{ height: `${Math.max((r.scans / top) * 100, 2)}%` }}
-            title={`${labelFor(dim, r.key)} — ${num(r.scans)} scans, ${num(r.conversions)} converted`}
-          />
-        ))}
-      </div>
-      <div className="flex gap-0.75">
-        {rows.map((r, i) => (
-          // Every column keeps its slot so the ticks stay registered under the bars they
-          // name; only the labelled ones print, and they run past their slot rather than
-          // truncating themselves to nothing.
-          <span key={r.key} className="min-w-1.5 flex-1">
-            {i % step === 0 && (
-              <span className={cx(stamp, 'mt-1.5 block whitespace-nowrap leading-none')}>
-                {labelFor(dim, r.key)}
-              </span>
-            )}
-          </span>
-        ))}
-      </div>
+      <Series
+        dim="day"
+        kind="line"
+        rows={data.dims.day ?? []}
+        keys={keys}
+        caption="Day"
+        empty="No scans in this window."
+      />
     </div>
   );
 }
@@ -225,17 +298,30 @@ export function Audience({
     ? `${num(t.handset_known)} of ${num(t.scans)} scans · ${handsetPct}%`
     : undefined;
 
-  const headline = useMemo(
-    () => [
-      { k: 'scans', v: num(t?.scans) },
+  // The daily series, expanded to every slot in the window, is what the two headline tiles
+  // get their shape and their change from. Half the window against the other half is the only
+  // comparison this data can honestly make — the server returns one window, not two.
+  const half = Math.max(Math.floor((data?.days ?? 30) / 2), 1);
+  const dayList = useMemo(() => dayKeys(data?.days ?? 30), [data?.days]);
+  const daily = useMemo(() => fill(d.day ?? [], dayList), [d.day, dayList]);
+
+  const headline = useMemo(() => {
+    const scans = daily.map((r) => r.scans);
+    const signups = daily.map((r) => r.conversions);
+    const since = `vs previous ${half} days`;
+    const trend = (values: number[]) => {
+      const pct = change(values, half);
+      return { spark: values, ...(pct === null ? {} : { delta: { pct, since, goodUp: true } }) };
+    };
+    return [
+      { k: 'scans', v: num(t?.scans), ...trend(scans) },
       { k: 'devices', v: num(t?.devices) },
       { k: 'repeat scans', v: num(t?.repeat_scans) },
-      { k: 'signups', v: num(t?.conversions) },
+      { k: 'signups', v: num(t?.conversions), ...trend(signups) },
       { k: 'scan → signup', v: `${((t?.conversion_rate ?? 0) * 100).toFixed(1)}%` },
       { k: 'coins granted', v: num(t?.coins) },
-    ],
-    [t],
-  );
+    ];
+  }, [t, daily, half]);
 
   if (!data) return null;
 
@@ -269,15 +355,36 @@ export function Audience({
 
       <h2 className={sectionHead}>Trend</h2>
       <div className="mt-3 grid gap-3">
-        <Panel title="Scans per day" note={`last ${data.days} days`}>
-          <Columns dim="day" rows={d.day ?? []} empty="No scans in this window." />
+        <Panel title="Scans and signups per day" note={`last ${data.days} days`}>
+          <Series
+            dim="day"
+            kind="line"
+            rows={d.day ?? []}
+            keys={dayList}
+            caption="Day"
+            empty="No scans in this window."
+          />
         </Panel>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3">
           <Panel title="Hour of day" note="UTC">
-            <Columns dim="hour" rows={d.hour ?? []} empty="No scans in this window." />
+            <Series
+              dim="hour"
+              kind="bar"
+              rows={d.hour ?? []}
+              keys={HOUR_KEYS}
+              caption="Hour (UTC)"
+              empty="No scans in this window."
+            />
           </Panel>
           <Panel title="Day of week">
-            <Columns dim="weekday" rows={d.weekday ?? []} empty="No scans in this window." />
+            <Series
+              dim="weekday"
+              kind="bar"
+              rows={d.weekday ?? []}
+              keys={WEEKDAY_KEYS}
+              caption="Day of week"
+              empty="No scans in this window."
+            />
           </Panel>
         </div>
       </div>

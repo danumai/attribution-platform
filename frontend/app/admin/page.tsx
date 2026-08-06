@@ -3,7 +3,7 @@ import { MouseEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useStat
 import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
-import { Analytics, Audience } from '@/lib/audience';
+import { Analytics, Audience, ScanTrend, dailySeries } from '@/lib/audience';
 import {
   Empty,
   Figure,
@@ -502,6 +502,9 @@ export default function Admin() {
   const loading = !d.overview && !failed;
   const o = d.overview;
   const campaigns = d.campaigns ?? [];
+  // The shape behind the two headline figures, gaps included: a quiet day the analytics query
+  // never returned still has to draw as a trough, or the trace flatters itself.
+  const trend = dailySeries(d.analytics ?? null);
   // Redemptions carry the publisher's user ref; scans only know the device. Join so a scan row
   // can show who it turned into.
   const userByScan = new Map((d.redemptions ?? []).map((x) => [x.scan_id, x]));
@@ -591,15 +594,21 @@ export default function Admin() {
               className="mt-3"
               onPick={(go) => setTab(go as Tab)}
               items={[
-                { k: 'Scans, last 24h', v: num(o.scans_24h), go: 'Audience' },
+                { k: 'Scans, last 24h', v: num(o.scans_24h), go: 'Audience', spark: trend.scans },
                 { k: 'Active campaigns', v: num(o.active_campaigns), go: 'Campaigns' },
                 {
                   k: 'Scan → signup',
                   v: `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`,
                   go: 'Audience',
+                  spark: trend.signups,
                 },
               ]}
             />
+
+            {/* Three integers say where the platform is; only a line says which way it is
+                going, which is the question this page is opened to answer. Same query and
+                same window as the Audience tab, so the two cannot disagree about a day. */}
+            <ScanTrend className="mt-3" data={d.analytics ?? null} />
 
             {/* Exact, unlike the dashboard's version of the same split: these two counts come
                 off the overview endpoint rather than being derived from a capped page of rows. */}

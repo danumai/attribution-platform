@@ -1,12 +1,15 @@
 import 'reflect-metadata';
 import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { json } from 'express';
+import { NextFunction, Request, Response, json } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { AppModule } from './app.module';
 import { PrismaExceptionFilter } from './common/prisma-filter';
+import { log, renderMetrics, requestContext } from './common/obs';
 import { globalRateLimit, securityHeaders } from './common/security';
-import { ENABLE_DOCS, FRONTEND_URLS, TRUST_PROXY } from './config';
+import { ENABLE_DOCS, FRONTEND_URLS, METRICS_TOKEN, REDIS_URL, TRUST_PROXY } from './config';
 import { prisma } from './database/prisma';
+import { closeRedis } from './database/redis';
 import { seedAccounts } from './database/seed';
 
 async function bootstrap() {
@@ -54,6 +57,31 @@ async function bootstrap() {
   // actually is, instead of an unhandled 500. See prisma-filter.ts.
   app.useGlobalFilters(new PrismaExceptionFilter(app.get(HttpAdapterHost).httpAdapter));
 
+  // First, so every log line and every 429 below already carries a request id.
+  app.use(requestContext);
+
+  /**
+   * Scrape target. Mounted here rather than on a controller because it must sit ahead of the
+   * global rate limiter (a throttled scrape blinds the monitoring exactly when traffic is
+   * interesting) and outside the CSP that `securityHeaders` sets for JSON routes.
+   *
+   * Token-gated, and in production absent entirely unless a token is configured: the series it
+   * exposes include the attribution refusal rates, which describe this platform's payout
+   * behaviour to anyone who asks.
+   */
+  app.use('/metrics', (req: Request, res: Response, next: NextFunction) => {
+    if (req.method !== 'GET') return next();
+    if (!METRICS_TOKEN) return res.status(404).end();
+    const presented = (req.headers.authorization ?? '').replace(/^Bearer /, '');
+    // Constant-time: a token compared with `!==` leaks its prefix to a patient prober.
+    const ok =
+      presented.length === METRICS_TOKEN.length &&
+      timingSafeEqual(Buffer.from(presented), Buffer.from(METRICS_TOKEN));
+    if (!ok) return res.status(401).end();
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+    res.send(renderMetrics());
+  });
+
   app.use(securityHeaders);
   // Before the body parser: a flood should be turned away without first buying it 1mb of
   // JSON parsing per request.
@@ -63,15 +91,27 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 4000);
   await app.listen(port); // dual-stack :: — browsers resolve localhost to ::1 first
-  console.log(`backend on port ${port}${ENABLE_DOCS ? ', swagger docs on /docs' : ''}`);
+  log.info('server.started', {
+    port,
+    docs: ENABLE_DOCS,
+    // The two that decide whether this process is safe to replicate: without a shared limiter
+    // store, a second instance doubles every per-IP security limit.
+    shared_rate_limiter: Boolean(REDIS_URL),
+    metrics: Boolean(METRICS_TOKEN),
+  });
+  if (!REDIS_URL)
+    log.warn('ratelimit.process_local', {
+      detail: 'REDIS_URL unset — per-IP limits are per-instance. Safe for exactly one replica.',
+    });
 
   // Drain in-flight requests before the process dies: a redeploy mid-transaction would
   // otherwise leave a scan use claimed with no redemption written against it.
   for (const sig of ['SIGTERM', 'SIGINT'] as const)
     process.once(sig, async () => {
-      console.log(`${sig} received, draining`);
+      log.info('server.draining', { signal: sig });
       await app.close().catch(() => {});
       await prisma.$disconnect().catch(() => {});
+      await closeRedis();
       process.exit(0);
     });
 }

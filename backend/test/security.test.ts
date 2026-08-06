@@ -52,15 +52,23 @@ assert.equal(validateLandingUrl(''), null);
 assert.throws(() => validateLandingUrl(42 as unknown as string));
 
 // --- rate limiter: allows exactly `max` in a window, then blocks ---
+// `await`ed throughout: the limiter became async when it grew a shared Redis backend, and a
+// bare `assert.equal(rateLimited(...), false)` compares a *Promise* to false — which is never
+// equal, but would also never be equal if the limiter blocked everything. Asserting on the
+// unawaited call is how a rate limiter passes its own tests while protecting nothing.
+// Wrapped rather than top-level `await`: these files run under ts-node in CommonJS.
 const key = `test-${Math.random()}`;
-for (let i = 0; i < 3; i++) assert.equal(rateLimited(key, 3), false, `hit ${i} should pass`);
-assert.equal(rateLimited(key, 3), true, '4th hit should be limited');
-assert.equal(rateLimited(`other-${Math.random()}`, 3), false, 'buckets are per-key');
-
-// window expiry
 const k2 = `test-${Math.random()}`;
-assert.equal(rateLimited(k2, 1, 1), false);
-assert.equal(rateLimited(k2, 1, 1), true);
+async function rateLimitChecks() {
+  for (let i = 0; i < 3; i++)
+    assert.equal(await rateLimited(key, 3), false, `hit ${i} should pass`);
+  assert.equal(await rateLimited(key, 3), true, '4th hit should be limited');
+  assert.equal(await rateLimited(`other-${Math.random()}`, 3), false, 'buckets are per-key');
+
+  // window expiry
+  assert.equal(await rateLimited(k2, 1, 1), false);
+  assert.equal(await rateLimited(k2, 1, 1), true);
+}
 // --- production config guards: each of these is a silent prod outage or auth bypass ---
 // config.ts validates at import time, so each case needs its own process.
 function prodBootError(env: Record<string, string>): string {
@@ -106,8 +114,10 @@ assert.equal(asOrgType('admin'), 'admin');
 assert.throws(() => asOrgType('superuser'), /unknown org type/, 'an unknown role must not become a session');
 assert.throws(() => asOrgType('Admin'), /unknown org type/, 'role matching is exact, not case-folded');
 
-setTimeout(() => {
-  assert.equal(rateLimited(k2, 1, 1), false, 'window should reset');
-  console.log('security self-check passed');
-  process.exit(0);
-}, 5);
+rateLimitChecks().then(() =>
+  setTimeout(async () => {
+    assert.equal(await rateLimited(k2, 1, 1), false, 'window should reset');
+    console.log('security self-check passed');
+    process.exit(0);
+  }, 5),
+);

@@ -4,6 +4,9 @@ import ScanStub from './ScanStub';
 import JourneyFlow from './JourneyFlow';
 import JourneyTrigger from './JourneyTrigger';
 import HeroGlow from './HeroGlow';
+import BudgetPlanner from './BudgetPlanner';
+import Spotlight from './Spotlight';
+import Faq from './Faq';
 import * as lp from '@/lib/lp';
 import './landing.css';
 
@@ -223,8 +226,8 @@ export default function Landing() {
               difference is held, not lost.
             </p>
           </div>
-          <div className={lp.classes}>
-            <article className={lp.fareCard(false)}>
+          <Spotlight className={lp.classes}>
+            <article className={lp.fareCard(false)} data-spot>
               <div className={lp.fareTop}>
                 <h3 className={lp.fareTitle}>Guest</h3>
                 <span className={lp.tierGuest}>held</span>
@@ -246,7 +249,7 @@ export default function Landing() {
               <p className={lp.fareFoot}>Grace window set per partnership · default 7 days</p>
             </article>
 
-            <article className={lp.fareCard(true)}>
+            <article className={lp.fareCard(true)} data-spot>
               <div className={lp.fareTop}>
                 <h3 className={lp.fareTitle}>Verified</h3>
                 <span className={lp.tierVerified}>posted</span>
@@ -269,7 +272,11 @@ export default function Landing() {
                 Released after the deadline? Refused — the budget keeps the difference.
               </p>
             </article>
-          </div>
+          </Spotlight>
+
+          {/* The two rates argue in the abstract. This is the same argument with the reader's
+              own numbers in it — the only place on the page they can steer anything. */}
+          <BudgetPlanner />
         </section>
 
         {/* Both sides of the marketplace, given equal weight. The publisher used to appear only
@@ -283,9 +290,9 @@ export default function Landing() {
               between them is one entry on the same double-entry ledger.
             </p>
           </div>
-          <div className={lp.paths}>
+          <Spotlight className={lp.paths}>
             {PATHS.map((p) => (
-              <article className={lp.path} key={p.key}>
+              <article className={lp.path} key={p.key} data-spot>
                 <span className={lp.pathMark} aria-hidden="true">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"
                        strokeLinecap="round" strokeLinejoin="round">
@@ -306,7 +313,7 @@ export default function Landing() {
                 </div>
               </article>
             ))}
-          </div>
+          </Spotlight>
         </section>
 
         <section className={`${lp.section} ${lp.wrap}`}>
@@ -327,6 +334,20 @@ export default function Landing() {
               </div>
             ))}
           </dl>
+        </section>
+
+        {/* The six things that get asked before anyone funds a budget. Answering them here
+            is cheaper than answering them one email at a time. */}
+        <section className={`${lp.section} ${lp.wrap}`}>
+          <div className={lp.sectionHead}>
+            <span className={lp.eyebrow}>Before you fund</span>
+            <h2 className={lp.h2}>The questions that come first.</h2>
+            <p className={lp.sub}>
+              Six answers about what you are charged for, what stops a leaked print run, and
+              what each side has to build.
+            </p>
+          </div>
+          <Faq />
         </section>
 
         <section className={`${lp.close} ${lp.wrap}`}>

@@ -46,7 +46,9 @@ export const mark =
 
 const lpPad = `${btnBox} px-5 py-2.5 text-sm font-semibold`;
 
-export const btn = cx(btnBase, lpPad, inkAccent, 'hover:shadow-key-lit active:translate-y-px');
+/* `lp-btn` is a motion hook for the sheen that crosses the primary action on hover — see
+   landing.css. Only the accent button carries it; a sheen on a ghost button is noise. */
+export const btn = cx(btnBase, 'lp-btn overflow-hidden', lpPad, inkAccent, 'hover:shadow-key-lit active:translate-y-px');
 export const btnGhost = cx(btnBase, lpPad, inkGhost, 'active:translate-y-px');
 export const btnLg = 'px-6 py-3.25 text-[15px]';
 
@@ -143,7 +145,9 @@ export const tier = (t: 'guest' | 'verified') => (t === 'guest' ? tierGuest : ti
 
 export const section = 'pt-28 max-[720px]:pt-20';
 
-export const sectionHead = 'mb-10 max-w-[62ch]';
+/* `lp-enter` gives every section head the same scroll-in the cards below it already have —
+   without it the headings snapped in while their own content rose, which read as two pages. */
+export const sectionHead = 'lp-enter mb-10 max-w-[62ch]';
 
 /** a small labelled rule leading into the heading — structure, not decoration */
 export const eyebrow =
@@ -241,6 +245,56 @@ export const fareMeter =
 export const fareBody = 'text-[15px] leading-[1.62] text-ink-soft [&+p]:mt-3';
 
 export const fareFoot = 'mt-auto border-t border-line-soft pt-5 text-[12.5px] text-mut';
+
+/* ---- the budget planner ---- */
+
+export const planner = cx(
+  'lp-enter relative mt-5 overflow-hidden rounded-2xl border border-line bg-card',
+  'grid grid-cols-[minmax(0,360px)_minmax(0,1fr)] shadow-strip max-[860px]:grid-cols-[minmax(0,1fr)]',
+);
+
+export const plannerControls =
+  'grid content-start gap-7 border-r border-line bg-card-alt px-7 py-8 ' +
+  'max-[860px]:border-r-0 max-[860px]:border-b max-[720px]:px-6 max-[720px]:py-7';
+
+export const plannerField = 'grid gap-3.5';
+export const plannerLabel =
+  'flex items-baseline justify-between gap-3 text-stamp text-mut ' +
+  '[&_b]:font-mono [&_b]:text-[13.5px] [&_b]:font-semibold [&_b]:text-ink [&_b]:tabular-nums';
+
+/** native range input; the track fill and thumb are drawn in landing.css off `--pct` */
+export const range = 'lp-range w-full cursor-grab appearance-none bg-transparent active:cursor-grabbing';
+
+export const plannerOut =
+  'grid grid-cols-3 gap-x-6 gap-y-7 px-8 py-8 max-[1000px]:grid-cols-1 max-[720px]:px-6 max-[720px]:py-7';
+
+export const plannerFigure = 'grid content-start gap-1.5';
+export const plannerNum =
+  'font-mono text-[34px] font-semibold leading-none tracking-[-0.045em] text-ink tabular-nums max-[720px]:text-[28px]';
+export const plannerCap = 'text-[13px] leading-[1.45] text-mut';
+
+export const plannerNote =
+  'col-span-full border-t border-line-soft px-8 py-5 text-[12.5px] leading-[1.6] text-mut max-[720px]:px-6';
+
+/* ---- questions ---- */
+
+export const faq = 'lp-faq lp-enter overflow-hidden rounded-2xl border border-line bg-card shadow-rules';
+
+export const faqItem = 'lp-faq-item border-line-soft [&+&]:border-t';
+
+export const faqQ =
+  'flex cursor-pointer list-none items-start justify-between gap-5 px-7 py-5.5 ' +
+  'text-[15.5px] font-semibold tracking-[-0.015em] text-ink select-none ' +
+  'transition-colors duration-200 hover:bg-card-alt [&::-webkit-details-marker]:hidden ' +
+  'max-[720px]:px-5 max-[720px]:py-5 max-[720px]:text-[15px]';
+
+/** the plus rotates into a minus as the panel opens — one mark, two states */
+export const faqMark =
+  'lp-faq-mark mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent ' +
+  'transition-[transform,background-color] duration-300 [&_svg]:size-3.5';
+
+export const faqA =
+  'px-7 pb-6 max-w-[80ch] text-[15px] leading-[1.62] text-ink-soft max-[720px]:px-5 max-[720px]:pb-5';
 
 /* ---- who this is for ---- */
 

@@ -112,6 +112,28 @@ if (rawTrustProxy === 'true')
   );
 export const TRUST_PROXY = /^\d+$/.test(rawTrustProxy) ? Number(rawTrustProxy) : rawTrustProxy;
 
+/**
+ * Where the rate limiters count. Unset means "count in this process", which is correct for
+ * exactly one instance and is how the stack runs locally.
+ *
+ * This is the setting that gates horizontal scale. Every per-IP control here is a security
+ * control, so N replicas with in-process counters is N× every limit — twice the login attempts
+ * before throttling, twice the scan ceiling. Production refuses to boot with more than one
+ * instance and no shared store, but it cannot see the replica count from in here, so the
+ * warning is the deploy's job; this is only the switch.
+ */
+export const REDIS_URL = process.env.REDIS_URL ?? '';
+
+/**
+ * Bearer token for `GET /metrics`. Unauthenticated it is free reconnaissance — request volumes,
+ * route names, and the attribution refusal rates that describe how much this platform is
+ * paying out. Production serves the endpoint only when a token is set.
+ */
+export const METRICS_TOKEN = process.env.METRICS_TOKEN ?? '';
+
+if (PROD && METRICS_TOKEN && METRICS_TOKEN.length < 16)
+  throw new Error('METRICS_TOKEN must be at least 16 characters in production');
+
 const flag = (name: string, prodDefault: boolean) =>
   process.env[name] === undefined ? (PROD ? prodDefault : true) : process.env[name] === 'true';
 
