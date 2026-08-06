@@ -336,7 +336,7 @@ export function Chart({
       {/* The chart's twin in text. A tooltip that is the only way to read a value gates the
           data behind a pointer; this is what makes the hover layer an enhancement. */}
       <details className="mt-2 group">
-        <summary className={cx(muted, 'cursor-pointer list-none text-[12.5px] font-medium text-accent hover:underline')}>
+        <summary className={cx(muted, 'cursor-pointer list-none text-[12.5px] font-medium text-accent-text hover:underline')}>
           <span className="group-open:hidden">Table view</span>
           <span className="hidden group-open:inline">Hide table</span>
         </summary>
@@ -379,7 +379,7 @@ export function Chart({
  */
 export function Spark({
   values,
-  color = 'var(--color-accent)',
+  color = 'var(--color-accent-text)',
   className,
 }: {
   values: number[];

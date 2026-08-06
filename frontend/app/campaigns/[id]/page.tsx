@@ -381,6 +381,9 @@ type Panel = (typeof PANELS)[number];
 
 /* transparency grid, sized to whatever it sits behind — a backdrop needs a coarser one than
    a 68px swatch, where 18px squares read as content rather than as "nothing here" */
+/* Deliberately not themed. The checker stands for transparency in a preview of a
+   physical printed artifact; darkening it would imply a dark substrate and make the
+   Cutout preset look scannable when printed on light stock it would not be. */
 const checker = (px: number) => `repeating-conic-gradient(#eeeeee 0 25%, #fff 0 50%) 50%/${px}px ${px}px`;
 const CHECKER = checker(18);
 const BACKDROPS = [
@@ -662,7 +665,7 @@ export default function CampaignPage() {
             </div>
 
             <details className="mt-4 border-t-2 border-line-soft pt-1 [&[open]>summary]:text-ink">
-              <summary className="cursor-pointer list-none px-0 pt-2.5 pb-0.5 text-[13.5px] font-semibold text-accent hover:underline hover:underline-offset-[3px] [&::-webkit-details-marker]:hidden">
+              <summary className="cursor-pointer list-none px-0 pt-2.5 pb-0.5 text-[13.5px] font-semibold text-accent-text hover:underline hover:underline-offset-[3px] [&::-webkit-details-marker]:hidden">
                 + New QR code
               </summary>
               <div className="flex flex-wrap items-end gap-3.5">

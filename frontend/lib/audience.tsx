@@ -16,7 +16,10 @@ import { card, cx, muted, sectionHead, select as selectField, stamp } from './tw
 
 /** The two inks every plot in the console is drawn in. Validated as a pair: ΔE 23.9 under
  *  deuteranopia, 28.6 in normal vision, both clear of the surface at better than 3:1. */
-export const INK = { scans: 'var(--color-accent)', signups: 'var(--color-ok)' };
+/* accent-text, not accent: the fill is 2.5:1 on the dark canvas and a line drawn
+   in it disappears. A chart stroke is a graphic on a surface, so it takes the text
+   variant like every other mark on a surface does. */
+export const INK = { scans: 'var(--color-accent-text)', signups: 'var(--color-ok)' };
 
 export interface Bucket {
   key: string;
@@ -126,7 +129,7 @@ function BarList({
       ))}
       {rows.length > limit && (
         <button
-          className={cx(muted, 'cursor-pointer bg-transparent px-2 py-1 text-left font-semibold text-accent')}
+          className={cx(muted, 'cursor-pointer bg-transparent px-2 py-1 text-left font-semibold text-accent-text')}
           onClick={() => setAll((v) => !v)}
         >
           {all ? 'Show fewer' : `Show all ${rows.length}`}

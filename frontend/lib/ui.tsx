@@ -208,7 +208,7 @@ export function Figures({
                 cell that jumps somewhere, it takes the validation ink on hover — that plus
                 the cell filling is the affordance, so the strip needs no arrow per cell.
                 There is no `group` on a static cell, so the variant never fires there. */}
-            <span className={cx(stamp, 'block transition-colors duration-150 ease-press group-hover:text-accent')}>
+            <span className={cx(stamp, 'block transition-colors duration-150 ease-press group-hover:text-accent-text')}>
               {k}
             </span>
             {/* the trace sits beside the figure, not under it: a stat cell is one line of
@@ -267,7 +267,7 @@ export function Empty({
   return (
     <div className={cx(card, 'grid justify-items-center px-6 py-12 text-center', className)}>
       <span
-        className="mb-3.5 grid size-11 place-items-center rounded-full bg-card-sunk text-mut [&_svg]:size-5"
+        className="mb-3.5 grid size-11 place-items-center rounded-full bg-sunk text-mut [&_svg]:size-5"
         aria-hidden="true"
       >
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"
@@ -408,7 +408,7 @@ const ICONS: Record<Kind, JSX.Element> = {
 const KIND: Record<Kind, string> = {
   success: 'border-ok-line text-ok',
   error: 'border-bad-line text-bad',
-  info: 'border-accent-line text-accent',
+  info: 'border-accent-line text-accent-text',
 };
 
 function Toasts() {
@@ -424,7 +424,7 @@ function Toasts() {
         <output
           key={t.id}
           className={cx(
-            'pointer-events-auto flex items-start gap-2.5 rounded-md border bg-card px-3.25 py-3 text-[13.5px] shadow-contact',
+            'pointer-events-auto flex items-start gap-2.5 rounded-md border bg-card-high px-3.25 py-3 text-[13.5px] shadow-contact',
             KIND[t.kind],
             t.leaving ? 'animate-toast-out' : 'animate-toast-in',
           )}
@@ -478,7 +478,7 @@ function Dialogs() {
     // native <dialog> gives focus trap, Esc and ::backdrop for free
     <dialog
       ref={ref}
-      className="m-auto w-[min(440px,calc(100vw-32px))] rounded-xl border border-line bg-card p-6 text-ink shadow-pass open:animate-modal-in backdrop:animate-fade backdrop:bg-[color-mix(in_srgb,var(--color-ink)_45%,transparent)]"
+      className="m-auto w-[min(440px,calc(100vw-32px))] rounded-xl border border-line bg-card-high p-6 text-ink shadow-pass open:animate-modal-in backdrop:animate-fade backdrop:bg-scrim"
       onCancel={(e) => { e.preventDefault(); close(null); }}
     >
       <form

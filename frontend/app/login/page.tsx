@@ -66,7 +66,7 @@ function Check() {
   return (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-         className="mt-0.5 size-3.5 shrink-0 text-accent">
+         className="mt-0.5 size-3.5 shrink-0 text-accent-text">
       <path d="M3 8.5 6.2 11.5 13 4.5" />
     </svg>
   );
@@ -305,7 +305,7 @@ function Login() {
             </>
           )}
           <p className="mt-auto border-t border-line pt-3.5 text-[12.5px]">
-            <Link href="/" className="font-medium text-ink-soft no-underline hover:text-accent">
+            <Link href="/" className="font-medium text-ink-soft no-underline hover:text-accent-text">
               ← Back to the overview
             </Link>
           </p>

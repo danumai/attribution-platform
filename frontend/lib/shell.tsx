@@ -10,6 +10,7 @@ import { ReactNode, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { TicketMark } from '@/lib/mark';
+import { ThemeToggle } from '@/lib/theme';
 import { btnBase, cx, h1, inkAccent, muted, riseStagger, stamp } from '@/lib/tw';
 
 export type NavItem = {
@@ -57,7 +58,7 @@ function railItem(state: 'idle' | 'current' | 'out') {
     btnBase,
     railRow,
     state === 'current'
-      ? 'border-transparent bg-accent-soft font-semibold text-accent'
+      ? 'border-transparent bg-accent-soft font-semibold text-accent-text'
       : state === 'out'
         ? 'mt-2 border-transparent bg-transparent text-mut enabled:hover:bg-bad-soft enabled:hover:text-bad'
         : 'border-transparent bg-transparent text-ink-soft enabled:hover:bg-card-alt enabled:hover:text-ink',
@@ -98,7 +99,7 @@ export function Shell({
     );
     const inner = (
       <>
-        <Icon name={it.icon} className={current ? 'text-accent' : 'text-mut'} />
+        <Icon name={it.icon} className={current ? 'text-accent-text' : 'text-mut'} />
         <span className="flex-1 truncate">{it.label}</span>
         {it.badge ? (
           <span className="min-w-5 shrink-0 rounded-full bg-warn-soft px-1.5 py-px text-center text-[11px] font-semibold text-warn tabular-nums">
@@ -140,7 +141,7 @@ export function Shell({
       <button
         className={cx(
           'hidden',
-          open && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-55 max-[900px]:block max-[900px]:bg-[color-mix(in_srgb,#0d1117_45%,transparent)] max-[900px]:backdrop-blur-sm',
+          open && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-55 max-[900px]:block max-[900px]:bg-scrim max-[900px]:backdrop-blur-sm',
         )}
         aria-label="Close menu"
         onClick={() => setOpen(false)}
@@ -156,7 +157,7 @@ export function Shell({
       >
         <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
           <span
-            className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-ink [&_svg]:size-4.5 [&_svg]:fill-current"
+            className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-on [&_svg]:size-4.5 [&_svg]:fill-current"
             aria-hidden="true"
           >
             <TicketMark />
@@ -193,7 +194,7 @@ export function Shell({
       </aside>
 
       <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-20 flex items-center gap-3.5 border-b border-line bg-paper/85 px-8 pt-5 pb-4 backdrop-blur-xl max-[900px]:p-4">
+        <header className="sticky top-0 z-20 flex items-center gap-3.5 border-b border-line bg-canvas/85 px-8 pt-5 pb-4 backdrop-blur-xl max-[900px]:p-4">
           <button
             className={cx(btnBase, inkAccent, 'hidden size-9 shrink-0 p-0 max-[900px]:grid max-[900px]:place-items-center')}
             aria-label="Open menu"
@@ -207,7 +208,12 @@ export function Shell({
             <h1 className={h1}>{title}</h1>
             {lede && <p className={`${muted} mt-0.5 max-w-[70ch]`}>{lede}</p>}
           </div>
-          {actions && <div className="flex shrink-0 items-center gap-2.5">{actions}</div>}
+          {/* The toggle is shell chrome, not a page action, so it sits here on every
+              signed-in surface rather than being re-added per page. */}
+          <div className="flex shrink-0 items-center gap-2.5">
+            <ThemeToggle />
+            {actions}
+          </div>
         </header>
         <main
           className={cx(

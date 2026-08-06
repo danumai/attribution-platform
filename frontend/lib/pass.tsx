@@ -40,7 +40,7 @@ export function Brand() {
   return (
     <div className="mb-7 flex items-center gap-2.5">
       <span
-        className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-ink [&_svg]:size-4.5 [&_svg]:fill-current"
+        className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-on [&_svg]:size-4.5 [&_svg]:fill-current"
         aria-hidden="true"
       >
         <TicketMark />
@@ -101,7 +101,7 @@ export function RoleCard({
         'group cursor-pointer rounded-xl border p-4 text-left',
         'transition-[border-color,background-color,box-shadow] duration-150 ease-press',
         selected
-          ? 'border-accent bg-accent-soft shadow-contact-sm'
+          ? 'border-accent-text bg-accent-soft shadow-contact-sm'
           : 'border-line bg-card hover:border-mut/40 hover:bg-card-alt',
       )}
     >
@@ -109,13 +109,13 @@ export function RoleCard({
         <span
           className={cx(
             'grid size-4 shrink-0 place-items-center rounded-full border transition-colors duration-150',
-            selected ? 'border-accent bg-accent' : 'border-line bg-card',
+            selected ? 'border-accent-text bg-accent' : 'border-line bg-card',
           )}
           aria-hidden="true"
         >
           <span className={cx('size-1.5 rounded-full bg-card', !selected && 'opacity-0')} />
         </span>
-        <b className={cx('text-[14px] font-semibold tracking-[-0.012em]', selected && 'text-accent')}>
+        <b className={cx('text-[14px] font-semibold tracking-[-0.012em]', selected && 'text-accent-text')}>
           {title}
         </b>
       </span>

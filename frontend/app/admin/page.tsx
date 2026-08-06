@@ -276,7 +276,7 @@ function Table<T extends object>({
                   return (
                     <th
                       key={i}
-                      className={cx(c.num ? thNum : th, sort?.i === i && 'text-accent')}
+                      className={cx(c.num ? thNum : th, sort?.i === i && 'text-accent-text')}
                       aria-sort={
                         can && sort?.i === i ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined
                       }

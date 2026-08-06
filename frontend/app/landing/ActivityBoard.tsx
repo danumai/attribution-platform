@@ -62,7 +62,7 @@ export default function ActivityBoard() {
             <span className={lp.boardMeta}>
               <b>{e.campaign}</b>
               <span>
-                {e.promoter} <span className="text-accent">→</span> {e.publisher} · {e.ref}
+                {e.promoter} <span className="text-accent-text">→</span> {e.publisher} · {e.ref}
               </span>
             </span>
             <span className={lp.boardCoins}>+{e.coins}</span>
