@@ -37,6 +37,8 @@ import {
   claimIdFromReferrer,
   decide,
   detectPlatform,
+  normCores,
+  normDark,
   normLang,
   normScreen,
   normTz,
@@ -75,6 +77,8 @@ interface ClaimableScan {
   tz: string | null;
   screen: string | null;
   language: string | null;
+  cores: number | null;
+  dark: boolean | null;
 }
 
 /**
@@ -88,7 +92,8 @@ interface ClaimableScan {
 const byReferrer = (tx: Tx, publisherId: string, claimId: string) =>
   tx.$queryRaw<ClaimableScan[]>`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
-           p.coin_rate, p.guest_rate, p.grace_days, s.tz, s.screen, s.language
+           p.coin_rate, p.guest_rate, p.grace_days,
+           s.tz, s.screen, s.language, s.cores, s.dark
     FROM scans s
     JOIN campaigns c    ON c.id = s.campaign_id
     JOIN partnerships p ON p.id = c.partnership_id
@@ -119,7 +124,8 @@ const fingerprintCandidates = (
 ) =>
   tx.$queryRaw<ClaimableScan[]>`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
-           p.coin_rate, p.guest_rate, p.grace_days, s.tz, s.screen, s.language
+           p.coin_rate, p.guest_rate, p.grace_days,
+           s.tz, s.screen, s.language, s.cores, s.dark
     FROM scans s
     JOIN campaigns c    ON c.id = s.campaign_id
     JOIN partnerships p ON p.id = c.partnership_id
@@ -172,6 +178,11 @@ function readSignals(b: Record<string, unknown>): OpenSignals {
     tz: normTz(str(b.tz, 'tz', 64, false)),
     screen: normScreen(str(b.screen, 'screen', 32, false)),
     language: normLang(str(b.language, 'language', 32, false)),
+    // Both are optional for an SDK that has not been updated yet: a missing signal simply
+    // earns nothing, exactly as a missing timezone always has. Neither may ever be *required*,
+    // or upgrading the SDK would become the thing that decides who gets paid.
+    cores: normCores(b.cores),
+    dark: normDark(b.dark),
   };
 }
 
@@ -185,11 +196,32 @@ function readSignals(b: Record<string, unknown>): OpenSignals {
  * rather than banning anything, and why `DEVICE_DEDUPE_DAYS` can be turned off entirely.
  */
 const deviceHash = (s: OpenSignals) =>
-  sha256([s.fingerprint, s.platform, s.tz, s.screen, s.language].join('|')).slice(0, 32);
+  sha256(
+    [s.fingerprint, s.platform, s.tz, s.screen, s.language, s.cores, s.dark].join('|'),
+  ).slice(0, 32);
 
 type Match =
   | { scan: ClaimableScan; confidence: number; match_method: 'referrer' | 'fingerprint' }
   | { reason: string; confidence?: number };
+
+/**
+ * Answer `unattributed`, but roll the transaction back first.
+ *
+ * `claimInstall` and `claimAtSignup` both flip their guard (`redeemed` / `consumed`) *before*
+ * the budget is known — the fee depends on `identified`, which is only resolved once the match
+ * is in hand. Returning normally from the transaction callback commits that flip, so a signup
+ * that arrives one credit short of the budget permanently burned the install: topping the
+ * campaign back up could never make that user attributable again, and the publisher had
+ * already created the account.
+ *
+ * `firstOpen` avoids this by checking the budget before it consumes anything. Here that is not
+ * available, so the rollback is the guard instead.
+ */
+class Rollback extends Error {
+  constructor(public reason: string) {
+    super(reason);
+  }
+}
 
 /**
  * Find the scan this install came from, or refuse.
@@ -232,7 +264,8 @@ async function claimInstall(tx: Tx, publisherId: string, installId: string): Pro
     (ClaimableScan & { install_expired: boolean; confidence: number; match_method: string })[]
   >`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
-           p.coin_rate, p.guest_rate, p.grace_days, s.tz, s.screen, s.language,
+           p.coin_rate, p.guest_rate, p.grace_days,
+           s.tz, s.screen, s.language, s.cores, s.dark,
            i.confidence, i.match_method, (i.expires_at <= now()) AS install_expired
     FROM installs i
     JOIN scans s        ON s.id = i.scan_id
@@ -515,8 +548,9 @@ export class PartnerController {
 
       // Fail closed on an exhausted budget. Unattributed rather than an error, because the
       // user has already signed up — the publisher's flow must not break over our accounting.
+      // Thrown rather than returned so the install/scan is released: see `Rollback`.
       if ((await lockedBalance(tx, `campaign:${scan.campaign_id}`)) < fee)
-        return unattributed('budget_exhausted');
+        throw new Rollback('budget_exhausted');
 
       let red;
       try {
@@ -571,6 +605,9 @@ export class PartnerController {
         replay: false,
       };
     }).catch((e) => {
+      // Rolled back on purpose, and the caller still gets a 200 — the transaction was undone
+      // so the install stays claimable once the promoter tops the budget back up.
+      if (e instanceof Rollback) return unattributed(e.reason);
       if (replayCampaignId) return null; // handled below, as a replay rather than an error
       throw e;
     });
@@ -630,10 +667,11 @@ export class PartnerController {
           campaign_id: string;
           coin_rate: number;
           grace_days: number;
+          partnership_status: string;
         }[]
       >`
         SELECT rd.id, rd.coins, rd.identified, rd.created_at, rd.campaign_id,
-               p.coin_rate, p.grace_days
+               p.coin_rate, p.grace_days, p.status AS partnership_status
         FROM redemptions rd
         JOIN campaigns c ON c.id = rd.campaign_id
         JOIN partnerships p ON p.id = c.partnership_id
@@ -641,6 +679,15 @@ export class PartnerController {
         FOR UPDATE OF rd`;
       const red = rows[0];
       if (!red) throw new NotFoundException('attribution not found');
+      // The one money path that was not checking this. Suspending a partnership is documented
+      // as stopping scans *and* payouts, and every other spend — the redirect, first-open and
+      // both claim paths — filters on it in SQL. Without it the upgrade delta stayed payable,
+      // so an admin freezing a relationship still let up to `coin_rate - guest_rate` per
+      // outstanding guest redemption leave the campaign budget for the whole grace window.
+      // Surfaced rather than filtered out in the WHERE: a publisher deserves a reason here,
+      // not a 404 that reads like a lost attribution.
+      if (red.partnership_status !== 'active')
+        throw new ConflictException('partnership_not_active');
       if (red.identified)
         return { attribution_id: red.id, fee: red.coins, identified: true, status: 'already_full' };
 

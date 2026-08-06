@@ -101,7 +101,7 @@ export function claimIdFromReferrer(referrer?: string | null): string | null {
 }
 
 /* ---------------------------------------------------------------------------
- * Device signals — the fingerprint's third, fourth and fifth dimensions.
+ * Device signals — every fingerprint dimension past hashed IP + platform.
  *
  * Two sides have to produce byte-identical strings for these to be worth anything: a mobile
  * browser on the interstitial, and a native SDK at first open, minutes later. Everything below
@@ -141,10 +141,43 @@ export function normLang(raw: unknown): string | null {
   return /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/.test(v) ? v : null;
 }
 
+/**
+ * Logical CPU count: `navigator.hardwareConcurrency` in the browser, `activeProcessorCount`
+ * natively. One of the very few hardware facts both sides report as the same integer, and it
+ * splits handsets by generation where the screen only splits them by body size — an iPhone 13
+ * and a 15 share `390x844@3` and do not share a core count.
+ *
+ * Bounded rather than trusted: this arrives from a phone on one side and another company's
+ * server on the other, and a nonsense value must land as NULL rather than as its own bucket.
+ */
+export function normCores(raw: unknown): number | null {
+  const n = typeof raw === 'number' ? raw : Number(String(raw ?? '').trim());
+  return Number.isInteger(n) && n >= 1 && n <= 512 ? n : null;
+}
+
+/**
+ * Whether the device is in dark appearance: `prefers-color-scheme` in the browser,
+ * `userInterfaceStyle` / `isNightModeActive` natively.
+ *
+ * Worth one bit and weighted like one. It earns its place as a tiebreaker: when two scans on
+ * one NAT agree on everything else, the appearance setting is often the only thing that does
+ * not — and `decide()` refuses a tie rather than guessing, so a bit that splits one is a match
+ * that would otherwise have been thrown away.
+ */
+export function normDark(raw: unknown): boolean | null {
+  if (typeof raw === 'boolean') return raw;
+  const v = String(raw ?? '').trim().toLowerCase();
+  if (['1', 'true', 'dark', 'yes'].includes(v)) return true;
+  if (['0', 'false', 'light', 'no'].includes(v)) return false;
+  return null;
+}
+
 export interface DeviceSignals {
   tz: string | null;
   screen: string | null;
   language: string | null;
+  cores: number | null;
+  dark: boolean | null;
 }
 
 /**
@@ -157,15 +190,26 @@ export interface DeviceSignals {
  *
  * SCREEN outweighs TZ + LANG together because it is the only one with real entropy — a whole
  * country shares a timezone and a language, while screen geometry splits it by model.
+ *
+ * The weights sum to exactly 100 with `BASE`, which is what makes a confidence readable as a
+ * percentage in the console and comparable against `MIN_CONFIDENCE`. Adding a signal therefore
+ * costs the existing ones a few points each — deliberately, because the alternative is either
+ * a scale that no longer tops out at 100 or a cap that turns every good match into a 100 and
+ * hands `decide()` ties it then has to refuse.
  */
 export const BASE = 55;
-export const WEIGHTS = { tz: 10, screen: 25, language: 10 } as const;
+export const WEIGHTS = { tz: 8, screen: 22, language: 7, cores: 5, dark: 3 } as const;
 
-/** What a scan's stored signals score against the ones presented at first open. */
+/**
+ * What a scan's stored signals score against the ones presented at first open.
+ *
+ * `== null` rather than falsy: `dark: false` and `cores: 0` are answers, and a truthiness test
+ * would silently drop the light-mode half of every device.
+ */
 export function score(scan: Partial<DeviceSignals>, open: DeviceSignals): number {
   let n = BASE;
-  for (const k of ['tz', 'screen', 'language'] as const)
-    if (scan[k] && open[k] && scan[k] === open[k]) n += WEIGHTS[k];
+  for (const k of Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[])
+    if (scan[k] != null && open[k] != null && scan[k] === open[k]) n += WEIGHTS[k];
   return n;
 }
 

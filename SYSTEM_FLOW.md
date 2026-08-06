@@ -147,15 +147,15 @@ turns the user away with an explanation rather than a broken page.
        ──► record the pending claim
              (claim_id, platform, hashed IP, truncated UA)
        ──► iOS with a registered App Store id?
-             yes → 200, the interstitial (collects tz/screen/locale,
-                   then forwards via GET /go/:claim_id)
+             yes → 200, the hand-off screen (collects tz/screen/locale/cores/
+                   appearance, then forwards via GET /go/:claim_id)
              no  → 302 straight to the store listing
 ```
 
 **Why iOS gets an extra hop.** Android's referrer names the exact scan, so an interstitial
 there would cost conversion and buy nothing — it is skipped. iOS has no referrer channel at
-all, and the browser is the *only* place this device's timezone, screen geometry and locale
-can ever be read. Skip the hop and the match is left with hashed IP + platform, which now
+all, and the browser is the *only* place this device's timezone, screen geometry, locale,
+core count and appearance can ever be read. Skip the hop and the match is left with hashed IP + platform, which now
 scores 55 against a floor of 70 and is refused. The hop is what makes iOS attribution work.
 
 The page holds for ~900ms, forwards itself with `location.replace`, and degrades in two
@@ -236,7 +236,7 @@ generous window (`SIGNUP_WINDOW_DAYS`, default 30). No money moves until signup.
 
     scan ──► INTERSTITIAL on our origin        ← this is the new hop
                   │
-             browser reports timezone, screen geometry, locale
+             browser reports timezone, screen, locale, cores, appearance
              (the App Store has no referrer channel; this is the only
               moment these can be read at all)
                   │
@@ -247,7 +247,7 @@ generous window (`SIGNUP_WINDOW_DAYS`, default 30). No money moves until signup.
              signals from the native side
                   │
              app's OWN BACKEND ──► POST /v1/attribution/first-open
-                                    { ip, platform, tz, screen, language }
+                              { ip, platform, tz, screen, language, cores, dark }
                   │
              candidates scored ──► best one, if it clears the floor
 
@@ -270,9 +270,15 @@ evidence that picks one. Each candidate is scored:
 | Signal | Weight | Why |
 |---|---|---|
 | hashed IP + platform | 55 (base) | narrows the field; never sufficient alone |
-| screen geometry | +25 | the only signal with real entropy — splits a country by handset model |
-| timezone | +10 | a whole country shares one |
-| locale | +10 | a whole country shares one |
+| screen geometry | +22 | the only signal with real entropy — splits a country by handset model |
+| timezone | +8 | a whole country shares one |
+| locale | +7 | a whole country shares one |
+| CPU cores | +5 | splits handsets by generation where the screen only splits by body size |
+| dark appearance | +3 | one bit, but often the only one that separates two candidates on a NAT |
+
+The weights sum to exactly 100 with the base, which is what makes a confidence readable as a
+percentage. Adding a signal therefore costs the existing ones a few points each — deliberately,
+because the alternative is a scale that no longer tops out at 100.
 
 `MIN_CONFIDENCE` (default **70**) is the accept line, so a bare IP + platform match scores 55
 and is **refused**. The score is stored on the install and copied onto the redemption, so a
@@ -879,6 +885,8 @@ curl -X POST https://api.example.com/v1/attribution/first-open \
     "platform": "ios",
     "tz": "Asia/Dhaka",
     "screen": "393x852@3",
+    "cores": 6,
+    "dark": true,
     "language": "en-US"
   }'
 ```
@@ -905,8 +913,8 @@ This can be minutes or weeks later — `SIGNUP_WINDOW_DAYS`, default 30.
 
 ### 4.3 Getting the signals right
 
-This is the whole integration on iOS. Send all four fields; each one you omit costs
-confidence, and below the floor nothing is attributed at all.
+This is the whole integration on iOS. Send every field; each one you omit costs confidence,
+and below the floor nothing is attributed at all.
 
 | Field | Native source | Notes |
 |---|---|---|
@@ -915,6 +923,12 @@ confidence, and below the floor nothing is attributed at all.
 | `tz` | `TimeZone.current.identifier` | IANA, e.g. `Asia/Dhaka` |
 | `screen` | `UIScreen.main.bounds` + `scale` | `"{short}x{long}@{dpr}"`, e.g. `393x852@3` |
 | `language` | `Locale.current.identifier` | `en-US` or `en_US`, either is fine |
+| `cores` | `ProcessInfo.processInfo.activeProcessorCount` | integer, e.g. `6` |
+| `dark` | `traitCollection.userInterfaceStyle == .dark` | boolean, or `"dark"` / `"light"` |
+
+`cores` and `dark` are optional and always will be: an SDK that has not been updated simply
+earns nothing for them, exactly as a missing timezone always has. Neither will ever be
+*required*, because that would make upgrading the SDK the thing that decides who gets paid.
 
 `screen` must be **orientation-normalised** — shorter dimension first — because the browser
 that scanned may have been sideways. Points, not pixels: `393x852@3`, not `1179x2556@3`. Get
@@ -932,10 +946,11 @@ refuses the install outright; the other two are recorded for review and do not b
 | Signals agreeing | Score | Result (floor = 70) |
 |---|---|---|
 | IP + platform only | 55 | **refused** — `low_confidence` |
-| \+ timezone | 65 | refused |
-| \+ timezone, locale | 75 | attributed |
-| \+ screen | 80 | attributed |
-| all four | 100 | attributed |
+| \+ timezone | 63 | refused |
+| \+ timezone, locale | 70 | attributed, on the line |
+| \+ screen | 77 | attributed |
+| \+ screen, timezone, locale | 92 | attributed |
+| everything | 100 | attributed |
 
 **`ip` alone is no longer enough.** It was in the previous single-call API; it is not now. An
 IP is a postcode — carrier NAT, café wifi, an airport, a corporate VPN — and paying on it
@@ -959,7 +974,7 @@ in the integration.
 integrations keep working — but that path now runs the same scored matcher at signup time, so
 a bare `ip` scores 55 and is refused where it used to pay. On Android the referrer makes this
 irrelevant. On iOS, move to the two-call flow or iOS attribution will drop to near zero. You
-can also send `tz`/`screen`/`language` on the legacy single call as a stopgap.
+can also send `tz`/`screen`/`language`/`cores`/`dark` on the legacy single call as a stopgap.
 
 ## 5. The response
 

@@ -26,6 +26,13 @@ export interface ScanAnalytics {
     repeat_scans: number;
     /** how many scans the CDN resolved a country for; 0 means geo is simply not wired up */
     geo_known: number;
+    /**
+     * How many scans carry handset detail from the hand-off screen. This is the coverage
+     * number behind every panel in the Handset section, and it is also the honest ceiling on
+     * how many iOS installs can ever be matched with confidence — a scan with no signals
+     * scores the base and is refused.
+     */
+    handset_known: number;
     conversion_rate: number;
   };
   dims: Record<string, Bucket[]>;
@@ -42,6 +49,19 @@ const DIMENSIONS: Record<string, string> = {
   platform: `platform`,
   // 'direct' is the interesting bucket here: no referer is what a real camera scan looks like.
   referer_host: `coalesce(referer_host, 'direct')`,
+
+  // The four below are only ever populated for scans that passed through the hand-off screen,
+  // which today is iOS into a registered App Store listing. Every other scan lands in
+  // 'unknown', and that is the honest bucket rather than a gap — the reader can see at a glance
+  // what share of their traffic this detail is even available for.
+  //
+  // `screen` is the interesting one: it is the closest this data ever gets to naming a handset
+  // model, and it costs nothing extra because attribution already stores it.
+  screen: `coalesce(screen, 'unknown')`,
+  tz: `coalesce(tz, 'unknown')`,
+  // Three-valued on purpose: NULL is "never measured", which is not the same fact as "light".
+  theme: `case when dark then 'dark' when dark is false then 'light' else 'unknown' end`,
+  network: `coalesce(client->>'network', 'unknown')`,
   qr_code: `coalesce(code, 'unknown')`,
   campaign: `campaign_name`,
   // Zero-padded so the buckets sort lexically into clock order without a numeric cast per row.
@@ -64,7 +84,7 @@ const dimensionSql = Object.entries(DIMENSIONS)
 /**
  * Every breakdown in one round trip.
  *
- * Thirteen `GROUP BY`s could be thirteen queries; as one `UNION ALL` over a single CTE the
+ * Every `GROUP BY` here could be its own query; as one `UNION ALL` over a single CTE the
  * window of scans is scanned once and reused, and the whole panel is one network hop. The
  * dimension names are interpolated as plain SQL because they come from the constant map above
  * — the only caller-supplied values are the two parameters, which stay bound.
@@ -84,6 +104,7 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
     `WITH s AS (
        SELECT sc.scanned_at, sc.country, sc.city, sc.device_type, sc.os, sc.browser,
               sc.language, sc.platform, sc.referer_host,
+              sc.screen, sc.tz, sc.dark, sc.client,
               q.code, c.name AS campaign_name,
               r.id IS NOT NULL AS converted
        FROM scans sc
@@ -103,7 +124,8 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
             count(DISTINCT sc.ip)::int                           AS devices,
             count(r.id)::int                                     AS conversions,
             coalesce(sum(r.coins), 0)::int                       AS coins,
-            count(*) FILTER (WHERE sc.country IS NOT NULL)::int   AS geo_known
+            count(*) FILTER (WHERE sc.country IS NOT NULL)::int   AS geo_known,
+            count(*) FILTER (WHERE sc.screen IS NOT NULL)::int    AS handset_known
      FROM scans sc
      LEFT JOIN redemptions r ON r.scan_id = sc.id
      WHERE sc.scanned_at > now() - make_interval(days => $2::int)
@@ -136,6 +158,7 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
       // A device that scanned once contributes zero here, so this is genuinely the extra scans.
       repeat_scans: Math.max(t.scans - t.devices, 0),
       geo_known: t.geo_known,
+      handset_known: t.handset_known,
       conversion_rate: t.scans ? +(t.conversions / t.scans).toFixed(3) : 0,
     },
     dims,

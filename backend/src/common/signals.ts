@@ -154,6 +154,76 @@ function deviceType(req: Request, ua: string, os: string | null): string {
   return 'desktop';
 }
 
+/* ---------------------------------------------------------------------------
+ * The second source: what the hand-off screen measured in the browser.
+ *
+ * Same rule as everything above — reporting only. The timezone, screen, core count and
+ * appearance the interstitial also sends are matching signals and are parsed by
+ * `attribution.ts` instead, because those five have to survive the crossing into a native SDK
+ * and everything here does not. Mixing the two files is how a reporting field ends up scored.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * A bounded integer, or absence. Everything here arrives from a phone, so nothing is trusted.
+ *
+ * The empty check is load-bearing rather than tidy: `Number('')` is `0`, so an absent key would
+ * otherwise land in the column as a real, in-range zero — a device that reported no touch
+ * points at all, rather than one that was never asked.
+ */
+const int = (raw: unknown, lo: number, hi: number): number | null => {
+  const v = String(raw ?? '').trim();
+  const n = Number(v);
+  return v && Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n) : null;
+};
+
+/**
+ * A short enum-ish token: lowercased, charset-bounded, so a value read straight into the
+ * console can never carry markup. The comma is allowed because `languages` is a list.
+ */
+const tok = (raw: unknown, max = 24): string | null => {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return v && v.length <= max && /^[a-z0-9._,-]+$/.test(v) ? v : null;
+};
+
+/**
+ * What the browser measured, as a bag of reporting facts.
+ *
+ * Every value is optional twice over: the API this reads is missing on some engine (Safari has
+ * no `deviceMemory` or `connection`, Firefox has neither and no `hardwareConcurrency` either),
+ * and the whole screen is skipped for Android and desktop. So this returns NULL rather than an
+ * object of nulls — an empty bag in the column would read as "measured nothing" when the truth
+ * is "was never asked".
+ */
+export function clientSignals(q: Record<string, unknown>): Record<string, unknown> | null {
+  const bag: Record<string, unknown> = {
+    /** inner window size in CSS px — smaller than `screen` by exactly the browser or in-app chrome */
+    viewport: /^\d{2,5}x\d{2,5}$/.test(String(q.vp ?? '')) ? String(q.vp) : null,
+    /** minutes east of UTC. Redundant with `tz` when that resolved, the only clock answer when it did not. */
+    utc_offset: int(q.tzo, -900, 900),
+    /** 0 on a desktop pointer, 5 on essentially every iPhone — a bot check, not an identity */
+    touch_points: int(q.td, 0, 32),
+    /** the whole `navigator.languages` list; the primary tag alone is already in `language` */
+    languages: tok(q.langs, 120),
+    /** `4g` / `3g` / `slow-2g`, Chromium only. A slow link is the honest reason for a drop-off. */
+    network: tok(q.net, 12),
+    /** advertised RAM in GB, Chromium only and deliberately coarse (0.25 … 8) */
+    memory_gb: int(q.dm, 0, 64),
+    color_depth: int(q.cd, 1, 64),
+    /** the OS the *browser* claims, which is not always the one the UA claims */
+    platform: tok(q.pf, 32),
+    /** true in an installed PWA / standalone webview rather than a browser tab */
+    standalone: q.sa === '1' ? true : q.sa === '0' ? false : null,
+    /** an accessibility preference, reported because it changes what the screen was able to show */
+    reduced_motion: q.rm === '1' ? true : q.rm === '0' ? false : null,
+    /** ms the screen was actually held before it handed off — the real cost of this hop */
+    held_ms: int(q.held, 0, 600_000),
+    /** `tap` when the reader pressed Continue, `auto` when the hold ran out */
+    exit: q.via === 'tap' ? 'tap' : q.via === 'auto' ? 'auto' : null,
+  };
+  for (const [k, v] of Object.entries(bag)) if (v === null) delete bag[k];
+  return Object.keys(bag).length ? bag : null;
+}
+
 /** Everything the redirect can learn, in one pass over the headers. */
 export function scanSignals(req: Request): ScanSignals {
   const ua = head(req, 'user-agent');

@@ -110,7 +110,9 @@ echo "6b. iOS path — interstitial, then first-open and signup as separate stag
 # interstitial, which is the only moment this device's timezone, screen and locale can be
 # read — in a browser, before the App Store takes the session away.
 IOS_PAGE=$(curl -s -A "$IOS" "$API/r/$CODE")
-echo "$IOS_PAGE" | grep -q 'Opening the App' && pass "iPhone scan serves the signal interstitial" || fail "no interstitial served"
+# Asserted on the `/go/` hand-off, not on the heading: the copy is presentation and has already
+# been reworded once, which failed this line while the mechanism it guards was working fine.
+echo "$IOS_PAGE" | grep -q '/go/' && pass "iPhone scan serves the signal interstitial" || fail "no interstitial served"
 echo "$IOS_PAGE" | grep -qE '(^|[^a-z])(st|token|jwt)=' && fail "interstitial leaks a redeemable token" \
   || pass "interstitial carries nothing the app could spend"
 CLAIM=$(printf '%s' "$IOS_PAGE" | grep -o '/go/[A-Za-z0-9_-]\{6,\}' | head -1 | cut -d/ -f3)
@@ -118,14 +120,14 @@ CLAIM=$(printf '%s' "$IOS_PAGE" | grep -o '/go/[A-Za-z0-9_-]\{6,\}' | head -1 | 
 
 # What the page's script posts back, then the store hop itself.
 STORE=$(curl -s -A "$IOS" -o /dev/null -w '%{redirect_url}' \
-  "$API/go/$CLAIM?tz=Asia/Dhaka&sc=393x852@3&lang=en-US")
+  "$API/go/$CLAIM?tz=Asia/Dhaka&sc=393x852@3&lang=en-US&cores=8&dark=1")
 echo "$STORE" | grep -q '^https://apps.apple.com/app/id123456789$' \
   && pass "forwarding hop reaches the App Store listing, payload-free" || fail "go hop: $STORE"
 
 # Stage one. Minutes after the scan, the app opens for the first time and the publisher's
 # server presents the same signals. Nothing is paid here.
 FO=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d '{"ip":"::1","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US"}')
+  -d '{"ip":"::1","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US","cores":8,"dark":true}')
 [ "$(echo "$FO" | j .attributed)" = "true" ] && pass "iOS first open matched on the full fingerprint" || fail "first-open: $FO"
 [ "$(echo "$FO" | j .confidence)" = "100" ] && pass "every signal agreeing scores 100" || fail "confidence: $FO"
 INSTALL_ID=$(echo "$FO" | j .install_id)
@@ -270,6 +272,32 @@ curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 
 ENDED=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
 echo "$ENDED" | grep -q 'campaign-ended' && pass "exhausted budget stops serving scans" || fail "expected campaign-ended, got $ENDED"
 
+# ...and a signup that arrives one credit short must not burn the scan getting there. The
+# scan is consumed before the fee is known (it depends on `identified`), so a plain return
+# from the transaction used to commit that — leaving a real scanner permanently unattributable
+# even after the promoter topped the budget back up, with the account already created.
+# Two scans while the budget still allows them, then drain it with the first.
+curl -s -XPOST $API/v1/campaigns/$CAMP_ID/fund -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"coins":50}' >/dev/null
+ref_of() { printf '%s' "$1" | sed 's/.*&referrer=//' | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(decodeURIComponent(d.trim())))"; }
+R_A=$(ref_of "$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")")
+R_B=$(ref_of "$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")")
+curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"$R_A\",\"publisher_user_ref\":\"drain$S@x.com\",\"identified\":true}" >/dev/null
+BROKE=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"$R_B\",\"publisher_user_ref\":\"short$S@x.com\",\"identified\":true}" | j .reason)
+[ "$BROKE" = "budget_exhausted" ] && pass "signup past the budget is refused, not errored" || fail "expected budget_exhausted, got $BROKE"
+curl -s -XPOST $API/v1/campaigns/$CAMP_ID/fund -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"coins":50}' >/dev/null
+AGAIN=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"$R_B\",\"publisher_user_ref\":\"short$S@x.com\",\"identified\":true}" | j .attributed)
+[ "$AGAIN" = "true" ] && pass "refusal released the scan — attributable once the budget is topped up" || fail "scan burned by budget_exhausted"
+
+# Money in is replay-safe when the caller keys it: same key, one credit.
+BEFORE=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+for _ in 1 2; do curl -s -XPOST $API/v1/campaigns/$CAMP_ID/fund -H "Authorization: Bearer $PRO_TOKEN" \
+  -H 'Content-Type: application/json' -d "{\"coins\":25,\"idempotency_key\":\"e2e-$S\"}" >/dev/null; done
+AFTER=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+[ "$AFTER" = "$((BEFORE + 25))" ] && pass "retried funding credits once (idempotency key)" || fail "double-funded: $BEFORE → $AFTER"
+
 # A publisher whose store listing isn't configured must not burn print-run uses on a dead end.
 NOAPP=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
   -d "{\"name\":\"NoApp $S\",\"email\":\"noapp$S@t.com\",\"password\":\"password123\",\"type\":\"publisher\"}" | j .token)
@@ -324,8 +352,12 @@ A -XPATCH $API/v1/admin/orgs/$PUB_ID -H 'Content-Type: application/json' -d '{"s
 BACK=$(curl -s -o /dev/null -w '%{http_code}' $API/v1/campaigns -H "Authorization: Bearer $PUB_TOKEN")
 [ "$BACK" = "200" ] && pass "reinstating the org restores access" || fail "reinstate: $BACK"
 
+# Relative to whatever is left, not an absolute: this asserted `75` on the assumption that
+# section 9 had drained the campaign to exactly zero, which coupled it to every earlier
+# section's arithmetic and broke the moment one of them spent differently.
+PRE_ADJ=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 ADJ=$(A -XPOST $API/v1/admin/campaigns/$CAMP_ID/adjust -H 'Content-Type: application/json' -d '{"coins":75,"reason":"goodwill"}' | j .budget)
-[ "$ADJ" = "75" ] && pass "admin budget adjustment credits the campaign" || fail "adjust: $ADJ"
+[ "$ADJ" = "$((PRE_ADJ + 75))" ] && pass "admin budget adjustment credits the campaign" || fail "adjust: $PRE_ADJ → $ADJ"
 OVER=$(A -XPOST $API/v1/admin/campaigns/$CAMP_ID/adjust -H 'Content-Type: application/json' -d '{"coins":-999}' | j .statusCode)
 [ "$OVER" = "400" ] && pass "clawback below zero rejected" || fail "overdraw: $OVER"
 

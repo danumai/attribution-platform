@@ -54,11 +54,25 @@ export class AdminController {
         (SELECT count(*)::int FROM qr_codes WHERE voided)                 AS voided_codes,
         (SELECT coalesce(sum(coins),0)::int FROM redemptions)             AS coins_granted,
         (SELECT coalesce(-sum(amount),0)::int FROM ledger_entries WHERE account='external:funding') AS total_funded,
-        (SELECT coalesce(sum(amount),0)::int FROM ledger_entries)         AS ledger_sum`;
+        (SELECT coalesce(sum(amount),0)::int FROM ledger_entries)         AS ledger_sum,
+        -- The check ledger_sum cannot make. A global zero says the *book* is double-entry;
+        -- it says nothing about whether the cached account_balances row every money path
+        -- reads and locks still equals the entries behind it. Drift there spends real budget
+        -- against a wrong number, and it stays invisible until someone reconciles by hand --
+        -- which until now only the e2e script ever did.
+        -- ponytail: aggregates the whole ledger. Fine at admin-dashboard frequency; when the
+        -- book is big enough to feel it, move this to a scheduled reconciliation job that
+        -- alerts, rather than a number rendered on page load.
+        (SELECT count(*)::int FROM account_balances b
+           LEFT JOIN (SELECT account, sum(amount)::int AS s FROM ledger_entries GROUP BY account) e
+             ON e.account = b.account
+          WHERE b.balance <> coalesce(e.s, 0))                            AS drifted_accounts`;
     return {
       ...o,
       // ledger is double-entry: every ref sums to zero, so the whole book must too
       ledger_balanced: o.ledger_sum === 0,
+      /** false means a cached balance disagrees with its entries — stop spending, reconcile. */
+      balances_reconciled: o.drifted_accounts === 0,
       conversion_rate: o.scans ? +(o.redemptions / o.scans).toFixed(3) : 0,
     };
   }
@@ -380,19 +394,28 @@ export class AdminController {
   async adjust(
     @Session() s: SessionClaims,
     @Param('id') id: string,
-    @Body() b: { coins: number; reason?: string },
+    @Body() b: { coins: number; reason?: string; idempotency_key?: string },
   ) {
     if (!Number.isInteger(b.coins) || b.coins === 0 || Math.abs(b.coins) > 10_000_000)
       throw new BadRequestException('coins must be a non-zero integer within ±10000000');
     const campaign = await prisma.campaign.findUnique({ where: { id }, select: { id: true } });
     if (!campaign) throw new NotFoundException('campaign not found');
-    await prisma.$transaction(async (tx: Tx) => {
-      if ((await lockedBalance(tx, `campaign:${id}`)) + b.coins < 0)
-        throw new BadRequestException('adjustment would push budget below zero');
-      const ref = `admin-adjust:${id}:${Date.now()}`;
-      await ledger(tx, 'external:funding', -b.coins, ref);
-      await ledger(tx, `campaign:${id}`, b.coins, ref);
-    });
+    // A goodwill credit is a hand-driven money-in path, which makes a double-submitted form the
+    // likeliest way this endpoint ever pays twice. With a key the retry collides on
+    // `UNIQUE (account, ref)` instead; see the note on the portal's `fund`.
+    const key = str(b.idempotency_key, 'idempotency_key', 64, false);
+    await prisma
+      .$transaction(async (tx: Tx) => {
+        if ((await lockedBalance(tx, `campaign:${id}`)) + b.coins < 0)
+          throw new BadRequestException('adjustment would push budget below zero');
+        const ref = `admin-adjust:${id}:${key ?? Date.now()}`;
+        await ledger(tx, 'external:funding', -b.coins, ref);
+        await ledger(tx, `campaign:${id}`, b.coins, ref);
+      })
+      .catch((e: any) => {
+        if (e.code === 'P2002' && key) return; // already applied under this key
+        throw e;
+      });
     await audit(s.org_id, 'campaign.adjust', `campaign:${id}`, b);
     return { budget: await balance(`campaign:${id}`), reason: b.reason ?? null };
   }
@@ -422,6 +445,14 @@ export class AdminController {
         os: true,
         browser: true,
         device_type: true,
+        // What the hand-off screen measured. `tz`/`screen`/`cores`/`dark` are the evidence an
+        // iOS install is matched on, so support reading a disputed attribution needs to see
+        // exactly what the scan side of that comparison held.
+        tz: true,
+        screen: true,
+        cores: true,
+        dark: true,
+        client: true,
         consumed: true,
         qr_code: { select: { code: true } },
         redemption: { select: { coins: true, match_method: true } },
@@ -451,6 +482,11 @@ export class AdminController {
       os: s.os,
       browser: s.browser,
       device_type: s.device_type,
+      tz: s.tz,
+      screen: s.screen,
+      cores: s.cores,
+      dark: s.dark,
+      client: s.client,
       consumed: s.consumed,
       qr_code: s.qr_code.code,
       campaign_id: s.campaign.id,

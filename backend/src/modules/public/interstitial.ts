@@ -4,8 +4,8 @@
  * Everything else in this product is a console for the two businesses on either side of a
  * campaign. This page is for the person who just pointed a camera at a printed code, and it
  * exists for a functional reason before an aesthetic one: iOS has no install-referrer channel,
- * so the only moment we can read this device's timezone, screen geometry and locale is right
- * here, in a browser, before the App Store takes the session away.
+ * so the only moment we can read this device's timezone, screen geometry, core count and
+ * appearance is right here, in a browser, before the App Store takes the session away.
  *
  * Design world is DESIGN.md's "printed instrument", and it fits the moment exactly — the
  * scanner is holding the printed artifact this page is dressed as, seconds after scanning it.
@@ -14,6 +14,13 @@
  * feeds for exactly as long as the hold lasts. No spinner, because a spinner would be the one
  * element here that measures nothing.
  *
+ * The header row is the whole message in one line of furniture: the code plate the camera just
+ * read, a dotted route with traffic running along it, and the destination store's own tile at
+ * the far end. It answers "where am I going" without a sentence, and when the hold expires the
+ * route resolves — the card recedes and the store tile takes the screen. That hand-off is the
+ * same gesture whether the reader waited it out or pressed Continue, because it is the same
+ * event.
+ *
  * Three constraints shape the implementation and are worth stating, because each one rules
  * out something that would otherwise be the obvious choice:
  *
@@ -21,11 +28,14 @@
  *                    to a nonce for its own inline style and script and `data:` for the fibre
  *                    tile, and loads nothing over the network. No webfont — Archivo would be
  *                    a blocking request on a page that lives about a second, so the display
- *                    line is set in the system grotesque at the same weight and tracking.
+ *                    line is set in the system grotesque at the same weight and tracking. The
+ *                    store marks are drawn as inline SVG for the same reason: a store badge
+ *                    served from Apple's or Google's CDN would be a third-party request on the
+ *                    critical path, and the CSP forbids it outright.
  *
- *   Front-loaded.    The authored sequence has ~600ms before the redirect fires. A 1.4s
+ *   Front-loaded.    The authored sequence has ~900ms before the hand-off begins. A 1.4s
  *                    reveal like the landing page's would be half-seen. Everything lands
- *                    inside the first 500ms and the loop carries the remainder.
+ *                    inside the first 560ms and the loops carry the remainder.
  *
  *   Legible at rest. Under `prefers-reduced-motion`, and with script blocked entirely, every
  *                    word is on screen and the store link still works. Nothing here is hidden
@@ -33,17 +43,21 @@
  */
 
 /**
- * How long the page is held before it forwards.
+ * How long the page is held before the hand-off starts.
  *
- * Not decoration. Two things need it: `sendBeacon` has to get the signals away before the
- * document is discarded, and a `location.replace` fired in the same tick as page load is
- * unreliable inside in-app webviews — Instagram and TikTok both swallow it. A beat also
- * means the scanner sees their scan was accepted rather than a flash of buff card.
+ * Not decoration. Two things need it: the signals have to get away before the document is
+ * discarded, and a `location.replace` fired in the same tick as page load is unreliable inside
+ * in-app webviews — Instagram and TikTok both swallow it. A beat also means the scanner sees
+ * their scan was accepted rather than a flash of buff card.
  *
- * ponytail: fixed hold. If measured drop-off between scan and store install ever justifies
- * it, shorten it — but the signals must still be away before the document goes.
+ * ponytail: fixed hold. If measured drop-off between scan and store install ever justifies it,
+ * shorten it — `client.held_ms` on every scan row is exactly the measurement to shorten it
+ * against. The signals must still be away before the document goes.
  */
 export const HOLD_MS = 900;
+
+/** The hand-off itself: card away, store tile forward. Runs after the hold, then it navigates. */
+export const EXIT_MS = 340;
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -56,25 +70,94 @@ const esc = (s: string) =>
 const FIBRE =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23f)' opacity='.5'/%3E%3C/svg%3E\")";
 
+/** Which listing this scan is being handed to. Only the shape matters here, not the platform. */
+export type Store = 'ios' | 'android' | 'web';
+
+/**
+ * The destination's own mark, drawn rather than fetched.
+ *
+ * Both store marks are rendered in their real brand colours on their real ground, against the
+ * house rule that this world is duotone. A recoloured store badge is not the store badge — the
+ * whole job of this tile is instant recognition of where the next tap lands, and a press-blue
+ * Google Play triangle would be a mark nobody has ever seen.
+ *
+ * The stroke and facet geometry is authored, not traced: close enough to be unmistakable at
+ * 62px, and nothing here is passed off as the vendors' official asset.
+ */
+const MARKS: Record<Store, { heading: string; title: string; svg: string }> = {
+  ios: {
+    heading: 'Opening the App Store',
+    title: 'App Store',
+    // The stylised "A": two legs from a rounded apex, a crossbar, and the short descender tick
+    // that keeps it from reading as a plain letter.
+    svg: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#fff"
+       stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12.3 5.9 5.75 17.3"/><path d="M12.3 5.9 18.85 17.3"/>
+    <path d="M7.5 14.35h9.6"/><path d="M9.1 17.3 8.15 18.95"/>
+  </svg>`,
+  },
+  android: {
+    heading: 'Opening Google Play',
+    title: 'Google Play',
+    // Four facets folded about the spine: left, top, bottom, and the rhombus at the tip. Each
+    // one is a flat gradient, which is what gives the mark its fold without a single filter.
+    svg: `<svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
+    <defs>
+      <linearGradient id="pl" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#00A0FF"/><stop offset="1" stop-color="#00E3FF"/>
+      </linearGradient>
+      <linearGradient id="pt" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#00E176"/><stop offset="1" stop-color="#00C55B"/>
+      </linearGradient>
+      <linearGradient id="pb" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#C31162"/><stop offset="1" stop-color="#FF3A44"/>
+      </linearGradient>
+      <linearGradient id="pr" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#FFE000"/><stop offset="1" stop-color="#FF9C00"/>
+      </linearGradient>
+    </defs>
+    <path class="fl" fill="url(#pl)" d="M4.2 2.2 13.4 12 4.2 21.8Z"/>
+    <path class="ft" fill="url(#pt)" d="M4.2 2.2 18 9.35 13.4 12Z"/>
+    <path class="fb" fill="url(#pb)" d="M4.2 21.8 18 14.65 13.4 12Z"/>
+    <path class="fr" fill="url(#pr)" d="M18 9.35 20.9 11c.7.4.7 1.6 0 2l-2.9 1.65L13.4 12Z"/>
+  </svg>`,
+  },
+  web: {
+    // Filled in by the caller with the publisher's own name: "Opening their site" reads as
+    // nowhere, and this tile is the one case where the destination has no name of its own.
+    heading: '',
+    title: 'Website',
+    svg: `<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#fff"
+       stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8"/>
+    <path d="M12 3.6c2.4 2.4 3.5 5.4 3.5 8.4s-1.1 6-3.5 8.4c-2.4-2.4-3.5-5.4-3.5-8.4s1.1-6 3.5-8.4Z"/>
+  </svg>`,
+  },
+};
+
 export interface InterstitialCopy {
   /** the publisher's org name — the destination this scan routes to */
   destination: string;
   /** where the Continue link and the scripted redirect both point */
   go: string;
   nonce: string;
+  /** which listing the scan resolves to; picks the tile, the headline and the title */
+  store: Store;
 }
 
-export function interstitialHtml({ destination, go, nonce }: InterstitialCopy): string {
+export function interstitialHtml({ destination, go, nonce, store }: InterstitialCopy): string {
   const href = esc(go);
   const dest = esc(destination);
+  const mark = MARKS[store] ?? MARKS.web;
+  const heading = mark.heading || `Opening ${destination}`;
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>Opening the App Store — scan accepted</title>
+<title>${esc(heading)} — scan accepted</title>
 <!-- No-script and script-error fallback. Deliberately longer than the scripted hold so the
      two never race: script wins whenever it runs at all. -->
-<meta http-equiv="refresh" content="3;url=${href}">
+<meta http-equiv="refresh" content="4;url=${href}">
 <style nonce="${nonce}">
 /* The Committed Stock Rule: this world does not follow the OS theme, so every inherited
    value is restated. A half-inherited dark palette here is thermal ink on a dark ground —
@@ -87,7 +170,7 @@ export function interstitialHtml({ destination, go, nonce }: InterstitialCopy): 
   --blue:#1c39bb; --blue-lit:#2a4ae0; --blue-deep:#142a8c;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
-  --hold:${HOLD_MS}ms;
+  --hold:${HOLD_MS}ms; --exit:${EXIT_MS}ms;
 }
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -100,6 +183,7 @@ body{
   padding:clamp(16px,5vw,40px);
   padding-top:max(clamp(16px,5vw,40px),env(safe-area-inset-top));
   padding-bottom:max(clamp(16px,5vw,40px),env(safe-area-inset-bottom));
+  overflow:hidden; /* the hand-off scales the card past its resting box */
 }
 /* The desk has its own grain, coarser than the card's. */
 body::before{
@@ -131,19 +215,58 @@ body::before{
 .trim{height:1px; background:rgba(26,23,18,.26); position:relative; margin-bottom:22px}
 .trim::before{content:""; position:absolute; left:0; top:0; width:26px; height:1px; background:var(--blue)}
 
-/* ---------- code plate + reader ---------- */
+/* ---------- the route: code plate → store tile ---------- */
+.head{display:flex; align-items:center; gap:12px; margin-bottom:22px}
+
 .plate{
-  position:relative; width:62px; height:62px; border-radius:6px;
+  position:relative; width:62px; height:62px; flex:none; border-radius:6px;
   background:var(--stock-sunk); border:1px solid var(--rule);
-  display:grid; place-items:center; overflow:hidden; margin-bottom:20px;
+  display:grid; place-items:center; overflow:hidden;
 }
 .plate svg{display:block; color:var(--ink)}
 /* The validation loop: the reader crossing the plate. Same idiom as the console's scan
-   sweep, and the only looping element on the page. */
+   sweep, and the plate's only looping element. */
 .sweep{
   position:absolute; left:0; right:0; height:2px; top:0;
   background:var(--blue); box-shadow:0 0 0 1px rgba(28,57,187,.18);
   opacity:0;
+}
+
+/* The route is drawn as printed furniture — a perforated hairline, the same one the console
+   uses for a scale ceiling — with three units of traffic on it. At rest they are three dots
+   spaced along the line, which is a legible diagram of a redirect on its own. */
+.route{position:relative; flex:1; min-width:24px; height:16px}
+.route::before{
+  content:""; position:absolute; left:0; right:0; top:50%; height:1px; transform:translateY(-50%);
+  background:repeating-linear-gradient(90deg,var(--rule) 0 4px,transparent 4px 9px);
+}
+.route i{
+  position:absolute; top:50%; width:5px; height:5px; margin:-2.5px 0 0 -2.5px; border-radius:50%;
+  background:var(--blue); opacity:.3;
+}
+.route i:nth-child(1){left:20%}
+.route i:nth-child(2){left:50%}
+.route i:nth-child(3){left:80%}
+
+/* The destination's tile. A real app icon: squircle-ish radius, a lit top edge, a contact
+   shadow and a long cast — the one object on this page that is not printed, because it is a
+   picture of software rather than of stationery. */
+.tile{
+  position:relative; width:62px; height:62px; flex:none; border-radius:15px;
+  display:grid; place-items:center; overflow:hidden;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.45) inset, 0 0 0 1px rgba(26,23,18,.08),
+    0 1px 2px rgba(26,23,18,.16), 0 14px 24px -14px rgba(26,23,18,.6);
+}
+.tile svg{display:block; position:relative; z-index:1}
+.tile.ios{background:linear-gradient(155deg,#28b8ff,#0a63f5)}
+.tile.android{background:linear-gradient(155deg,#fff,#e9edf4)}
+.tile.web{background:linear-gradient(155deg,#39415a,#161b26)}
+/* Specular pass across the glass. Parked off the left edge so it is invisible at rest. */
+.tile::after{
+  content:""; position:absolute; inset:-30%; z-index:2; pointer-events:none;
+  background:linear-gradient(112deg,transparent 40%,rgba(255,255,255,.5) 50%,transparent 60%);
+  transform:translateX(-130%);
 }
 
 /* ---------- type ---------- */
@@ -198,14 +321,16 @@ h1{
 /* Landscape on a short phone: the card must never need scrolling to reach the key. */
 @media (max-height:560px){
   .coupon{padding-top:20px; padding-bottom:18px}
-  .plate{width:48px; height:48px; margin-bottom:14px}
+  .head{margin-bottom:14px}
+  .plate,.tile{width:48px; height:48px}
+  .tile{border-radius:12px}
   .fields{margin-top:18px; gap:12px}
   h1{font-size:24px}
   .lede{display:none}
 }
 
 /* ---------- the authored moment: the stub is read ----------
-   One rehearsed sequence, ~500ms end to end, exponential ease-out. Everything is fully
+   One rehearsed sequence, ~560ms end to end, exponential ease-out. Everything is fully
    legible with animation off — these rules only ever animate *to* the resting state. */
 @media (prefers-reduced-motion:no-preference){
   .pass{animation:land .34s cubic-bezier(.16,1,.3,1) both}
@@ -213,6 +338,16 @@ h1{
   /* The sweep runs twice inside the hold and stops — a loop nobody is left to watch is
      the kind of animation this system's motion rules exist to forbid. */
   .sweep{animation:sweep .62s cubic-bezier(.5,0,.5,1) .1s 2}
+  /* The tile is the last thing to arrive and it arrives from depth, because it is the only
+     object here that is not on the desk. */
+  .tile{animation:seat .42s cubic-bezier(.16,1,.3,1) .16s both}
+  .tile::after{animation:glint 1.15s cubic-bezier(.4,0,.2,1) .34s 2}
+  /* Traffic on the route, in the direction the scan is about to travel. Two passes, ending
+     as the hand-off takes over from it. */
+  .route i{animation:travel .8s cubic-bezier(.55,0,.45,1) 2}
+  .route i:nth-child(1){animation-delay:.20s}
+  .route i:nth-child(2){animation-delay:.33s}
+  .route i:nth-child(3){animation-delay:.46s}
   h1{animation:strike .38s cubic-bezier(.16,1,.3,1) .1s both}
   .lede{animation:land .3s cubic-bezier(.16,1,.3,1) .18s both}
   /* Stamped in sequence, the way the press lays plates. */
@@ -220,10 +355,22 @@ h1{
   .f2{animation:stamp .26s cubic-bezier(.16,1,.3,1) .32s both}
   .f3{animation:stamp .26s cubic-bezier(.16,1,.3,1) .40s both}
   .perf,.stub{animation:land .3s cubic-bezier(.16,1,.3,1) .3s both}
-  /* Honest progress: the rule feeds for exactly the hold, so it completes as the redirect
-     fires rather than looping past it like an indeterminate bar. Linear, because it is
+  /* Honest progress: the rule feeds for exactly the hold, so it completes as the hand-off
+     begins rather than looping past it like an indeterminate bar. Linear, because it is
      measuring elapsed time and an eased one would misreport it. */
   .bar{animation:feed var(--hold) linear .06s both}
+
+  /* ---------- the hand-off ----------
+     Set by script the moment the destination is committed to, from either trigger. The card
+     is finished with, so it recedes; the tile is what the reader is going to, so it comes
+     forward and holds full strength until the stock around it has gone. Standard ease-in-out,
+     not the arrival curve — this is a departure, and it should read as one. */
+  body.leaving .pass{animation:recede var(--exit) cubic-bezier(.4,0,.2,1) forwards}
+  body.leaving .tile{animation:launch var(--exit) cubic-bezier(.4,0,.2,1) forwards}
+  body.leaving .route i{animation:rush .26s cubic-bezier(.5,0,1,1) forwards}
+  body.leaving .route i:nth-child(2){animation-delay:.04s}
+  body.leaving .route i:nth-child(3){animation-delay:.08s}
+  body.leaving .bar{animation:none; transform:scaleX(1)}
 }
 @keyframes land{from{opacity:0; transform:translateY(9px); filter:blur(6px)}
   to{opacity:1; transform:none; filter:none}}
@@ -234,30 +381,52 @@ h1{
   to{opacity:1; transform:none}}
 @keyframes sweep{0%{opacity:0; top:2%} 12%{opacity:1} 88%{opacity:1} 100%{opacity:0; top:98%}}
 @keyframes feed{from{transform:scaleX(0)} to{transform:scaleX(1)}}
+/* Seated from above and behind, the way an icon settles onto a home screen. */
+@keyframes seat{from{opacity:0; transform:scale(.78) translateY(-6px)} to{opacity:1; transform:none}}
+@keyframes glint{0%{transform:translateX(-130%)} 55%,100%{transform:translateX(130%)}}
+@keyframes travel{0%{opacity:0} 18%{opacity:1} 82%{opacity:1}
+  100%{opacity:0; transform:translateX(46px)}}
+@keyframes rush{to{opacity:0; transform:translateX(80px) scaleX(2.4)}}
+/* Opacity holds through the first half so the tile is never dimmed by its own parent while
+   it is the thing being looked at. */
+@keyframes recede{0%{opacity:1; transform:none}
+  55%{opacity:1}
+  100%{opacity:0; transform:scale(.955) translateY(-10px); filter:blur(4px)}}
+@keyframes launch{to{transform:scale(1.42) translateY(-6px)}}
 </style></head>
 <body>
 <main class="pass">
   <div class="coupon">
     <div class="trim"></div>
 
-    <div class="plate" aria-hidden="true">
-      <!-- A QR finder pattern: the mark the camera actually locked onto a moment ago.
-           Drawn, not an icon font, so it inherits ink and needs no request. -->
-      <svg width="34" height="34" viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="2.4">
-        <rect x="1.2" y="1.2" width="11" height="11" rx="1.6"/>
-        <rect x="21.8" y="1.2" width="11" height="11" rx="1.6"/>
-        <rect x="1.2" y="21.8" width="11" height="11" rx="1.6"/>
-        <rect x="5.6" y="5.6" width="2.2" height="2.2" stroke-width="2.2"/>
-        <rect x="26.2" y="5.6" width="2.2" height="2.2" stroke-width="2.2"/>
-        <rect x="5.6" y="26.2" width="2.2" height="2.2" stroke-width="2.2"/>
-        <path d="M21.8 21.8h4M30 21.8h2.8M21.8 26.6h2.6M28 26.6h4.8M21.8 31.4h6M31 31.4h1.8"
-              stroke-linecap="round" stroke-width="2.2"/>
-      </svg>
-      <span class="sweep"></span>
+    <div class="head">
+      <div class="plate" aria-hidden="true">
+        <!-- A QR finder pattern: the mark the camera actually locked onto a moment ago.
+             Drawn, not an icon font, so it inherits ink and needs no request. -->
+        <svg width="34" height="34" viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="2.4">
+          <rect x="1.2" y="1.2" width="11" height="11" rx="1.6"/>
+          <rect x="21.8" y="1.2" width="11" height="11" rx="1.6"/>
+          <rect x="1.2" y="21.8" width="11" height="11" rx="1.6"/>
+          <rect x="5.6" y="5.6" width="2.2" height="2.2" stroke-width="2.2"/>
+          <rect x="26.2" y="5.6" width="2.2" height="2.2" stroke-width="2.2"/>
+          <rect x="5.6" y="26.2" width="2.2" height="2.2" stroke-width="2.2"/>
+          <path d="M21.8 21.8h4M30 21.8h2.8M21.8 26.6h2.6M28 26.6h4.8M21.8 31.4h6M31 31.4h1.8"
+                stroke-linecap="round" stroke-width="2.2"/>
+        </svg>
+        <span class="sweep"></span>
+      </div>
+
+      <div class="route" aria-hidden="true"><i></i><i></i><i></i></div>
+
+      <div class="tile ${store}" role="img" aria-label="${esc(mark.title)}">${mark.svg}</div>
     </div>
 
-    <h1>Opening the App&nbsp;Store</h1>
-    <p class="lede">Your scan was accepted. Install the app and your welcome bonus is waiting inside it.</p>
+    <h1>${esc(heading).replace(/ ([^ ]+)$/, '&nbsp;$1')}</h1>
+    <p class="lede">${
+      store === 'web'
+        ? 'Your scan was accepted. Your welcome bonus is waiting on the other side.'
+        : 'Your scan was accepted. Install the app and your welcome bonus is waiting inside it.'
+    }</p>
 
     <div class="fields">
       <div class="f1">
@@ -299,7 +468,8 @@ h1{
 
 <script nonce="${nonce}">
 (function(){
-  var GO = ${JSON.stringify(go)}, HOLD = ${HOLD_MS};
+  var GO = ${JSON.stringify(go)}, HOLD = ${HOLD_MS}, EXIT = ${EXIT_MS};
+  var t0 = Date.now();
 
   // Local clock, printed as a field. Purely presentational — the row this page actually
   // writes is timestamped server-side, where a device cannot lie about it.
@@ -309,36 +479,91 @@ h1{
     document.getElementById('issued').textContent = p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
   }catch(e){}
 
-  // The three signals this page exists to collect. Each in its own try: an older WebView
-  // without Intl must not cost us the screen geometry, and a throw here would strand the
-  // scanner on a page whose only job is to leave.
+  var mq = function(s){ try{ return !!(window.matchMedia && window.matchMedia(s).matches); }catch(e){ return false; } };
+  var reduced = mq('(prefers-reduced-motion: reduce)');
+
+  /**
+   * The signals this page exists to collect.
+   *
+   * Each read is wrapped, and that is not defensiveness for its own sake: this runs in every
+   * in-app webview there is, some of them years behind, and one throw would strand the scanner
+   * on a page whose only job is to leave. A missing signal costs a report bucket or a few
+   * points of match confidence. A thrown one costs the install.
+   *
+   * Five of these are scored at first open (tz, sc, lang, cores, dark) and must therefore be
+   * things a native SDK can also report. The rest are reporting only — deliberately, because a
+   * signal that means something different in a browser than in an app is worse than no signal:
+   * it does not merely fail to match, it drags a real match below the acceptance line.
+   */
   var q = [];
-  try{ var z = Intl.DateTimeFormat().resolvedOptions().timeZone; if(z) q.push('tz='+encodeURIComponent(z)); }catch(e){}
-  try{
+  var add = function(k, v){
+    if(v === null || v === undefined || v === '' || v !== v) return;
+    q.push(k + '=' + encodeURIComponent(v));
+  };
+  var take = function(k, fn){ try{ add(k, fn()); }catch(e){} };
+
+  // --- scored: the handset, as both a browser and an SDK can describe it ---
+  take('tz',    function(){ return Intl.DateTimeFormat().resolvedOptions().timeZone; });
+  take('sc',    function(){
     var w = screen.width, h = screen.height, r = window.devicePixelRatio || 1;
     // Orientation-normalised at the source: a phone held sideways at scan time and upright
     // at first open is the same phone, and w×h unsorted would say otherwise.
-    if(w && h) q.push('sc='+encodeURIComponent(Math.min(w,h)+'x'+Math.max(w,h)+'@'+r));
-  }catch(e){}
-  try{ if(navigator.language) q.push('lang='+encodeURIComponent(navigator.language)); }catch(e){}
-  var url = GO + (q.length ? '?' + q.join('&') : '');
+    return w && h ? Math.min(w,h) + 'x' + Math.max(w,h) + '@' + r : null;
+  });
+  take('lang',  function(){ return navigator.language; });
+  take('cores', function(){ return navigator.hardwareConcurrency; });
+  add('dark', mq('(prefers-color-scheme: dark)') ? 1 : 0);
 
-  // Someone who taps Continue has opted out of waiting — let the anchor navigate and cancel
-  // the timer, rather than having a scheduled replace() fire over the top of their tap.
-  var done = false;
+  // --- reporting only ---
+  take('tzo',   function(){ return -new Date().getTimezoneOffset(); });
+  take('langs', function(){
+    var l = navigator.languages;
+    return l && l.length ? l.slice(0,6).join(',').toLowerCase() : null;
+  });
+  take('vp',    function(){ return Math.round(innerWidth) + 'x' + Math.round(innerHeight); });
+  take('cd',    function(){ return screen.colorDepth; });
+  take('td',    function(){ return navigator.maxTouchPoints; });
+  take('dm',    function(){ return navigator.deviceMemory; });
+  take('pf',    function(){ return String(navigator.platform).replace(/[^A-Za-z0-9._-]+/g,'-'); });
+  take('net',   function(){
+    var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    return c && c.effectiveType;
+  });
+  add('sa', (navigator.standalone === true || mq('(display-mode: standalone)')) ? 1 : 0);
+  add('rm', reduced ? 1 : 0);
+
+  var base = GO + (q.length ? '?' + q.join('&') : '');
+  var sep  = q.length ? '&' : '?';
+
+  // Someone who taps Continue has opted out of waiting — but they still get the hand-off, so
+  // the tap and the timeout resolve into one event rather than two competing navigations. The
+  // href is set now regardless: if anything below throws, or the tap lands before this script
+  // finishes, the anchor is still a real link to a real URL carrying the signals.
   var link = document.querySelector('.go');
-  if(link){
-    link.setAttribute('href', url);
-    link.addEventListener('click', function(){ done = true; });
-  }
+  if(link) link.setAttribute('href', base);
 
-  // Reduced motion means there is no sequence left to watch, so there is nothing to hold
-  // for beyond getting the signals away. Go almost immediately.
-  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  setTimeout(function(){
-    // replace(), not assign(): coming back from the App Store must not land here again.
-    if(!done) location.replace(url);
-  }, reduced ? 120 : HOLD);
+  var gone = false;
+  var leave = function(via){
+    if(gone) return;
+    gone = true;
+    var url = base + sep + 'via=' + via + '&held=' + (Date.now() - t0);
+    // Reduced motion means there is no sequence left to watch, so there is nothing to hold
+    // for beyond getting the signals away.
+    if(reduced){
+      // replace(), not assign(): coming back from the store must not land here again.
+      location.replace(url);
+      return;
+    }
+    document.body.className = 'leaving';
+    setTimeout(function(){ location.replace(url); }, EXIT);
+  };
+
+  if(link) link.addEventListener('click', function(ev){
+    ev.preventDefault();
+    leave('tap');
+  });
+
+  setTimeout(function(){ leave('auto'); }, reduced ? 120 : HOLD);
 })();
 </script>
 </body></html>`;

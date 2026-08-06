@@ -3,7 +3,7 @@
 // Run: npm run test:unit --workspace backend
 import { strict as assert } from 'assert';
 import { Request } from 'express';
-import { scanSignals } from '../src/common/signals';
+import { clientSignals, scanSignals } from '../src/common/signals';
 
 const req = (headers: Record<string, string>) => ({ headers }) as unknown as Request;
 
@@ -81,5 +81,33 @@ const blank = scanSignals(req({}));
 assert.equal(blank.os, null);
 assert.equal(blank.browser, null);
 assert.equal(blank.device_type, 'desktop');
+
+// ---------- what the hand-off screen measured ----------
+// Everything here arrives from a phone via a query string, so the test that matters is what
+// happens to values a phone should never have sent.
+const c = clientSignals({
+  vp: '390x664', tzo: '360', td: '5', langs: 'en-us,bn-bd', net: '4g',
+  dm: '8', cd: '24', pf: 'iPhone', sa: '0', rm: '1', held: '900', via: 'tap',
+})!;
+assert.equal(c.viewport, '390x664');
+assert.equal(c.utc_offset, 360);
+assert.equal(c.touch_points, 5);
+assert.equal(c.languages, 'en-us,bn-bd', 'the list keeps its commas');
+assert.equal(c.platform, 'iphone');
+assert.equal(c.standalone, false, 'sa=0 is an answer, not absence');
+assert.equal(c.reduced_motion, true);
+assert.equal(c.held_ms, 900);
+assert.equal(c.exit, 'tap');
+
+// Nothing measured is NULL, not an object of nulls: an empty bag in the column would read as
+// "measured nothing" when the truth is "was never asked".
+assert.equal(clientSignals({}), null);
+
+// Junk is dropped per key rather than poisoning the row — one bad value must not cost the rest.
+const junk = clientSignals({
+  vp: '<script>', tzo: '99999', td: 'lots', net: 'FOUR G', held: '-1', via: 'sideways',
+  cd: '24',
+})!;
+assert.deepEqual(junk, { color_depth: 24 });
 
 console.log('signals.test.ts ok');

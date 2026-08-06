@@ -5,9 +5,12 @@ import { strict as assert } from 'assert';
 import {
   BASE,
   DeviceSignals,
+  WEIGHTS,
   claimIdFromReferrer,
   decide,
   detectPlatform,
+  normCores,
+  normDark,
   normLang,
   normScreen,
   normTz,
@@ -74,21 +77,51 @@ assert.equal(normLang('en-US,en;q=0.9,bn;q=0.8'), 'en-us', 'Accept-Language head
 assert.equal(normLang('bn'), 'bn');
 for (const bad of ['', 'english-language-tag-far-too-long', '!!']) assert.equal(normLang(bad), null);
 
+// Core count crosses as an integer or not at all — a float or an out-of-range claim is a
+// caller widening a fingerprint dimension, not a device.
+assert.equal(normCores(6), 6);
+assert.equal(normCores(' 8 '), 8, 'query strings arrive as text');
+for (const bad of [0, 513, 4.5, 'many', '', null, NaN]) assert.equal(normCores(bad), null);
+
+// Appearance is a bit, and `false` is an answer — a truthiness test here would silently drop
+// every light-mode device and score it as "withheld".
+assert.equal(normDark(true), true);
+assert.equal(normDark('1'), true);
+assert.equal(normDark('dark'), true);
+assert.equal(normDark(false), false);
+assert.equal(normDark('0'), false);
+assert.equal(normDark('light'), false);
+for (const bad of ['maybe', '', null, undefined, 2]) assert.equal(normDark(bad), null);
+
 // ---------- the decision that spends money ----------
-const OPEN: DeviceSignals = { tz: 'Asia/Dhaka', screen: '393x852@3', language: 'en-us' };
+const OPEN: DeviceSignals = {
+  tz: 'Asia/Dhaka',
+  screen: '393x852@3',
+  language: 'en-us',
+  cores: 8,
+  dark: true,
+};
 const MIN = 70; // the shipped MIN_CONFIDENCE default
 
 // A scan with nothing but IP + platform behind it scores the base and is refused. This is the
 // case the whole scoring change exists for: an IP is a postcode, not an identity.
-const bare: DeviceSignals = { tz: null, screen: null, language: null };
+const bare: DeviceSignals = { tz: null, screen: null, language: null, cores: null, dark: null };
 assert.equal(score(bare, OPEN), BASE);
 assert.ok(BASE < MIN, 'IP + platform alone must never clear the floor on its own');
 let d = decide([bare], OPEN, MIN);
 assert.ok('reason' in d && d.reason === 'low_confidence', 'bare fingerprint must be refused');
 assert.equal('confidence' in d ? d.confidence : null, BASE, 'the refusal still reports its score');
 
-// Every signal agreeing is as good as a probabilistic match gets.
+// Every signal agreeing is as good as a probabilistic match gets, and it tops out at exactly
+// 100 — the scale the console prints as a percentage and MIN_CONFIDENCE is compared against.
 assert.equal(score(OPEN, OPEN), 100);
+assert.equal(BASE + Object.values(WEIGHTS).reduce((a, b) => a + b, 0), 100);
+
+// `dark: false` is a fact the device reported, not a missing signal. Scoring it as absence
+// would throw away the one bit that most often splits two candidates on the same NAT.
+const light = { ...bare, dark: false };
+assert.equal(score(light, { ...OPEN, dark: false }), BASE + WEIGHTS.dark, 'false must score');
+assert.equal(score(light, OPEN), BASE, 'light against dark is a disagreement, not a match');
 
 // Partial agreement, and the ordering the weights are meant to produce: screen alone (the only
 // signal with real entropy) must outweigh timezone and locale together.
@@ -102,8 +135,8 @@ assert.equal(score({ ...bare, tz: 'Europe/London' }, OPEN), BASE, 'a wrong signa
 assert.equal(score(OPEN, { ...bare }), BASE, 'a signal the device withheld scores nothing');
 
 // The single best candidate wins outright.
-const strong = { tz: 'Asia/Dhaka', screen: '393x852@3', language: 'en-us' };
-const weak = { tz: 'Asia/Dhaka', screen: null, language: null };
+const strong: DeviceSignals = { ...OPEN };
+const weak: DeviceSignals = { ...bare, tz: 'Asia/Dhaka' };
 d = decide([weak, strong], OPEN, MIN);
 assert.ok(!('reason' in d) && d.scan === strong && d.confidence === 100);
 

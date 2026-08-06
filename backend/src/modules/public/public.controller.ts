@@ -16,15 +16,17 @@ import { BASE_URL, FRONTEND_URL } from '../../config';
 import { QrStyle, isAdvanced, renderPng, renderSvg, validateStyle } from '../../common/qr';
 import {
   detectPlatform,
+  normCores,
+  normDark,
   normLang,
   normScreen,
   normTz,
   storeUrl,
 } from '../../common/attribution';
 import { clientIp, ipHash, rateLimited } from '../../common/security';
-import { interstitialHtml } from './interstitial';
+import { Store, interstitialHtml } from './interstitial';
 import { randomBytes } from 'crypto';
-import { scanSignals } from '../../common/signals';
+import { clientSignals, scanSignals } from '../../common/signals';
 import { balance } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
 import { newClaimId } from '../auth/tokens';
@@ -144,7 +146,7 @@ export class PublicController {
     // scan, so a hop would cost conversion and buy nothing. Desktop and app-less publishers
     // skip it too — there is no install to attribute either way.
     if (platform === 'ios' && campaign.partnership.publisher.ios_app_id)
-      return this.interstitial(res, claim_id, campaign.partnership.publisher.name);
+      return this.interstitial(res, claim_id, campaign.partnership.publisher.name, 'ios');
 
     // Straight to the store listing. No token, no code, no query the app can read and spend —
     // on Android the claim id travels only inside Play's install-referrer channel, which is
@@ -166,7 +168,7 @@ export class PublicController {
    * interpolated into an href and a script literal, so the shape is asserted rather than
    * assumed. A change to the generator must fail here, not open an injection point.
    */
-  private interstitial(res: Response, claim_id: string, destination: string) {
+  private interstitial(res: Response, claim_id: string, destination: string, store: Store) {
     if (!/^[A-Za-z0-9_-]{6,64}$/.test(claim_id)) throw new Error('malformed claim id');
     const nonce = randomBytes(16).toString('base64');
     // Overrides the global `default-src 'none'`, which would otherwise block the inline script
@@ -181,7 +183,7 @@ export class PublicController {
     // Never cached: every render carries a different claim id and a single-use nonce.
     res.setHeader('Cache-Control', 'no-store');
     res.send(
-      interstitialHtml({ destination, go: `${BASE_URL}/go/${claim_id}`, nonce }),
+      interstitialHtml({ destination, go: `${BASE_URL}/go/${claim_id}`, nonce, store }),
     );
   }
 
@@ -195,9 +197,10 @@ export class PublicController {
   @Get('go/:claimId')
   async go(
     @Param('claimId') claimId: string,
-    @Query('tz') tz: string,
-    @Query('sc') sc: string,
-    @Query('lang') lang: string,
+    // The whole query rather than a parameter each: the page sends a dozen and a half signals
+    // and every one of them is optional on some engine, so an argument list would be eighteen
+    // strings that only `normX`/`clientSignals` are allowed to interpret anyway.
+    @Query() q: Record<string, string>,
     @Req() req: Request,
     @Res() res: Response,
   ) {
@@ -229,13 +232,18 @@ export class PublicController {
     // Normalised here rather than at match time so the column only ever holds comparable
     // values — a scan and a first-open that spell the same screen differently never match.
     const signals = {
-      tz: normTz(tz),
-      screen: normScreen(sc),
-      language: normLang(lang),
+      tz: normTz(q.tz),
+      screen: normScreen(q.sc),
+      language: normLang(q.lang),
+      cores: normCores(q.cores),
+      dark: normDark(q.dark),
+      // Reporting only, and stored whole rather than merged: the page writes this column once
+      // and nothing else ever reads it back to score anything.
+      client: clientSignals(q),
     };
     // `consumed` guard: once an install is bound to this scan the signals are evidence of what
     // that decision was made on, and a replayed link must not rewrite them after the fact.
-    if (!scan.consumed && (signals.tz || signals.screen || signals.language))
+    if (!scan.consumed && Object.values(signals).some((v) => v !== null))
       await prisma.scan.updateMany({
         where: { id: scan.id, consumed: false },
         // language already holds the Accept-Language value; navigator.language overwrites it

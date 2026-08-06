@@ -207,18 +207,31 @@ export class PortalController {
   async fund(
     @Session() s: SessionClaims,
     @Param('id') id: string,
-    @Body() b: { coins: number },
+    @Body() b: { coins: number; idempotency_key?: string },
   ) {
     if (!ALLOW_SELF_FUNDING)
       throw new ForbiddenException('direct funding is disabled — fund through checkout');
     await this.promoterCampaign(s.org_id, id);
     if (!Number.isInteger(b.coins) || b.coins < 1 || b.coins > 10_000_000)
       throw new BadRequestException('coins must be 1–10000000');
-    await prisma.$transaction(async (tx) => {
-      const ref = `fund:${id}:${Date.now()}`;
-      await ledger(tx, 'external:funding', -b.coins, ref);
-      await ledger(tx, `campaign:${id}`, b.coins, ref);
-    });
+    // Keyed on the caller's own key when it sends one, so a retried request — a double-clicked
+    // button, a proxy retry, an at-least-once job — collides on `UNIQUE (account, ref)` and
+    // credits nothing twice. Without a key the ref is still per-request, which is the old
+    // behaviour: a retry funds again. The PSP checkout that replaces this endpoint keys on the
+    // payment intent id, which is exactly the same shape.
+    const key = str(b.idempotency_key, 'idempotency_key', 64, false);
+    await prisma
+      .$transaction(async (tx) => {
+        const ref = `fund:${id}:${key ?? Date.now()}`;
+        await ledger(tx, 'external:funding', -b.coins, ref);
+        await ledger(tx, `campaign:${id}`, b.coins, ref);
+      })
+      .catch((e: any) => {
+        // Same key, same campaign: the first call already landed. Answering with the current
+        // budget is the honest reply — the caller asked for this credit and it is there.
+        if (e.code === 'P2002' && key) return;
+        throw e;
+      });
     // Money entered the system without a payment record; the ledger alone does not say who
     // asked for it.
     await audit(s.org_id, 'campaign.fund', `campaign:${id}`, { coins: b.coins });
