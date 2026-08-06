@@ -81,10 +81,20 @@ light mode the same trap runs the other way, via `sunk`.
 `card-alt` in its own scheme.** The figures below are the worst case across those
 four, and that is what the test enforces.
 
-Applying this rule during review corrected four values that passed against the canvas
-and failed on `card-alt`: dark `mut` `#9E968A` → `#ADA598` (4.4 → 4.8), dark
-`accent-text` `#DF8377` → `#E68C80` (4.2 → 4.7), dark `bad` `#E5786A` → `#EA887A`
-(4.0 → 4.6), and light `mut` `#6B6459` → `#625B50` (4.0 on `sunk` → 4.6).
+Applying this rule corrected six values that passed against the canvas and failed on
+another surface. Every figure in the tables below is machine-measured, not estimated.
+
+| Token | Was | Now | Failed on |
+|---|---|---|---|
+| dark `mut` | `#9E968A` | `#ADA598` | `card-alt` 4.42 → 4.76 |
+| dark `accent-text` | `#DF8377` | `#E68C80` | `card-alt` 4.15 → 4.66 |
+| dark `bad` | `#E5786A` | `#EA887A` | `card-alt` 4.00 → 4.59 |
+| light `mut` | `#6B6459` | `#625B50` | `sunk` 4.04 → 4.64 |
+| light `ok` | `#4F7A3C` | `#3F6230` | `sunk` 3.48 → 4.84 |
+| light `warn` | `#8A5A12` | `#7E520F` | `sunk` 4.09 → 4.69 |
+
+The last two were caught only when the ratios were computed programmatically rather
+than by eye, which is the argument for the test existing at all.
 
 ### Dark (default) — canvas `#2B2825`
 
@@ -97,16 +107,18 @@ and failed on `card-alt`: dark `mut` `#9E968A` → `#ADA598` (4.4 → 4.8), dark
 | `card-high` | `#454039` | — |
 | `line-soft` | `#3B3630` | — |
 | `line` | `#4A443C` | — |
-| `ink` | `#F2EEE7` | 11.0:1 |
-| `ink-soft` | `#C8C1B6` | 6.5:1 |
-| `mut` | `#ADA598` | 4.8:1 |
+| `ink` | `#F2EEE7` | 10.04:1 |
+| `ink-soft` | `#C8C1B6` | 6.50:1 |
+| `mut` | `#ADA598` | 4.76:1 |
 | `accent` (fill) | `#B04034` | fill only |
 | `accent-hover` | `#C24A3D` | fill only |
-| `accent-on` | `#FBF8F2` | 5.5:1 on the fill |
-| `accent-text` | `#E68C80` | 4.7:1 |
-| `ok` | `#8FAE7C` | 4.7:1 |
-| `warn` | `#D9A441` | 5.2:1 |
-| `bad` | `#EA887A` | 4.6:1 |
+| `accent-on` | `#FBF8F2` | 5.46:1 on the fill |
+| `accent-text` | `#E68C80` | 4.66:1 |
+| `ok` | `#8FAE7C` | 4.71:1 |
+| `warn` | `#D9A441` | 5.16:1 |
+| `bad` | `#EA887A` | 4.59:1 |
+
+Worst case in dark is always `card-alt`, the lightest surface.
 
 ### Light — canvas `#E7E2DA`
 
@@ -119,18 +131,18 @@ and failed on `card-alt`: dark `mut` `#9E968A` → `#ADA598` (4.4 → 4.8), dark
 | `card-high` | `#FFFFFF` | — |
 | `line-soft` | `#E0DAD1` | — |
 | `line` | `#D3CCC1` | — |
-| `ink` | `#2B2825` | 11.3:1 |
-| `ink-soft` | `#56504A` | 6.3:1 |
-| `mut` | `#625B50` | 4.6:1 |
+| `ink` | `#2B2825` | 10.14:1 |
+| `ink-soft` | `#56504A` | 5.50:1 |
+| `mut` | `#625B50` | 4.64:1 |
 | `accent` (fill) | `#93332A` | fill only |
 | `accent-hover` | `#7E2B23` | fill only |
-| `accent-on` | `#FBF8F2` | 7.2:1 on the fill |
-| `accent-text` | `#93332A` | 5.3:1 |
-| `ok` | `#4F7A3C` | 4.6:1 |
-| `warn` | `#8A5A12` | 5.4:1 |
-| `bad` | `#A83226` | 5.5:1 |
+| `accent-on` | `#FBF8F2` | 7.21:1 on the fill |
+| `accent-text` | `#93332A` | 5.29:1 |
+| `ok` | `#3F6230` | 4.84:1 |
+| `warn` | `#7E520F` | 4.69:1 |
+| `bad` | `#A83226` | 4.62:1 |
 
-In light mode the worst case is `sunk`, the only surface darker than the canvas.
+Worst case in light is always `sunk`, the only surface darker than the canvas.
 
 ### The accent splits in two — the critical rule
 
