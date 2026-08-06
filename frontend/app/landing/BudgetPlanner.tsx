@@ -23,7 +23,7 @@ export default function BudgetPlanner() {
   const pct = (v: number, min: number, max: number) => `${((v - min) / (max - min)) * 100}%`;
 
   return (
-    <div className={lp.planner} data-spot>
+    <div className={lp.planner}>
       <div className={lp.plannerControls}>
         <label className={lp.plannerField}>
           <span className={lp.plannerLabel}>

@@ -25,12 +25,14 @@ export const passShell = 'relative rounded-2xl border border-line bg-card shadow
 /* ---- field pairs ---- */
 
 export const field = 'grid gap-1';
-export const fieldTerm = 'text-stamp text-mut';
+/* Landing labels are wide-tracked caps — the exhibition-catalogue register. The console
+   keeps sentence case; see the two label tokens in globals.css. */
+export const fieldTerm = 'text-stamp-caps uppercase text-mut';
 export const fieldValue = 'm-0 font-mono text-[13px] tracking-[-0.01em] text-ink tabular-nums';
 
 /* ---- nav ---- */
 
-export const nav = 'lp-nav sticky top-0 z-30 border-b border-line bg-paper/85 py-3.5 backdrop-blur-xl';
+export const nav = 'lp-nav sticky top-0 z-30 border-b border-line bg-canvas/85 py-3.5 backdrop-blur-xl';
 export const navInner = cx(wrap, 'flex items-center justify-between gap-4.5');
 /** reading progress, in the accent */
 export const navProgress =
@@ -39,16 +41,17 @@ export const navProgress =
 export const mark =
   'group flex items-center gap-2.5 text-sm font-semibold tracking-[-0.015em] whitespace-nowrap text-ink no-underline ' +
   'max-[480px]:text-[13px] ' +
-  '[&_svg]:size-7 [&_svg]:shrink-0 [&_svg]:rounded-lg [&_svg]:bg-accent [&_svg]:fill-accent-ink [&_svg]:p-1.5 ' +
+  '[&_svg]:size-7 [&_svg]:shrink-0 [&_svg]:rounded-lg [&_svg]:bg-accent [&_svg]:fill-accent-on [&_svg]:p-1.5 ' +
   '[&_svg]:transition-transform [&_svg]:duration-200 hover:[&_svg]:-rotate-6';
 
 /* ---- buttons: the console's controls, at landing scale ---- */
 
 const lpPad = `${btnBox} px-5 py-2.5 text-sm font-semibold`;
 
-/* `lp-btn` is a motion hook for the sheen that crosses the primary action on hover — see
-   landing.css. Only the accent button carries it; a sheen on a ghost button is noise. */
-export const btn = cx(btnBase, 'lp-btn overflow-hidden', lpPad, inkAccent, 'hover:shadow-key-lit active:translate-y-px');
+/* No sheen and no glow. A gleam sweeping across the primary action reads as a shiny web
+   button, which is the register this theme is deliberately not in — the button earns its
+   emphasis from being the only madder fill on the page. */
+export const btn = cx(btnBase, lpPad, inkAccent, 'active:translate-y-px');
 export const btnGhost = cx(btnBase, lpPad, inkGhost, 'active:translate-y-px');
 export const btnLg = 'px-6 py-3.25 text-[15px]';
 
@@ -56,10 +59,16 @@ export const btnLg = 'px-6 py-3.25 text-[15px]';
 
 export const hero = 'lp-hero relative isolate pt-16 pb-4 max-[720px]:pt-9';
 
-/** ambient backdrop in the system's own inks — this product's colours, not a generic wash */
-export const heroGlow =
-  'lp-hero-glow pointer-events-none absolute inset-[-120px_-10%_auto_-10%] -z-1 h-[640px] opacity-80 blur-[8px] ' +
-  'bg-[radial-gradient(42%_52%_at_16%_18%,color-mix(in_srgb,var(--color-accent)_18%,transparent),transparent_70%),radial-gradient(36%_46%_at_84%_8%,color-mix(in_srgb,var(--color-warn-lit)_12%,transparent),transparent_72%),radial-gradient(38%_48%_at_58%_62%,color-mix(in_srgb,var(--color-ok)_10%,transparent),transparent_74%)]';
+/** A single faint value shift behind the hero, not a coloured wash.
+ *
+ *  Three tinted radial glows was the loudest generic-SaaS signature on the page, and on a
+ *  mid-grey canvas coloured light does not read as atmosphere — it reads as a smudge. Depth
+ *  here comes from value, the same way it does on every other surface in the system. Being
+ *  a static gradient, it also no longer needs a client component to gate an infinite
+ *  animation while off screen. */
+export const heroWash =
+  'pointer-events-none absolute inset-[-120px_-10%_auto_-10%] -z-1 h-[640px] ' +
+  'bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--color-card)_70%,transparent),transparent_72%)]';
 
 /** The hero is a two-column composition, not a bordered card. The card is the proof panel on
  *  the right; wrapping the argument in one too made the whole viewport a single object. */
@@ -75,7 +84,7 @@ export const routing =
   'max-[720px]:gap-x-5 max-[720px]:gap-y-2.5 max-[720px]:pb-5 max-[720px]:mb-6';
 
 export const h1 =
-  'lp-h1 m-0 text-hero text-balance text-ink [&_em]:not-italic [&_em]:text-accent';
+  'lp-h1 m-0 text-hero text-balance text-ink [&_em]:not-italic [&_em]:text-accent-text';
 
 export const lede =
   'lp-lede mt-6 max-w-[52ch] text-lede text-ink-soft [&_b]:font-semibold [&_b]:text-ink';
@@ -92,16 +101,16 @@ export const stub = cx(
 );
 
 export const codePlate =
-  'lp-code relative overflow-hidden rounded-xl border border-line bg-card-sunk p-5 ' +
+  'lp-code relative overflow-hidden rounded-xl border border-line bg-sunk p-5 ' +
   '[&_svg]:block [&_svg]:h-auto [&_svg]:w-full [&_svg]:fill-ink';
 
 export const scanSweep =
-  'lp-scan absolute inset-x-0 top-0 h-[44%] border-b-2 border-accent opacity-0 ' +
+  'lp-scan absolute inset-x-0 top-0 h-[44%] border-b-2 border-accent-text opacity-0 ' +
   'bg-[linear-gradient(to_bottom,transparent,color-mix(in_srgb,var(--color-accent)_14%,transparent)_74%,color-mix(in_srgb,var(--color-accent)_30%,transparent))]';
 
 /** the plate takes the reader's ring the instant the sweep clears the code */
 export const codeRing =
-  'lp-code-ring absolute inset-0 rounded-xl opacity-0 shadow-[0_0_0_2px_var(--color-accent)_inset]';
+  'lp-code-ring absolute inset-0 rounded-xl opacity-0 shadow-[0_0_0_2px_var(--color-accent-text)_inset]';
 
 export const stubFields = 'lp-stub-fields m-0 grid grid-cols-2 gap-4';
 
@@ -116,7 +125,7 @@ export const board = cx('lp-board mt-5 overflow-hidden', passShell);
 
 export const boardHead =
   'flex items-center justify-between gap-3 border-b border-line bg-card-alt px-5 py-3';
-export const boardTitle = 'text-stamp font-semibold text-ink-soft';
+export const boardTitle = 'text-stamp-caps uppercase font-semibold text-ink-soft';
 export const tag =
   'rounded-full border border-line bg-card px-2.5 py-0.5 text-[11px] font-medium text-mut';
 
@@ -133,7 +142,7 @@ export const boardCoins =
 
 export const boardFoot =
   'flex items-baseline justify-between gap-3 border-t border-line bg-card-alt px-5 py-3 ' +
-  '[&>span]:text-stamp [&>span]:text-mut ' +
+  '[&>span]:text-stamp-caps [&>span]:uppercase [&>span]:text-mut ' +
   '[&_b]:font-mono [&_b]:text-[17px] [&_b]:font-semibold [&_b]:text-ink [&_b]:tabular-nums';
 
 const tierBase = 'justify-self-start rounded-full border px-2.5 py-0.5 text-[11px] font-medium capitalize';
@@ -151,7 +160,7 @@ export const sectionHead = 'lp-enter mb-10 max-w-[62ch]';
 
 /** a small labelled rule leading into the heading — structure, not decoration */
 export const eyebrow =
-  "mb-4 flex items-center gap-2.5 text-[12.5px] font-semibold tracking-[0.01em] text-accent " +
+  "mb-4 flex items-center gap-2.5 text-[12.5px] font-semibold tracking-[0.01em] text-accent-text " +
   "before:h-px before:w-7 before:bg-accent before:content-['']";
 
 export const h2 = 'm-0 block text-display text-balance text-ink';
@@ -175,7 +184,7 @@ export const journeyDot =
 export const journeyToken =
   'lp-journey-token pointer-events-none absolute top-2 size-2 rounded-full bg-ok opacity-0';
 export const journeyLabel =
-  'lp-journey-label text-stamp text-mut transition-colors duration-300 max-[1000px]:hidden';
+  'lp-journey-label text-stamp-caps uppercase text-mut transition-colors duration-300 max-[1000px]:hidden';
 
 export const journeyTrigger = 'mt-5 [&>span]:text-[11px]';
 
@@ -197,7 +206,7 @@ export const modalBody = 'min-h-11 text-sm leading-[1.6] text-ink-soft';
 /* ---- the route: four steps ---- */
 
 export const strip =
-  'grid grid-cols-4 overflow-hidden rounded-2xl border border-line bg-card shadow-strip ' +
+  'grid grid-cols-4 overflow-hidden rounded-2xl border border-line bg-card shadow-contact ' +
   'max-[1000px]:grid-cols-2 max-[720px]:grid-cols-1';
 
 export const leg =
@@ -210,7 +219,7 @@ export const leg =
 
 /** the step number, set as a figure rather than a coupon serial */
 export const legNo =
-  'grid size-7 place-items-center rounded-lg bg-accent-soft font-mono text-[12px] font-semibold text-accent';
+  'grid size-7 place-items-center rounded-lg bg-accent-soft font-mono text-[12px] font-semibold text-accent-text';
 export const legTitle = 'mt-4 mb-2.5 text-[17px] font-semibold tracking-[-0.02em] text-ink';
 export const legBody = 'text-[15px] leading-[1.6] text-ink-soft';
 export const legMeta =
@@ -227,7 +236,7 @@ export const classes = 'grid grid-cols-2 gap-5 max-[720px]:grid-cols-1 max-[720p
 export function fareCard(verified: boolean) {
   return cx(
     'lp-enter relative flex flex-col rounded-2xl border bg-card px-7 pt-7 pb-7',
-    'transition-[border-color,box-shadow] duration-200 hover:shadow-lift',
+    'transition-[border-color,box-shadow] duration-200 hover:shadow-contact',
     verified ? 'lp-class-verified border-accent-line' : 'lp-class-guest border-line',
   );
 }
@@ -240,7 +249,7 @@ export const fareAmount =
   '[&_small]:ml-2 [&_small]:font-sans [&_small]:text-[13px] [&_small]:font-medium [&_small]:tracking-normal [&_small]:text-mut';
 
 export const fareMeter =
-  'lp-meter mt-4 mb-5 h-1.5 overflow-hidden rounded-full bg-card-sunk [&_i]:block [&_i]:h-full [&_i]:origin-left [&_i]:rounded-full';
+  'lp-meter mt-4 mb-5 h-1.5 overflow-hidden rounded-full bg-sunk [&_i]:block [&_i]:h-full [&_i]:origin-left [&_i]:rounded-full';
 
 export const fareBody = 'text-[15px] leading-[1.62] text-ink-soft [&+p]:mt-3';
 
@@ -250,7 +259,7 @@ export const fareFoot = 'mt-auto border-t border-line-soft pt-5 text-[12.5px] te
 
 export const planner = cx(
   'lp-enter relative mt-5 overflow-hidden rounded-2xl border border-line bg-card',
-  'grid grid-cols-[minmax(0,360px)_minmax(0,1fr)] shadow-strip max-[860px]:grid-cols-[minmax(0,1fr)]',
+  'grid grid-cols-[minmax(0,360px)_minmax(0,1fr)] shadow-contact max-[860px]:grid-cols-[minmax(0,1fr)]',
 );
 
 export const plannerControls =
@@ -259,7 +268,7 @@ export const plannerControls =
 
 export const plannerField = 'grid gap-3.5';
 export const plannerLabel =
-  'flex items-baseline justify-between gap-3 text-stamp text-mut ' +
+  'flex items-baseline justify-between gap-3 text-stamp-caps uppercase text-mut ' +
   '[&_b]:font-mono [&_b]:text-[13.5px] [&_b]:font-semibold [&_b]:text-ink [&_b]:tabular-nums';
 
 /** native range input; the track fill and thumb are drawn in landing.css off `--pct` */
@@ -278,7 +287,7 @@ export const plannerNote =
 
 /* ---- questions ---- */
 
-export const faq = 'lp-faq lp-enter overflow-hidden rounded-2xl border border-line bg-card shadow-rules';
+export const faq = 'lp-faq lp-enter overflow-hidden rounded-2xl border border-line bg-card shadow-contact';
 
 export const faqItem = 'lp-faq-item border-line-soft [&+&]:border-t';
 
@@ -290,7 +299,7 @@ export const faqQ =
 
 /** the plus rotates into a minus as the panel opens — one mark, two states */
 export const faqMark =
-  'lp-faq-mark mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent ' +
+  'lp-faq-mark mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text ' +
   'transition-[transform,background-color] duration-300 [&_svg]:size-3.5';
 
 export const faqA =
@@ -302,11 +311,11 @@ export const paths = 'grid grid-cols-2 gap-5 max-[720px]:grid-cols-1';
 
 export const path = cx(
   'lp-enter flex flex-col rounded-2xl border border-line bg-card p-7',
-  'transition-[border-color,box-shadow] duration-200 hover:shadow-lift hover:border-mut/40',
+  'transition-[border-color,box-shadow] duration-200 hover:shadow-contact hover:border-mut/40',
 );
 
 export const pathMark =
-  'grid size-10 place-items-center rounded-xl bg-accent-soft text-accent [&_svg]:size-5';
+  'grid size-10 place-items-center rounded-xl bg-accent-soft text-accent-text [&_svg]:size-5';
 export const pathTitle = 'mt-4 text-[19px] font-semibold tracking-[-0.022em] text-ink';
 export const pathBody = 'mt-2.5 text-[15px] leading-[1.6] text-ink-soft';
 export const pathList =
@@ -317,7 +326,7 @@ export const pathFoot = 'mt-auto';
 
 /* ---- the controls ---- */
 
-export const rules = 'm-0 overflow-hidden rounded-2xl border border-line bg-card shadow-rules';
+export const rules = 'm-0 overflow-hidden rounded-2xl border border-line bg-card shadow-contact';
 
 export const rule =
   'lp-enter lp-rule group grid grid-cols-[220px_minmax(0,1fr)_190px] items-baseline gap-6 px-7 py-6 ' +
@@ -328,7 +337,7 @@ export const rule =
 export const ruleTerm = 'text-[14.5px] font-semibold tracking-[-0.015em] text-ink';
 export const ruleBody = 'm-0 max-w-[66ch] text-[15px] leading-[1.6] text-ink-soft';
 export const ruleVal =
-  'm-0 text-right font-mono text-[12.5px] text-mut transition-colors duration-200 group-hover:text-accent ' +
+  'm-0 text-right font-mono text-[12.5px] text-mut transition-colors duration-200 group-hover:text-accent-text ' +
   'max-[1000px]:col-start-2 max-[1000px]:text-left max-[720px]:col-start-1';
 
 /* ---- close ---- */
@@ -349,7 +358,7 @@ export const closeStub =
 export const foot =
   'mt-24 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-t border-line pt-6 pb-10 ' +
   'text-[12.5px] text-mut max-[480px]:justify-start ' +
-  '[&_a]:font-medium [&_a]:text-ink-soft [&_a]:no-underline hover:[&_a]:text-accent';
+  '[&_a]:font-medium [&_a]:text-ink-soft [&_a]:no-underline hover:[&_a]:text-accent-text';
 
 /** visually hidden, still read aloud */
 export const srOnly = 'absolute size-px overflow-hidden p-0 whitespace-nowrap [clip-path:inset(50%)]';

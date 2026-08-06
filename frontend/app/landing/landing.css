@@ -261,57 +261,17 @@
   }
 }
 
-/* --- pointer-level polish ---------------------------------------------------
-   Everything below is hover/press feel on a marketing page, so it is gated to a
-   real pointer: a touch tap fires a synthetic :hover that then sticks. */
+/* --- pointer-level polish ---
+   Two effects used to live here and both are deliberately gone.
 
-@media (hover: hover) and (pointer: fine) {
-  /* A card lights faintly under the cursor. The sheen is a background-image layer
-     rather than a ::before, so it sits above the surface and below the text with
-     no z-index bookkeeping. Spotlight.tsx feeds --mx/--my; --spot is animatable
-     because it is a registered property, so the light fades in and out instead of
-     snapping. */
-  @property --spot {
-    syntax: "<percentage>";
-    inherits: false;
-    initial-value: 0%;
-  }
-  .lp [data-spot] {
-    --spot: 0%;
-    background-image: radial-gradient(
-      260px circle at var(--mx, 50%) var(--my, 0px),
-      color-mix(in srgb, var(--color-accent) var(--spot), transparent),
-      transparent 68%
-    );
-    background-repeat: no-repeat;
-    transition: --spot 0.3s var(--ease-out);
-  }
-  .lp [data-spot]:hover { --spot: 9%; }
+   The cursor-following accent spotlight on cards ([data-spot], fed by Spotlight.tsx)
+   and the white gleam sweeping the primary button (.lp-btn::after) were the page's two
+   clearest "generic premium SaaS" signatures. On a mid-grey canvas with a pigment
+   accent neither reads as polish — coloured light over warm grey reads as a smudge, and
+   a white gleam reads as a plastic web button.
 
-  /* One pass of light across the primary action. The button is the page's whole
-     purpose, so it gets the one flourish nothing else has. */
-  .lp .lp-btn::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    background: linear-gradient(
-      100deg,
-      transparent 42%,
-      rgb(255 255 255 / 0.32) 50%,
-      transparent 58%
-    );
-    background-size: 260% 100%;
-    background-position: 140% 0;
-    opacity: 0;
-    transition: background-position 0.6s var(--ease-out), opacity 0.18s ease;
-  }
-  .lp .lp-btn:hover::after {
-    background-position: -40% 0;
-    opacity: 1;
-  }
-}
+   The structural motion below and above this comment stays: it earns its place by
+   showing how the product works rather than by making surfaces glisten. */
 
 /* --- the budget planner's sliders ---
    Native <input type="range">; only the track and thumb need drawing, and both are
@@ -332,7 +292,7 @@
   background: linear-gradient(
     to right,
     var(--color-accent) var(--pct, 0%),
-    var(--color-card-sunk) var(--pct, 0%)
+    var(--color-sunk) var(--pct, 0%)
   );
 }
 .lp .lp-range::-moz-range-track {
@@ -341,7 +301,7 @@
   background: linear-gradient(
     to right,
     var(--color-accent) var(--pct, 0%),
-    var(--color-card-sunk) var(--pct, 0%)
+    var(--color-sunk) var(--pct, 0%)
   );
 }
 
@@ -365,8 +325,8 @@
   box-shadow: var(--shadow-contact);
   transition: transform 0.14s var(--ease-out), box-shadow 0.14s var(--ease-out);
 }
-.lp .lp-range:active::-webkit-slider-thumb { transform: scale(1.18); box-shadow: var(--shadow-key-lit); }
-.lp .lp-range:active::-moz-range-thumb { transform: scale(1.18); box-shadow: var(--shadow-key-lit); }
+.lp .lp-range:active::-webkit-slider-thumb { transform: scale(1.18); box-shadow: var(--shadow-contact); }
+.lp .lp-range:active::-moz-range-thumb { transform: scale(1.18); box-shadow: var(--shadow-contact); }
 .lp .lp-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 24%, transparent); }
 .lp .lp-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 24%, transparent); }
 
@@ -378,7 +338,7 @@
 .lp-faq details[open] > summary .lp-faq-mark {
   transform: rotate(45deg);
   background: var(--color-accent);
-  color: var(--color-accent-ink);
+  color: var(--color-accent-on);
 }
 
 @supports selector(::details-content) {

@@ -3,9 +3,7 @@ import ActivityBoard from './ActivityBoard';
 import ScanStub from './ScanStub';
 import JourneyFlow from './JourneyFlow';
 import JourneyTrigger from './JourneyTrigger';
-import HeroGlow from './HeroGlow';
 import BudgetPlanner from './BudgetPlanner';
-import Spotlight from './Spotlight';
 import Faq from './Faq';
 import * as lp from '@/lib/lp';
 import './landing.css';
@@ -145,7 +143,7 @@ export default function Landing() {
 
       <main className="m-0 max-w-none p-0">
         <header className={`${lp.hero} ${lp.wrap}`}>
-          <HeroGlow />
+          <div className={lp.heroWash} aria-hidden="true" />
           <div className={lp.pass}>
             <div className={lp.coupon}>
               <dl className={lp.routing}>
@@ -226,8 +224,8 @@ export default function Landing() {
               difference is held, not lost.
             </p>
           </div>
-          <Spotlight className={lp.classes}>
-            <article className={lp.fareCard(false)} data-spot>
+          <div className={lp.classes}>
+            <article className={lp.fareCard(false)}>
               <div className={lp.fareTop}>
                 <h3 className={lp.fareTitle}>Guest</h3>
                 <span className={lp.tierGuest}>held</span>
@@ -249,7 +247,7 @@ export default function Landing() {
               <p className={lp.fareFoot}>Grace window set per partnership · default 7 days</p>
             </article>
 
-            <article className={lp.fareCard(true)} data-spot>
+            <article className={lp.fareCard(true)}>
               <div className={lp.fareTop}>
                 <h3 className={lp.fareTitle}>Verified</h3>
                 <span className={lp.tierVerified}>posted</span>
@@ -272,7 +270,7 @@ export default function Landing() {
                 Released after the deadline? Refused — the budget keeps the difference.
               </p>
             </article>
-          </Spotlight>
+          </div>
 
           {/* The two rates argue in the abstract. This is the same argument with the reader's
               own numbers in it — the only place on the page they can steer anything. */}
@@ -290,9 +288,9 @@ export default function Landing() {
               between them is one entry on the same double-entry ledger.
             </p>
           </div>
-          <Spotlight className={lp.paths}>
+          <div className={lp.paths}>
             {PATHS.map((p) => (
-              <article className={lp.path} key={p.key} data-spot>
+              <article className={lp.path} key={p.key}>
                 <span className={lp.pathMark} aria-hidden="true">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"
                        strokeLinecap="round" strokeLinejoin="round">
@@ -313,7 +311,7 @@ export default function Landing() {
                 </div>
               </article>
             ))}
-          </Spotlight>
+          </div>
         </section>
 
         <section className={`${lp.section} ${lp.wrap}`}>
