@@ -9,7 +9,13 @@ config({ path: join(__dirname, '..', '.env'), quiet: true });
 // Deliberately not imported from src/config: this file is loaded by the standalone CLI,
 // and a migrate-only job container should not have to set BASE_URL, ADMIN_* and the rest
 // just to run `migrate deploy`. The DATABASE_URL rule is duplicated, nothing else is.
-if (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL)
+//
+// `generate` is exempt because it never opens a connection — it reads the schema and writes
+// the client. Guarding it broke every production install instead: backend's postinstall is
+// `prisma generate`, so a workspace-root `pnpm install` under NODE_ENV=production failed even
+// for the frontend service, which has no business holding a database URL.
+const needsDb = !process.argv.slice(2).includes('generate');
+if (needsDb && process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL)
   throw new Error('DATABASE_URL must be set in production');
 
 const url =
