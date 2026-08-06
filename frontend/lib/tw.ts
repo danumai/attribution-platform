@@ -39,7 +39,7 @@ export const btnBase =
 
 /** the four inks a control can be printed in */
 export const inkAccent =
-  'border-transparent bg-accent text-accent-ink shadow-key enabled:hover:bg-accent-hover';
+  'border-transparent bg-accent text-accent-on enabled:hover:bg-accent-hover';
 export const inkGhost =
   'border-line bg-card text-ink shadow-contact-sm enabled:hover:bg-card-alt enabled:hover:border-mut/40';
 export const inkDanger =
@@ -61,11 +61,11 @@ export const btnTinyGhost = `${btnBase} ${btnBox} rounded-md px-2.5 py-1 text-xs
 
 /** acts on this page but reads at link weight; must be a button to take focus */
 export const linkish =
-  'cursor-pointer border-0 bg-transparent p-0 text-[13.5px] font-medium text-accent ' +
+  'cursor-pointer border-0 bg-transparent p-0 text-[13.5px] font-medium text-accent-text ' +
   'enabled:hover:underline underline-offset-[3px] disabled:opacity-45 disabled:cursor-not-allowed';
 
 export const link =
-  'font-medium text-accent no-underline hover:underline hover:underline-offset-[3px]';
+  'font-medium text-accent-text no-underline hover:underline hover:underline-offset-[3px]';
 
 /* ---- forms ---- */
 
@@ -74,7 +74,7 @@ export const label = 'mt-5 mb-1.5 block text-[13px] font-medium tracking-[-0.006
 export const field =
   'w-full rounded-lg border border-line bg-card px-3 py-2.5 text-[14px] text-ink shadow-contact-sm ' +
   'transition-[border-color,box-shadow] duration-150 ease-press ' +
-  'placeholder:text-mut/70 hover:border-mut/40 focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/12';
+  'placeholder:text-mut/70 hover:border-mut/40 focus:border-accent-text focus:outline-none focus:ring-4 focus:ring-accent/12';
 
 /** native arrow is unstyleable, so the chevron is drawn into the field */
 export const select = `${field} cursor-pointer appearance-none pr-[34px] bg-no-repeat bg-[position:calc(100%-12px)_50%] bg-[image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2012%2012'%20fill='none'%20stroke='%23737e8c'%20stroke-width='1.6'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%204.5%206%207.5%209%204.5'/%3E%3C/svg%3E")]`;
@@ -82,7 +82,7 @@ export const select = `${field} cursor-pointer appearance-none pr-[34px] bg-no-r
 export const colorField =
   'h-[42px] w-full cursor-pointer rounded-lg border border-line bg-card p-[3px] shadow-contact-sm ' +
   'transition-[border-color,box-shadow] duration-150 ease-press hover:border-mut/40 ' +
-  'focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/12';
+  'focus:border-accent-text focus:outline-none focus:ring-4 focus:ring-accent/12';
 
 export const rangeField = 'h-[22px] w-full cursor-pointer accent-accent';
 
@@ -93,7 +93,7 @@ export const checkLabel = 'mt-5 flex cursor-pointer items-start gap-[9px] text-[
 /* ---- segmented control ---- */
 
 export const tabs =
-  'mt-1 flex gap-1 overflow-x-auto rounded-lg border border-line bg-card-sunk p-1 ' +
+  'mt-1 flex gap-1 overflow-x-auto rounded-lg border border-line bg-sunk p-1 ' +
   '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
 /** quieter sub-level control, sitting inside a panel that already has tabs */
@@ -279,7 +279,7 @@ export const tablebar = 'mt-4 flex flex-wrap items-center justify-between gap-3'
 export const search =
   'flex flex-[0_1_340px] items-center gap-2 rounded-lg border border-line bg-card px-3 shadow-contact-sm ' +
   'transition-[border-color,box-shadow] duration-150 ease-press ' +
-  'focus-within:border-accent focus-within:ring-4 focus-within:ring-accent/12 ' +
+  'focus-within:border-accent-text focus-within:ring-4 focus-within:ring-accent/12 ' +
   '[&>svg]:size-[15px] [&>svg]:shrink-0 [&>svg]:text-mut';
 
 export const searchInput =
@@ -291,11 +291,11 @@ export const filterBar = 'mt-4 flex flex-wrap items-center gap-2.5';
 /** an applied filter, shown as a removable chip — never state hidden in a heading */
 export const filterChip =
   'inline-flex items-center gap-1.5 rounded-full border border-accent-line bg-accent-soft ' +
-  'py-1 pr-1 pl-3 text-[13px] text-accent [&_code]:font-mono [&_code]:text-[12.5px]';
+  'py-1 pr-1 pl-3 text-[13px] text-accent-text [&_code]:font-mono [&_code]:text-[12.5px]';
 
 export const filterChipDrop =
   'grid size-5 shrink-0 cursor-pointer place-items-center rounded-full border-0 bg-transparent ' +
-  'text-accent transition-colors duration-150 ease-press hover:bg-accent-line [&_svg]:size-3';
+  'text-accent-text transition-colors duration-150 ease-press hover:bg-accent-line [&_svg]:size-3';
 
 /* row action menu — one control per row instead of a run of links */
 export const menu = 'group relative inline-block';
@@ -311,7 +311,7 @@ export const menuSummary =
 export const menuScrim = 'fixed inset-0 z-40';
 
 export const menuPop =
-  'absolute top-[calc(100%+6px)] right-0 z-41 min-w-49 rounded-xl border border-line bg-card p-1.5 shadow-contact animate-rise-fast';
+  'absolute top-[calc(100%+6px)] right-0 z-41 min-w-49 rounded-xl border border-line bg-card-high p-1.5 shadow-contact animate-rise-fast';
 
 export function menuItem(danger?: boolean) {
   return cx(
@@ -348,7 +348,7 @@ export function healthMark(ok: boolean) {
  * Meters exist here because a spend product that prints its budget as an integer has hidden its
  * only real story. "1,200 coins" says nothing; "1,200 left of 5,000" is the whole picture.
  */
-export const meter = 'h-1.5 overflow-hidden rounded-full bg-card-sunk';
+export const meter = 'h-1.5 overflow-hidden rounded-full bg-sunk';
 
 /**
  * How full, and in which ink.
@@ -371,7 +371,7 @@ export function meterInk(covers: number) {
 }
 
 /** two proportions in one bar: verified against guest, in the colours the landing page uses */
-export const split = 'flex h-1.5 gap-px overflow-hidden rounded-full bg-card-sunk';
+export const split = 'flex h-1.5 gap-px overflow-hidden rounded-full bg-sunk';
 
 /* ---- QR design studio ---- */
 
@@ -382,6 +382,10 @@ export const studioPreview = 'sticky top-[86px] max-[900px]:static';
 
 export const previewHead = 'mb-3 flex items-baseline justify-between';
 
+/* The plate's background comes from the merchant's chosen backdrop at the call site, not
+   from a theme token — a QR preview is a proof of a printed artifact, and the Cutout
+   preset is transparent. Theming this dark would show an unscannable code as if it were
+   fine. Only the frame around it follows the theme. */
 export const qrbox =
   'flex aspect-square items-center justify-center rounded-lg border border-line p-4 shadow-contact-sm ' +
   'transition-colors duration-200 ease-press [&_img]:max-h-full [&_img]:max-w-full';
@@ -394,7 +398,7 @@ export function chip(on: boolean) {
     btnBase,
     'grid h-[42px] w-[46px] place-items-center p-0 [&_svg]:size-[22px]',
     on
-      ? 'border-accent bg-accent-soft text-accent'
+      ? 'border-accent-text bg-accent-soft text-accent-text'
       : 'border-line bg-card text-ink-soft shadow-contact-sm enabled:hover:bg-card-alt',
   );
 }
@@ -410,7 +414,7 @@ export function preset(pressed: boolean) {
     btnBase,
     'group grid justify-items-center gap-2.5 px-2 pt-3 pb-2.5 text-center text-[11.5px] font-medium leading-[1.25]',
     pressed
-      ? 'border-line bg-card-sunk text-ink'
+      ? 'border-line bg-sunk text-ink'
       : 'border-transparent bg-transparent text-mut enabled:hover:bg-card-alt enabled:hover:text-ink',
   );
 }
@@ -426,7 +430,7 @@ export function codeTab(on: boolean, voided: boolean) {
     btnBase,
     'flex flex-col items-start gap-0.5 px-3.5 py-2 text-left [&_code]:border-0 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[13px] [&_code]:text-inherit',
     on
-      ? 'border-accent-line bg-accent-soft text-accent'
+      ? 'border-accent-line bg-accent-soft text-accent-text'
       : 'border-line bg-card text-ink-soft shadow-contact-sm enabled:hover:bg-card-alt',
     voided && 'line-through opacity-55',
   );
@@ -442,8 +446,8 @@ export function logoWell(state: 'idle' | 'over' | 'filled') {
       ? 'flex flex-row items-center gap-4 border-solid border-line bg-card-alt px-4 py-3.5 text-left'
       : 'flex cursor-pointer flex-col items-center justify-center gap-1.5 border-dashed px-5 py-7 text-center [&_svg]:size-6.5 [&_svg]:text-mut',
     state === 'over'
-      ? 'border-accent bg-accent-soft'
-      : state === 'idle' && 'border-line bg-card-sunk hover:border-accent hover:bg-accent-soft',
+      ? 'border-accent-text bg-accent-soft'
+      : state === 'idle' && 'border-line bg-sunk hover:border-accent-text hover:bg-accent-soft',
   );
 }
 
