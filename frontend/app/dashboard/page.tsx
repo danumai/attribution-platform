@@ -14,7 +14,6 @@ import {
   Split,
   confirmDialog,
   formDialog,
-  promptDialog,
   toast,
 } from '@/lib/ui';
 import { Chart } from '@/lib/chart';
@@ -219,6 +218,9 @@ export default function Dashboard() {
   const activePartnerships = partnerships.filter((p) => p.status === 'active');
   // a publisher is the one who has to act on a pending request; a promoter is only waiting
   const awaitingMe = isPromoter ? 0 : partnerships.filter((p) => p.status === 'pending').length;
+  // Same asymmetry for a repricing: the publisher decides, the promoter waits. Counted for both
+  // so neither side has to remember an open proposal exists.
+  const openProposals = partnerships.filter((p) => p.proposed_coin_rate !== null).length;
 
   /* ---- creation, as dialogs ----
      These used to be forms parked permanently under their own lists, on screen whether or not
@@ -284,6 +286,44 @@ export default function Dashboard() {
     );
   }
 
+  /**
+   * Repricing, from the table where the rates actually live. Both tiers here, unlike the
+   * campaign dialog: this is the agreement itself, not one campaign spending against it.
+   */
+  async function proposeRates(p: Partnership) {
+    const v = await formDialog({
+      title: `Propose new rates to ${p.publisher_name}`,
+      body: `They are paid ${num(p.guest_rate)} for a guest and ${num(p.coin_rate)} for a verified signup today. Those stay in force until they accept.`,
+      confirmText: 'Send for approval',
+      fields: [
+        {
+          name: 'coin_rate',
+          label: 'Coins per verified signup (full tier)',
+          type: 'number',
+          value: String(p.proposed_coin_rate ?? p.coin_rate),
+          required: true,
+        },
+        {
+          name: 'guest_rate',
+          label: 'Coins for an unverified guest',
+          type: 'number',
+          value: String(p.proposed_guest_rate ?? p.guest_rate),
+          required: true,
+          hint: 'Cannot exceed the full tier.',
+        },
+      ],
+    });
+    if (!v) return;
+    await act(
+      () =>
+        api(`/v1/partnerships/${p.id}/rates`, {
+          method: 'PATCH',
+          body: JSON.stringify({ coin_rate: +v.coin_rate, guest_rate: +v.guest_rate }),
+        }),
+      `Sent to ${p.publisher_name} — the rates in force do not change until they accept.`,
+    );
+  }
+
   async function newCampaign() {
     const v = await formDialog({
       title: 'New campaign',
@@ -316,10 +356,18 @@ export default function Dashboard() {
     );
   }
 
-  // Name and status in one dialog: the two things a promoter owns on a running campaign.
-  // `ended` is here and not on a button of its own because it is the one status a campaign
-  // does not come back from — worth the extra click and the confirm dialog costs a whole form.
+  /**
+   * Everything a promoter owns on a running campaign, in one dialog.
+   *
+   * Three different kinds of change, which is why it fans out into three calls rather than one:
+   * the name and the status are the campaign's own and land immediately; the budget is money and
+   * goes through funding; the rate is the *publisher's* price and can only be proposed.
+   *
+   * `ended` is a status option and not a button of its own because it is the one status a
+   * campaign does not come back from — worth the extra click.
+   */
   async function editCampaign(c: Campaign) {
+    const p = partnerships.find((x) => x.id === c.partnership_id);
     const v = await formDialog({
       title: `Edit "${c.name}"`,
       confirmText: 'Save changes',
@@ -337,18 +385,86 @@ export default function Dashboard() {
             { value: 'ended', label: 'Ended' },
           ],
         },
+        {
+          name: 'budget',
+          label: 'Budget (coins)',
+          type: 'number',
+          value: String(c.budget),
+          required: true,
+          hint: 'Raising it funds the difference. Taking funded coins back out is an admin adjustment.',
+        },
+        {
+          name: 'covers',
+          label: '…or how many more signups to cover',
+          type: 'number',
+          placeholder: String(Math.floor(c.budget / c.coin_rate)),
+          hint: `Same money in the unit you buy it in — wins over Budget when filled. At ${num(c.coin_rate)} coins per signup.`,
+        },
+        {
+          name: 'coin_rate',
+          label: 'Rate (coins per verified signup)',
+          type: 'number',
+          value: String(c.coin_rate),
+          required: true,
+          hint: `${c.publisher_name} is paid this, so it is a request, not a change — and it applies to every campaign you run with them.`,
+        },
       ],
     });
     if (!v) return;
-    await act(
-      () => api(`/v1/campaigns/${c.id}`, { method: 'PATCH', body: JSON.stringify(v) }),
-      `"${v.name}" saved${v.status === c.status ? '' : ` — now ${v.status}`}.`,
-    );
+
+    // The rate the top-up is priced at is the one in force, not the one being proposed: an
+    // unaccepted proposal pays nobody, so budgeting at it would fund the wrong number.
+    const target = v.covers?.trim() ? Math.ceil(+v.covers * c.coin_rate) : Math.round(+v.budget);
+    const topUp = target - c.budget;
+    const rate = Math.round(+v.coin_rate);
+    // Checked before anything is sent, so an impossible budget cannot leave the name and the
+    // status already saved behind a failure.
+    if (!Number.isFinite(target) || target < 0) return toast.error('Budget must be a positive number of coins.');
+    if (topUp < 0)
+      return toast.error(
+        `Lowering a funded budget is a clawback an admin has to make. ${c.name} holds ${num(c.budget)} coins.`,
+      );
+    if (rate !== c.coin_rate) {
+      if (!p) return toast.error('Reload before changing the rate — this campaign’s partnership is not loaded.');
+      if (rate < p.guest_rate)
+        return toast.error(`The full rate cannot sit below the guest rate of ${num(p.guest_rate)}.`);
+    }
+
+    await act(async () => {
+      await api(`/v1/campaigns/${c.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: v.name, status: v.status }),
+      });
+      if (topUp > 0)
+        await api(`/v1/campaigns/${c.id}/fund`, {
+          method: 'POST',
+          // Keyed on where the budget was *and* where it is going, so a double-click funds once
+          // while a genuine second top-up to the same target — after scans have spent some of
+          // it — is a different key and still lands.
+          body: JSON.stringify({ coins: topUp, idempotency_key: `edit:${c.budget}:${target}` }),
+        });
+      if (rate !== c.coin_rate && p)
+        await api(`/v1/partnerships/${p.id}/rates`, {
+          method: 'PATCH',
+          body: JSON.stringify({ coin_rate: rate }),
+        });
+    }, [
+      `"${v.name}" saved`,
+      v.status === c.status ? '' : `now ${v.status}`,
+      topUp > 0 ? `funded ${num(topUp)} coins` : '',
+      rate !== c.coin_rate ? `new rate sent to ${c.publisher_name} for approval` : '',
+    ].filter(Boolean).join(' — ') + '.');
   }
 
   const items: NavItem[] = [
     { id: 'overview', label: 'Overview', icon: 'overview' },
-    { id: 'partnerships', label: 'Partnerships', icon: 'partnerships', badge: awaitingMe },
+    {
+      id: 'partnerships',
+      label: 'Partnerships',
+      icon: 'partnerships',
+      // Both are decisions sitting in the publisher's own inbox, so they count as one badge.
+      badge: awaitingMe + (isPromoter ? 0 : openProposals),
+    },
     { id: 'campaigns', label: 'Campaigns', icon: 'campaigns' },
     { id: 'redemptions', label: 'Redemptions', icon: 'redemptions' },
     ...(isPromoter ? [] : [{ id: 'settings', label: 'Settings', icon: 'settings' } as NavItem]),
@@ -475,6 +591,11 @@ export default function Dashboard() {
                 isPromoter
                   ? ['Partnership requests waiting on a publisher', partnerships.filter((p) => p.status === 'pending').length, 'partnerships']
                   : ['Partnership requests waiting on you', awaitingMe, 'partnerships'],
+                [
+                  isPromoter ? 'Rate changes waiting on a publisher' : 'Rate changes waiting on you',
+                  openProposals,
+                  'partnerships',
+                ],
                 ['Campaigns that cannot pay for one more signup', campaigns.filter((c) => c.status === 'active' && c.budget < c.coin_rate).length, 'campaigns'],
                 ['Paused campaigns', campaigns.filter((c) => c.status === 'paused').length, 'campaigns'],
               ].map(([k, v, go]) => (
@@ -555,6 +676,13 @@ export default function Dashboard() {
                       <td className={td}>{p.publisher_name}</td>
                       <td className={tdNum}>
                         {num(p.guest_rate)} / {num(p.coin_rate)}
+                        {/* The rates in force stay the headline; the proposal is printed under
+                            them, because nothing is paid at a proposal. */}
+                        {p.proposed_coin_rate !== null && (
+                          <div className={cx(muted, 'tabular-nums')}>
+                            asking {num(p.proposed_guest_rate ?? 0)} / {num(p.proposed_coin_rate)}
+                          </div>
+                        )}
                       </td>
                       <td className={td}>
                         <span className={pill(p.status)}>{p.status}</span>
@@ -572,6 +700,38 @@ export default function Dashboard() {
                           >
                             Accept
                           </button>
+                        )}
+                        {isPromoter && p.status === 'active' && (
+                          <button className={cx(btnTiny, 'my-0.5')} onClick={() => proposeRates(p)}>
+                            {p.proposed_coin_rate === null ? 'Propose rates' : 'Revise proposal'}
+                          </button>
+                        )}
+                        {/* The publisher is the one being paid, so the decision is its own. */}
+                        {!isPromoter && p.proposed_coin_rate !== null && (
+                          <span className="flex flex-wrap gap-2">
+                            <button
+                              className={cx(btnTiny, 'my-0.5')}
+                              onClick={() =>
+                                act(
+                                  () => api(`/v1/partnerships/${p.id}/rates/accept`, { method: 'POST' }),
+                                  `Now earning ${num(p.proposed_coin_rate ?? 0)} coins per verified signup from ${p.promoter_name}.`,
+                                )
+                              }
+                            >
+                              Accept {num(p.proposed_guest_rate ?? 0)} / {num(p.proposed_coin_rate)}
+                            </button>
+                            <button
+                              className={cx(btnTiny, 'my-0.5')}
+                              onClick={() =>
+                                act(
+                                  () => api(`/v1/partnerships/${p.id}/rates/decline`, { method: 'POST' }),
+                                  `Declined — you keep earning ${num(p.coin_rate)} per verified signup.`,
+                                )
+                              }
+                            >
+                              Decline
+                            </button>
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -611,6 +771,9 @@ export default function Dashboard() {
             // What the promoter actually has to know: how many more signups this budget
             // can still pay for. Zero is the moment scans stop granting coins.
             const covers = c.coin_rate > 0 ? Math.floor(c.budget / c.coin_rate) : 0;
+            // An open repricing is not the rate: it pays nobody until the publisher accepts, so
+            // it is printed beside the number in force rather than instead of it.
+            const proposed = partnerships.find((x) => x.id === c.partnership_id)?.proposed_coin_rate;
             return (
               <div className={cx(card, 'mt-3 grid gap-4')} key={c.id}>
                 <div className="flex flex-wrap items-start gap-3">
@@ -624,31 +787,9 @@ export default function Dashboard() {
                   <div className="flex shrink-0 flex-wrap gap-2">
                     {isPromoter && (
                       <>
-                        <button
-                          className={btnGhost}
-                          onClick={async () => {
-                            const v = await promptDialog({
-                              title: `Fund "${c.name}"`,
-                              body: `At ${num(c.coin_rate)} coins per signup, 1000 coins covers about ${Math.floor(
-                                1000 / c.coin_rate,
-                              )} signups.`,
-                              inputLabel: 'Coins to add',
-                              input: '1000',
-                              confirmText: 'Add funds',
-                            });
-                            if (v)
-                              act(
-                                () =>
-                                  api(`/v1/campaigns/${c.id}/fund`, {
-                                    method: 'POST',
-                                    body: JSON.stringify({ coins: +v }),
-                                  }),
-                                `Funded ${num(+v)} coins.`,
-                              );
-                          }}
-                        >
-                          Fund
-                        </button>
+                        {/* Funding lives inside Edit now: the budget is one of the numbers on
+                            the card, and a second dialog that only tops it up asked for the
+                            same money in a different unit. */}
                         <button className={btnGhost} onClick={() => editCampaign(c)}>
                           Edit
                         </button>
@@ -674,7 +815,12 @@ export default function Dashboard() {
                     halves of the fraction. */}
                 <dl className="flex flex-wrap gap-x-11 gap-y-3.5 border-t border-line-soft pt-3.5">
                   {([
-                    ['Rate', num(c.coin_rate), 'coins / signup', 'text-ink'],
+                    [
+                      'Rate',
+                      num(c.coin_rate),
+                      proposed ? `coins / signup — ${num(proposed)} awaiting approval` : 'coins / signup',
+                      'text-ink',
+                    ],
                     ['Budget', num(c.budget), 'coins', 'text-ink'],
                     ['Covers', num(covers), 'more signups', meterInk(covers)],
                   ] as const).map(([k, v, unit, ink]) => (

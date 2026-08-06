@@ -49,6 +49,31 @@ BADPUB=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships -H "
   -d "{\"publisher_org_id\":\"$PRO_ID\"}")
 [ "$BADPUB" = "400" ] && pass "partnership with a non-publisher rejected (400)" || fail "publisher guard: $BADPUB"
 
+# Repricing: the promoter asks, the publisher decides, and the rates in force keep paying out
+# the whole time. Ends where it started (10 / 50) — every payout assertion below is priced on it.
+RATES() { curl -s -XPATCH $API/v1/partnerships/$PART_ID/rates -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$2"; }
+NOTPRO=$(curl -s -o /dev/null -w '%{http_code}' -XPATCH $API/v1/partnerships/$PART_ID/rates -H "Authorization: Bearer $PUB_TOKEN" -H 'Content-Type: application/json' -d '{"coin_rate":9999}')
+[ "$NOTPRO" = "404" ] && pass "publisher cannot reprice itself upward (404)" || fail "propose guard: $NOTPRO"
+PROP=$(RATES "$PRO_TOKEN" '{"coin_rate":65,"guest_rate":12}')
+[ "$(echo "$PROP" | j .coin_rate)" = "50" ] && [ "$(echo "$PROP" | j .proposed_coin_rate)" = "65" ] \
+  && pass "proposed rate is stored without changing what pays out" || fail "propose: $PROP"
+BADPAIR=$(curl -s -o /dev/null -w '%{http_code}' -XPATCH $API/v1/partnerships/$PART_ID/rates -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"coin_rate":5}')
+[ "$BADPAIR" = "400" ] && pass "proposal below the guest tier rejected (400)" || fail "pair rule: $BADPAIR"
+SELFOK=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships/$PART_ID/rates/accept -H "Authorization: Bearer $PRO_TOKEN")
+[ "$SELFOK" = "404" ] && pass "promoter cannot approve its own proposal (404)" || fail "self-approval: $SELFOK"
+DECL=$(curl -s -XPOST $API/v1/partnerships/$PART_ID/rates/decline -H "Authorization: Bearer $PUB_TOKEN")
+[ -z "$(echo "$DECL" | j .proposed_coin_rate)" ] && [ "$(echo "$DECL" | j .coin_rate)" = "50" ] \
+  && pass "publisher declines: proposal cleared, agreed rate untouched" || fail "decline: $DECL"
+RATES "$PRO_TOKEN" '{"coin_rate":65,"guest_rate":12}' >/dev/null
+ACC=$(curl -s -XPOST $API/v1/partnerships/$PART_ID/rates/accept -H "Authorization: Bearer $PUB_TOKEN")
+[ "$(echo "$ACC" | j .coin_rate)" = "65" ] && [ "$(echo "$ACC" | j .guest_rate)" = "12" ] && [ -z "$(echo "$ACC" | j .proposed_coin_rate)" ] \
+  && pass "publisher accepts: new rates take force, proposal cleared" || fail "accept: $ACC"
+STALE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships/$PART_ID/rates/accept -H "Authorization: Bearer $PUB_TOKEN")
+[ "$STALE" = "404" ] && pass "an accepted proposal cannot be accepted twice (404)" || fail "replayed accept: $STALE"
+RATES "$PRO_TOKEN" '{"coin_rate":50,"guest_rate":10}' >/dev/null
+BACK=$(curl -s -XPOST $API/v1/partnerships/$PART_ID/rates/accept -H "Authorization: Bearer $PUB_TOKEN" | j .coin_rate)
+[ "$BACK" = "50" ] && pass "repriced back to 10 / 50 for the payout assertions below" || fail "restore rates: $BACK"
+
 echo "3. Campaign + funding"
 CAMP=$(curl -s -XPOST $API/v1/campaigns -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
   -d "{\"partnership_id\":\"$PART_ID\",\"name\":\"Inflight promo\"}")

@@ -54,6 +54,9 @@ export interface Partnership {
   created_at: string;
   promoter_name: string;
   publisher_name: string;
+  /** a repricing the promoter has asked for; null until it is accepted or declined */
+  proposed_coin_rate: number | null;
+  proposed_guest_rate: number | null;
 }
 
 export interface Campaign {

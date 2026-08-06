@@ -131,6 +131,77 @@ export class PortalController {
     return prisma.partnership.findUnique({ where: { id } });
   }
 
+  /**
+   * Ask to reprice a live partnership. Promoter side, and a request rather than a change.
+   *
+   * The coin rate is what the *publisher* gets paid per signup, so the promoter cannot simply
+   * set it — but it also must not stop the money while the two sides talk. The proposal lands
+   * in its own columns and every payout keeps reading the rates already agreed; the publisher's
+   * `rates/accept` is the only thing that promotes it.
+   *
+   * `active` only: a pending partnership has no agreed price to renegotiate (the publisher has
+   * not accepted the first one), and a suspended one is an admin hold that new terms must not
+   * quietly work around.
+   */
+  @Patch('partnerships/:id/rates')
+  async proposeRates(
+    @Session() s: SessionClaims,
+    @Param('id') id: string,
+    @Body() b: { coin_rate?: number; guest_rate?: number },
+  ) {
+    const current = await prisma.partnership.findFirst({
+      where: { id, promoter_org_id: s.org_id, status: 'active' },
+    });
+    if (!current) throw new NotFoundException('no active partnership with that id');
+    // Resolved against the row, so the pair rule is judged on the post-accept numbers: moving
+    // only the coin rate has to clear the guest rate already in force.
+    const { coin_rate, guest_rate } = validateRates(b, current);
+    if (coin_rate === current.coin_rate && guest_rate === current.guest_rate)
+      throw new BadRequestException('those are the rates already in force');
+    const updated = await prisma.partnership.update({
+      where: { id },
+      data: { proposed_coin_rate: coin_rate, proposed_guest_rate: guest_rate },
+    });
+    await audit(s.org_id, 'partnership.rates.propose', `partnership:${id}`, {
+      from: { coin_rate: current.coin_rate, guest_rate: current.guest_rate },
+      to: { coin_rate, guest_rate },
+    });
+    return updated;
+  }
+
+  @Post('partnerships/:id/rates/accept')
+  async acceptRates(@Session() s: SessionClaims, @Param('id') id: string) {
+    return this.decideRates(s, id, true);
+  }
+
+  /** Declining clears the proposal and leaves the agreed rates alone — the promoter can ask again. */
+  @Post('partnerships/:id/rates/decline')
+  async declineRates(@Session() s: SessionClaims, @Param('id') id: string) {
+    return this.decideRates(s, id, false);
+  }
+
+  private async decideRates(s: SessionClaims, id: string, accept: boolean) {
+    const p = await prisma.partnership.findFirst({
+      where: { id, publisher_org_id: s.org_id, proposed_coin_rate: { not: null } },
+    });
+    if (!p) throw new NotFoundException('no open rate proposal');
+    const cleared = { proposed_coin_rate: null, proposed_guest_rate: null };
+    // Compare-and-set on the proposal itself: if the promoter revised it between this
+    // publisher's read and its click, the click applied a price nobody is looking at.
+    const updated = await prisma.partnership.updateMany({
+      where: { id, proposed_coin_rate: p.proposed_coin_rate, proposed_guest_rate: p.proposed_guest_rate },
+      data: accept
+        ? { coin_rate: p.proposed_coin_rate!, guest_rate: p.proposed_guest_rate!, ...cleared }
+        : cleared,
+    });
+    if (!updated.count) throw new BadRequestException('the proposal changed — reload and look again');
+    await audit(s.org_id, `partnership.rates.${accept ? 'accept' : 'decline'}`, `partnership:${id}`, {
+      coin_rate: p.proposed_coin_rate,
+      guest_rate: p.proposed_guest_rate,
+    });
+    return prisma.partnership.findUnique({ where: { id } });
+  }
+
   // ---------- campaigns ----------
 
   @Post('campaigns')

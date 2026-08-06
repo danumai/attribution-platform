@@ -55,6 +55,12 @@ model Partnership {
   guest_rate        Int      @default(10)
   /// how long after a guest redemption the delta can still be claimed
   grace_days        Int      @default(7)
+  /// A repricing the promoter has asked for and the publisher has not agreed to yet. NULL = no
+  /// open proposal. Nothing pays out at these numbers: the columns above stay in force until
+  /// the publisher accepts, which copies these over them and clears them. Set and cleared as a
+  /// pair, so the `guest_rate <= coin_rate` rule can be checked on the pair the way it is above.
+  proposed_coin_rate  Int?
+  proposed_guest_rate Int?
   /// pending | active | suspended — enforced by CHECK. `pending` is only ever "waiting on the
   /// publisher"; an admin pausing the relationship uses `suspended`, which `accept` cannot lift.
   status            String   @default("pending")
