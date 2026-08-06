@@ -4,7 +4,6 @@ import {
   Fields,
   Pass,
   PassStamp,
-  Perf,
   Serial,
   Stub,
   passLede,
@@ -86,7 +85,6 @@ export default function Ended({ searchParams }: { searchParams: { reason?: strin
             artwork, the promoter behind it is the one who can reissue a working code.
           </p>
         </Coupon>
-        <Perf />
         <Stub>
           <Fields
             items={[
@@ -94,7 +92,7 @@ export default function Ended({ searchParams }: { searchParams: { reason?: strin
               ['Reason code', reason || 'ended'],
             ]}
           />
-          <Serial items={['No charge', 'Rev 01']} />
+          <Serial items={['No charge']} />
         </Stub>
       </Pass>
     </main>

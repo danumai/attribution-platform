@@ -22,22 +22,41 @@ import {
   figureColumns,
   figureStrip,
   h3,
+  hint,
   label,
+  meter,
+  meterFill,
   muted,
+  select,
+  skeleton,
+  split,
   stamp,
 } from '@/lib/tw';
 
 type Kind = 'success' | 'error' | 'info';
 type Toast = { id: number; kind: Kind; text: string; leaving?: boolean };
+
+/** One control in a dialog. `select` needs `options`; everything else is an `<input>`. */
+export type DialogField = {
+  name: string;
+  label: string;
+  type?: 'text' | 'number' | 'select';
+  value?: string;
+  placeholder?: string;
+  hint?: string;
+  options?: { value: string; label: string }[];
+  /** blocks submit while empty — the dialog equivalent of a required field */
+  required?: boolean;
+};
+
 type Dialog = {
   title: string;
   body?: string;
   confirmText?: string;
   danger?: boolean;
-  /** present => prompt dialog; the string is the initial input value */
-  input?: string;
-  inputLabel?: string;
-  resolve: (v: string | boolean | null) => void;
+  /** present => the dialog carries a form; absent => it is a confirm */
+  fields?: DialogField[];
+  resolve: (v: Record<string, string> | boolean | null) => void;
 };
 
 let toasts: Toast[] = [];
@@ -77,19 +96,42 @@ export const toast = {
 };
 
 /** Replaces window.confirm. Resolves true when confirmed. */
-export function confirmDialog(o: Omit<Dialog, 'resolve' | 'input' | 'inputLabel'>) {
+export function confirmDialog(o: Omit<Dialog, 'resolve' | 'fields'>) {
   return new Promise<boolean>((res) => {
     dialog = { ...o, resolve: (v) => res(v === true) };
     emit();
   });
 }
 
-/** Replaces window.prompt. Resolves the string, or null when cancelled. */
-export function promptDialog(o: Omit<Dialog, 'resolve'> & { input: string }) {
-  return new Promise<string | null>((res) => {
-    dialog = { ...o, resolve: (v) => res(typeof v === 'string' ? v : null) };
+/**
+ * A form in a dialog. Resolves the field values, or null when cancelled.
+ *
+ * This exists so creating a thing stops being permanent page furniture. Both consoles used to
+ * park a creation form under its own list — a "New campaign" panel on screen forever, below
+ * every campaign you already had, whether or not you wanted one.
+ */
+export function formDialog(o: Omit<Dialog, 'resolve'> & { fields: DialogField[] }) {
+  return new Promise<Record<string, string> | null>((res) => {
+    dialog = { ...o, resolve: (v) => res(v && typeof v === 'object' ? v : null) };
     emit();
   });
+}
+
+/** Replaces window.prompt: one field, unwrapped. Built on `formDialog` so there is a single
+ *  rendering path rather than a second one that drifts. */
+export function promptDialog(o: {
+  title: string;
+  body?: string;
+  confirmText?: string;
+  danger?: boolean;
+  inputLabel?: string;
+  input: string;
+}) {
+  const { inputLabel, input, ...rest } = o;
+  return formDialog({
+    ...rest,
+    fields: [{ name: 'value', label: inputLabel ?? '', value: input, required: true }],
+  }).then((r) => (r ? (r.value ?? null) : null));
 }
 
 /**
@@ -166,6 +208,158 @@ export function Figures({
   );
 }
 
+/**
+ * What a section with nothing in it looks like.
+ *
+ * Every empty state in the console used to be one sentence in a bordered box, with nothing to
+ * do about it. A reader who has just arrived and has no campaigns is exactly the reader most in
+ * need of a button, so the action is part of the primitive rather than an afterthought beside it.
+ */
+export function Empty({
+  title,
+  body,
+  action,
+  className,
+}: {
+  title: string;
+  body?: string;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cx(card, 'grid justify-items-center px-6 py-12 text-center', className)}>
+      <span
+        className="mb-3.5 grid size-11 place-items-center rounded-full bg-card-sunk text-mut [&_svg]:size-5"
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"
+             strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3.5 6.5h13M3.5 10h13M3.5 13.5h7" />
+        </svg>
+      </span>
+      <b className={h3}>{title}</b>
+      {body && <p className={cx(muted, 'mt-1.5 max-w-[46ch] leading-[1.55]')}>{body}</p>}
+      {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
+
+/**
+ * Stands in for a section while its data is in flight.
+ *
+ * One shape per thing being awaited. The console used to shimmer the same five bars whether a
+ * table, a strip of figures or a form was arriving — which tells the reader nothing about what
+ * is about to appear, and makes the swap land as a jump rather than a fill.
+ */
+export function SkeletonCard({ lines = 5, className }: { lines?: number; className?: string }) {
+  return (
+    <div className={cx(card, 'grid gap-3', className)} aria-busy="true" aria-label="Loading">
+      {Array.from({ length: lines }, (_, i) => (
+        <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
+      ))}
+    </div>
+  );
+}
+
+export function SkeletonStrip({ cells = 4, className }: { cells?: number; className?: string }) {
+  return (
+    <div
+      className={cx(figureStrip, figureColumns(cells), className)}
+      aria-busy="true"
+      aria-label="Loading"
+    >
+      {Array.from({ length: cells }, (_, i) => (
+        <div key={i} className={figureCell}>
+          <div className={cx(skeleton, 'w-16')} />
+          <div className={cx(skeleton, 'mt-2.5 h-5 w-12')} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function SkeletonTable({
+  rows = 5,
+  cols = 4,
+  className,
+}: {
+  rows?: number;
+  cols?: number;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cx('overflow-hidden rounded-xl border border-line bg-card shadow-contact-sm', className)}
+      aria-busy="true"
+      aria-label="Loading"
+    >
+      <div className="flex gap-4 border-b border-line bg-card-alt px-3.5 py-3.5">
+        {Array.from({ length: cols }, (_, i) => (
+          <div key={i} className={cx(skeleton, 'h-2.5 flex-1')} />
+        ))}
+      </div>
+      {Array.from({ length: rows }, (_, r) => (
+        <div key={r} className="flex gap-4 border-b border-line-soft px-3.5 py-3.5 last:border-b-0">
+          {Array.from({ length: cols }, (_, c) => (
+            <div key={c} className={cx(skeleton, 'flex-1')} style={{ opacity: 1 - r * 0.13 }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A proportion, printed.
+ *
+ * `of` is the denominator the bar is drawn against. Pass it only when it is real — a meter with
+ * an invented ceiling is worse than no meter, because it looks like a measurement.
+ */
+export function Meter({
+  value,
+  of,
+  state,
+  className,
+}: {
+  value: number;
+  of: number;
+  state?: 'ok' | 'warn' | 'bad';
+  className?: string;
+}) {
+  const ratio = of > 0 ? Math.min(Math.max(value / of, 0), 1) : 0;
+  return (
+    <div
+      className={cx(meter, className)}
+      role="progressbar"
+      aria-valuenow={Math.round(ratio * 100)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <i className={meterFill(ratio, state)} style={{ width: `${ratio * 100}%` }} />
+    </div>
+  );
+}
+
+/** Verified against guest, in the two colours the landing page already assigns those states. */
+export function Split({
+  verified,
+  guest,
+  className,
+}: {
+  verified: number;
+  guest: number;
+  className?: string;
+}) {
+  const total = verified + guest;
+  if (!total) return null;
+  return (
+    <div className={cx(split, className)} aria-hidden="true">
+      <i className="block h-full bg-ok" style={{ width: `${(verified / total) * 100}%` }} />
+      <i className="block h-full bg-warn-lit" style={{ width: `${(guest / total) * 100}%` }} />
+    </div>
+  );
+}
+
 const ICONS: Record<Kind, JSX.Element> = {
   success: <path d="M4 8.5 6.8 11 12 5" />,
   error: <path d="M8 4.6v4.2M8 11.4v.1" />,
@@ -221,53 +415,81 @@ function Toasts() {
 function Dialogs() {
   const d = useSyncExternalStore(subscribe, () => dialog, () => dialog);
   const ref = useRef<HTMLDialogElement>(null);
-  const [value, setValue] = useState('');
+  const [vals, setVals] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!d) return;
-    setValue(d.input ?? '');
+    setVals(Object.fromEntries((d.fields ?? []).map((f) => [f.name, f.value ?? ''])));
     ref.current?.showModal();
   }, [d]);
 
   if (!d) return null;
 
-  const close = (v: string | boolean | null) => {
+  const close = (v: Record<string, string> | boolean | null) => {
     ref.current?.close();
     dialog = null;
     emit();
     d.resolve(v);
   };
 
+  // A required field that is empty blocks submit, rather than letting the form post and come
+  // back as a server error — which is what the login page used to do.
+  const incomplete = (d.fields ?? []).some((f) => f.required && !vals[f.name]?.trim());
+
   return (
     // native <dialog> gives focus trap, Esc and ::backdrop for free
     <dialog
       ref={ref}
-      className="m-auto w-[min(420px,calc(100vw-32px))] rounded-lg border border-line bg-card p-6 text-ink shadow-contact open:animate-modal-in backdrop:animate-fade backdrop:bg-[color-mix(in_srgb,#2a2113_55%,transparent)]"
+      className="m-auto w-[min(440px,calc(100vw-32px))] rounded-xl border border-line bg-card p-6 text-ink shadow-pass open:animate-modal-in backdrop:animate-fade backdrop:bg-[color-mix(in_srgb,var(--color-ink)_45%,transparent)]"
       onCancel={(e) => { e.preventDefault(); close(null); }}
     >
       <form
         method="dialog"
-        onSubmit={(e) => { e.preventDefault(); close(d.input !== undefined ? value : true); }}
+        onSubmit={(e) => { e.preventDefault(); close(d.fields ? vals : true); }}
       >
         <h3 className={`${h3} mb-1.5`}>{d.title}</h3>
         {d.body && <p className={`${muted} leading-[1.5]`}>{d.body}</p>}
-        {d.input !== undefined && (
-          <>
-            {d.inputLabel && <label className={label}>{d.inputLabel}</label>}
-            {/* autofocus is correct here: a prompt dialog exists to take one value */}
-            <input
-              className={cx(field, d.inputLabel ? '' : 'mt-4.5')}
-              autoFocus
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-            />
-          </>
-        )}
+
+        {d.fields?.map((f, i) => {
+          const set = (v: string) => setVals((s) => ({ ...s, [f.name]: v }));
+          return (
+            <div key={f.name}>
+              {f.label && <label className={label} htmlFor={`dlg-${f.name}`}>{f.label}</label>}
+              {f.type === 'select' ? (
+                <select
+                  id={`dlg-${f.name}`}
+                  className={cx(select, !f.label && 'mt-4.5')}
+                  /* the first control is what the dialog was opened to fill in */
+                  autoFocus={i === 0}
+                  value={vals[f.name] ?? ''}
+                  onChange={(e) => set(e.target.value)}
+                >
+                  {f.placeholder && <option value="">{f.placeholder}</option>}
+                  {f.options?.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id={`dlg-${f.name}`}
+                  className={cx(field, !f.label && 'mt-4.5')}
+                  type={f.type ?? 'text'}
+                  autoFocus={i === 0}
+                  placeholder={f.placeholder}
+                  value={vals[f.name] ?? ''}
+                  onChange={(e) => set(e.target.value)}
+                />
+              )}
+              {f.hint && <p className={hint}>{f.hint}</p>}
+            </div>
+          );
+        })}
+
         <div className="mt-5.5 flex justify-end gap-2">
           <button type="button" className={btnGhost} onClick={() => close(null)}>
             Cancel
           </button>
-          <button type="submit" className={d.danger ? btnDanger : btn}>
+          <button type="submit" className={d.danger ? btnDanger : btn} disabled={incomplete}>
             {d.confirmText ?? 'Confirm'}
           </button>
         </div>

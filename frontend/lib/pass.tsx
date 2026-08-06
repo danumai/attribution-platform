@@ -73,9 +73,55 @@ export function PassStamp({ children, posted }: { children: ReactNode; posted?: 
   );
 }
 
-/** The tear line between the two panels is gone; the side panel's own tint is the division. */
-export function Perf() {
-  return null;
+/**
+ * The fork the whole product turns on, asked as a choice rather than buried as a tab.
+ *
+ * Promoter and publisher are not a preference — they are two different products with two
+ * different consoles, and picking wrong means creating an account of the wrong kind. It used to
+ * sit as a segmented control halfway down the signup form, below the organization name, which is
+ * the one place a reader has already stopped reading.
+ */
+export function RoleCard({
+  title,
+  body,
+  selected,
+  onSelect,
+}: {
+  title: string;
+  body: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={cx(
+        'group cursor-pointer rounded-xl border p-4 text-left',
+        'transition-[border-color,background-color,box-shadow] duration-150 ease-press',
+        selected
+          ? 'border-accent bg-accent-soft shadow-contact-sm'
+          : 'border-line bg-card hover:border-mut/40 hover:bg-card-alt',
+      )}
+    >
+      <span className="flex items-center gap-2">
+        <span
+          className={cx(
+            'grid size-4 shrink-0 place-items-center rounded-full border transition-colors duration-150',
+            selected ? 'border-accent bg-accent' : 'border-line bg-card',
+          )}
+          aria-hidden="true"
+        >
+          <span className={cx('size-1.5 rounded-full bg-card', !selected && 'opacity-0')} />
+        </span>
+        <b className={cx('text-[14px] font-semibold tracking-[-0.012em]', selected && 'text-accent')}>
+          {title}
+        </b>
+      </span>
+      <span className="mt-1.5 block text-[13px] leading-normal text-mut">{body}</span>
+    </button>
+  );
 }
 
 /** the side panel: the page's own facts, on a tinted ground */

@@ -51,7 +51,6 @@
 
   /* ---- type ---- */
   --font-sans: var(--font-inter), -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-display: var(--font-inter), -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* the small field label — sentence case, not a stamped caps field name */
@@ -59,6 +58,29 @@
   --text-stamp--line-height: 1.4;
   --text-stamp--letter-spacing: 0;
   --text-stamp--font-weight: 500;
+
+  /* One scale, two ranges. The landing page reads from the top of it, the console from the
+     bottom, so a heading is spelled once instead of as a clamp() at every call site. Tracking
+     tightens as size grows, which is what keeps a 72px line from looking loose beside a 15px
+     one set in the same face. */
+  --text-hero: clamp(38px, 5.6vw, 68px);
+  --text-hero--line-height: 1.03;
+  --text-hero--letter-spacing: -0.035em;
+  --text-hero--font-weight: 680;
+
+  --text-display: clamp(27px, 3.4vw, 40px);
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.028em;
+  --text-display--font-weight: 660;
+
+  --text-title: clamp(20px, 2.2vw, 25px);
+  --text-title--line-height: 1.2;
+  --text-title--letter-spacing: -0.022em;
+  --text-title--font-weight: 620;
+
+  --text-lede: 17px;
+  --text-lede--line-height: 1.6;
+  --text-lede--letter-spacing: -0.008em;
 
   /* ---- geometry ---- */
   --radius-sm: 6px;
@@ -76,7 +98,9 @@
   --shadow-key: 0 1px 2px rgba(79, 70, 229, .24);
   --shadow-key-lit: 0 6px 16px -6px rgba(79, 70, 229, .5);
   --shadow-key-down: 0 1px 2px rgba(79, 70, 229, .3);
-  --shadow-notch: none;
+
+  /* the lift a card takes on hover — one token so a grid of them cannot drift apart */
+  --shadow-lift: 0 12px 32px -14px rgba(16, 24, 40, .22), 0 2px 6px -2px rgba(16, 24, 40, .06);
 
   --ease-press: cubic-bezier(.2, .7, .3, 1);
   --ease-out: cubic-bezier(.16, 1, .3, 1);
@@ -106,17 +130,12 @@
   @keyframes lp-ink { from { opacity: .2; } }
 }
 
-/* Non-namespaced material. The paper world's grain, fibre, distress and guilloche are gone;
-   the perforation vars remain as names so the utilities referencing them keep resolving, but
-   they now draw a plain hairline rule instead of a torn edge. */
+/* The paper world is fully gone. Its grain, fibre, distress, guilloche and perforation vars
+   were all resolving to `none` or to a plain hairline, so every utility reading them painted
+   nothing while still reading as intent. Anything that wanted a rule now asks for `border-line`
+   directly. */
 :root {
   color-scheme: light;
-  --perf-h: linear-gradient(to right, var(--color-line) 0 100%);
-  --perf-v: linear-gradient(to bottom, var(--color-line) 0 100%);
-  --grain: none;
-  --fibre: none;
-  --distress: none;
-  --guilloche: none;
 }
 
 @layer base {

@@ -13,9 +13,9 @@
  * Nothing below hides content by default. */
 
 @media (prefers-reduced-motion: no-preference) {
-  /* --- the authored moment: the pass comes off the press ---
-     The card lands, the routing fields stamp, the display line is struck,
-     the validation rule is ruled under it, and the stub prints last. */
+  /* --- the arrival sequence ---
+     The hero settles, its three facts land, the headline is struck line by line,
+     and the proof panel resolves last. */
 
   .lp .lp-pass,
   .lp .lp-board {
@@ -52,7 +52,7 @@
   .lp .lp-cta-note { animation: lp-rise 0.6s var(--ease-out) 0.9s both; }
   @keyframes lp-rise { from { opacity: 0; transform: translateY(10px); } }
 
-  /* the stub prints downward, the way a thermal head lays a code */
+  /* the code resolves downward, the way a scanner reads one */
   .lp .lp-code { animation: lp-print 0.66s var(--ease-out) 0.62s both; }
   @keyframes lp-print { from { clip-path: inset(0 0 100% 0); } }
   .lp .lp-stub-fields .lp-field { animation: lp-rise 0.5s var(--ease-out) both; }
@@ -60,7 +60,6 @@
   .lp .lp-stub-fields .lp-field:nth-child(2) { animation-delay: 0.92s; }
   .lp .lp-stub-fields .lp-field:nth-child(3) { animation-delay: 0.98s; }
   .lp .lp-stub-fields .lp-field:nth-child(4) { animation-delay: 1.04s; }
-  .lp .lp-serial { animation: lp-rise 0.5s var(--ease-out) 1.12s both; }
 
   /* --- the recurring validation loop, only while the stub is on screen --- */
   .lp-stub[data-run] .lp-scan {
@@ -110,20 +109,15 @@
     }
     @keyframes lp-feed { to { transform: scaleX(1); } }
 
-    /* the nav lifts off the page once the reader has left the top, and gains a
-       glass tint so it reads as floating over the scrolled content beneath it */
+    /* The nav already carries its tint and blur as utilities. What scroll adds is the
+       separation: it lifts off the page once the reader has left the top. */
     .lp .lp-nav {
       animation: lp-nav-set linear both;
       animation-timeline: scroll(root block);
       animation-range: 0 130px;
     }
     @keyframes lp-nav-set {
-      to {
-        box-shadow: 0 14px 26px -24px rgba(26, 23, 18, 0.75);
-        background: color-mix(in srgb, var(--color-paper) 82%, transparent);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-      }
+      to { box-shadow: var(--shadow-contact); }
     }
 
     /* The hero pass needs BOTH its entrance (lp-press-land, above) and this
@@ -241,17 +235,6 @@
     @keyframes lp-count { from { --n: 0; } }
     .lp .lp-class-guest { --fig: var(--color-warn-lit); }
     .lp .lp-class-verified { --fig: var(--color-ok); }
-
-    /* the stamp lands once the fare it marks is on screen */
-    .lp .lp-stamp {
-      animation: lp-struck-stamp linear both;
-      animation-timeline: view();
-      animation-range: entry 28% entry 52%;
-    }
-    @keyframes lp-struck-stamp {
-      from { opacity: 0; rotate: -22deg; scale: 1.5; }
-      to { opacity: 0.34; rotate: -11deg; scale: 1; }
-    }
 
     /* generic section entrance: fade + rise, reused everywhere a card or class
        block scrolls into place — the same idiom .lp-leg already uses */

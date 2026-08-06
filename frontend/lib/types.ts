@@ -168,6 +168,13 @@ export interface AdminScan {
   os: string | null;
   browser: string | null;
   device_type: string | null;
+  /** the four signals an iOS install is scored against — NULL when the hand-off screen was skipped */
+  tz: string | null;
+  screen: string | null;
+  cores: number | null;
+  dark: boolean | null;
+  /** everything else the hand-off screen measured; reporting only, shape fixed by the server */
+  client: Record<string, string | number | boolean> | null;
   consumed: boolean;
   qr_code: string;
   campaign_id: string;

@@ -6,7 +6,7 @@ import { API, api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
 import { Analytics, Audience } from '@/lib/audience';
 import type { CampaignStats, QrCode } from '@/lib/types';
-import { Figures, LoadError, confirmDialog, toast } from '@/lib/ui';
+import { Figures, LoadError, Meter, SkeletonStrip, confirmDialog, toast } from '@/lib/ui';
 import { num } from '@/lib/fmt';
 import {
   DEFAULT_STYLE,
@@ -39,7 +39,9 @@ import {
   codeTab,
   colorwell,
   cx,
+  figure,
   field,
+  skeleton,
   hint,
   label as labelClass,
   link,
@@ -52,7 +54,6 @@ import {
   qrbox,
   sectionHead,
   select as selectField,
-  skeleton,
   stamp,
   studio,
   studioPreview,
@@ -305,6 +306,9 @@ function LogoWell({ logo, onPick, onClear }: { logo?: string; onPick: (f: File) 
   if (logo)
     return (
       <div className={logoWell('filled')}>
+        {/* Literally white, and not `bg-card`: a logo is usually a transparent PNG, and the
+            ground it has to be judged against is the one it will be printed on — the code's
+            light modules. A themed surface here would preview a lie. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           className="size-15.5 shrink-0 rounded-md border border-line bg-white object-contain p-1.5"
@@ -526,6 +530,10 @@ export default function CampaignPage() {
   if (!me) return null;
   const isPromoter = me.type === 'promoter';
   const gradient = style.gradient ?? null;
+  /* What was ever put in: everything granted out of it, plus everything still sitting there.
+     The stats endpoint gives both halves, which is what makes the burn-down a measurement
+     rather than a bar against an invented ceiling. */
+  const funded = stats ? stats.coins_granted + stats.budget_remaining : 0;
 
   const items: NavItem[] = [
     { id: 'overview', label: 'Overview', icon: 'overview', href: '/dashboard' },
@@ -550,11 +558,7 @@ export default function CampaignPage() {
         {loadErr ? (
           <LoadError message={loadErr} onRetry={() => load()} />
         ) : (
-          <div className={cx(card, 'mt-3 grid gap-3')} aria-busy="true" aria-label="Loading">
-            {Array.from({ length: 5 }, (_, i) => (
-              <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
-            ))}
-          </div>
+          <SkeletonStrip className="mt-3" />
         )}
       </Shell>
     );
@@ -578,6 +582,43 @@ export default function CampaignPage() {
           { k: 'budget left', v: num(stats.budget_remaining) },
         ]}
       />
+
+      {/* Burn-down and conversion, the two proportions the figures above cannot show on their
+          own. Both denominators are real: the funded total is what has been granted plus what
+          is left, and the funnel is this campaign's own scans against its own redemptions. */}
+      <div className="mt-3 grid grid-cols-2 gap-3 max-[760px]:grid-cols-1">
+        <div className={card}>
+          <div className="flex items-baseline justify-between gap-3">
+            <b className={stamp}>Budget</b>
+            <span className={muted}>
+              {num(stats.coins_granted)} of {num(stats.coins_granted + stats.budget_remaining)} spent
+            </span>
+          </div>
+          <Meter
+            className="mt-3"
+            value={stats.budget_remaining}
+            of={stats.coins_granted + stats.budget_remaining}
+          />
+          <p className={cx(figure, 'mt-3')}>
+            {funded ? `${((stats.budget_remaining / funded) * 100).toFixed(0)}%` : '—'}{' '}
+            <small className="text-xs font-normal tracking-normal text-mut">still available</small>
+          </p>
+        </div>
+
+        <div className={card}>
+          <div className="flex items-baseline justify-between gap-3">
+            <b className={stamp}>Scan → signup</b>
+            <span className={muted}>
+              {num(stats.redemptions)} of {num(stats.scans)} scans
+            </span>
+          </div>
+          <Meter className="mt-3" value={stats.redemptions} of={stats.scans} state="ok" />
+          <p className={cx(figure, 'mt-3')}>
+            {stats.scans ? `${((stats.redemptions / stats.scans) * 100).toFixed(1)}%` : '—'}{' '}
+            <small className="text-xs font-normal tracking-normal text-mut">converted</small>
+          </p>
+        </div>
+      </div>
 
       {/* The numbers above say how much this campaign did. This says where to spend the next
           print run — which is the decision the promoter actually came here to make. */}

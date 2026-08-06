@@ -4,7 +4,18 @@ import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
 import { Analytics, Audience } from '@/lib/audience';
-import { Figure, Figures, LoadError, confirmDialog, promptDialog, toast } from '@/lib/ui';
+import {
+  Empty,
+  Figure,
+  Figures,
+  LoadError,
+  SkeletonStrip,
+  SkeletonTable,
+  Split,
+  confirmDialog,
+  promptDialog,
+  toast,
+} from '@/lib/ui';
 import type {
   AdminOrg,
   AdminOverview,
@@ -24,7 +35,6 @@ import {
   card,
   cx,
   codeKey,
-  empty as emptyBox,
   field,
   filterBar,
   filterChip,
@@ -47,7 +57,7 @@ import {
   searchInput,
   sectionHead,
   select as selectField,
-  skeleton,
+  stamp,
   table,
   tableFoot,
   tableWrap,
@@ -93,6 +103,26 @@ const HEAD: Record<Tab, string> = {
 // ponytail: crude UA bucketing. New scans carry `device_type` from the server instead.
 const device = (ua: string) =>
   !ua ? '—' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobile/.test(ua) ? 'Mobile' : 'Desktop';
+
+/**
+ * Everything the hand-off screen measured about one handset, as a single hover.
+ *
+ * A column each would be a dozen more on a table that already runs off the side of the screen,
+ * and these are read once — when someone is disputing a single attribution — rather than
+ * scanned down. Screen leads because it is the highest-weighted signal in the match.
+ */
+const handset = (x: AdminScan) => {
+  const rows = Object.entries({
+    screen: x.screen,
+    tz: x.tz,
+    cores: x.cores,
+    theme: x.dark == null ? null : x.dark ? 'dark' : 'light',
+    ...(x.client ?? {}),
+  }).filter(([, v]) => v !== null && v !== undefined);
+  return rows.length
+    ? rows.map(([k, v]) => `${k}  ${v}`).join('\n')
+    : 'No hand-off screen — this scan went straight to its destination.';
+};
 
 /** `Intl` knows every country name already — a lookup table here would be dead weight. */
 const regionNames =
@@ -210,14 +240,7 @@ function Table<T extends object>({
   // a narrowed result set starts at the top again, not 300 rows down
   useEffect(() => setLimit(PAGE), [q, sort]);
 
-  if (loading)
-    return (
-      <div className={cx(card, 'mt-3 grid gap-2.5')}>
-        {Array.from({ length: 6 }, (_, i) => (
-          <div key={i} className={skeleton} style={{ width: `${100 - i * 7}%` }} />
-        ))}
-      </div>
-    );
+  if (loading) return <SkeletonTable className="mt-3" rows={6} cols={Math.min(cols.length, 6)} />;
 
   return (
     <>
@@ -289,14 +312,18 @@ function Table<T extends object>({
           )}
         </div>
       ) : (
-        <div className={cx(card, emptyBox, 'mt-3')}>
-          <p>{q ? `Nothing matches “${q}”.` : empty}</p>
-          {q && (
-            <button className={cx(btnGhost, 'mt-3.5')} onClick={() => setQ('')}>
-              Clear the filter
-            </button>
-          )}
-        </div>
+        <Empty
+          className="mt-3"
+          title={q ? 'Nothing matches that filter' : empty}
+          body={q ? `No row contains “${q}”.` : undefined}
+          action={
+            q ? (
+              <button className={btnGhost} onClick={() => setQ('')}>
+                Clear the filter
+              </button>
+            ) : undefined
+          }
+        />
       )}
     </>
   );
@@ -547,11 +574,7 @@ export default function Admin() {
           failed ? (
             <LoadError message={loadErr} onRetry={() => load()} />
           ) : (
-            <div className={cx(card, 'mt-3 grid gap-3')}>
-              {Array.from({ length: 5 }, (_, i) => (
-                <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
-              ))}
-            </div>
+            <SkeletonStrip className="mt-3" />
           )
         ) : (
           <>
@@ -577,6 +600,30 @@ export default function Admin() {
                 },
               ]}
             />
+
+            {/* Exact, unlike the dashboard's version of the same split: these two counts come
+                off the overview endpoint rather than being derived from a capped page of rows. */}
+            {o.redemptions > 0 && (
+              <div className={cx(card, 'mt-3')}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <b className={stamp}>Verified vs guest</b>
+                  <span className={muted}>{num(o.redemptions)} redemptions</span>
+                </div>
+                <Split
+                  className="mt-3"
+                  verified={o.identified_redemptions}
+                  guest={o.guest_redemptions}
+                />
+                <div className="mt-2.5 flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-ink-soft">
+                  <span>
+                    <b className="font-semibold text-ok">{num(o.identified_redemptions)}</b> verified
+                  </span>
+                  <span>
+                    <b className="font-semibold text-warn">{num(o.guest_redemptions)}</b> still guest
+                  </span>
+                </div>
+              </div>
+            )}
 
             <h2 className={sectionHead}>Needs attention</h2>
             <div className={cx(card, 'mt-3 p-2')}>
@@ -869,6 +916,19 @@ export default function Admin() {
               { h: 'OS', sort: (x) => x.os ?? '', get: (x) => x.os ?? '—' },
               { h: 'Browser', sort: (x) => x.browser ?? '', get: (x) => x.browser ?? '—' },
               { h: 'Lang', sort: (x) => x.language ?? '', get: (x) => x.language ?? '—' },
+              // The signals an iOS match is scored on. Hover carries the rest of them.
+              {
+                h: 'Handset',
+                sort: (x) => x.screen ?? '',
+                get: (x) =>
+                  x.screen ? (
+                    <code title={handset(x)}>{x.screen}</code>
+                  ) : (
+                    <span className={muted} title={handset(x)}>
+                      —
+                    </span>
+                  ),
+              },
               { h: 'From', sort: (x) => x.referer_host ?? '', get: (x) => x.referer_host ?? <span className={muted}>camera</span> },
               { h: 'IP hash', sort: (x) => x.ip_hash ?? '', get: (x) => <code>{x.ip_hash ?? '—'}</code> },
               {

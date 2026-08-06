@@ -45,7 +45,7 @@ export default function ActivityBoard() {
   }, []);
 
   return (
-    <div className={`${lp.board} ${lp.stocked}`}>
+    <div className={lp.board}>
       <div className={lp.boardHead}>
         <span className={lp.boardTitle}>Redemptions posting</span>
         <span className={lp.tag}>Example data</span>

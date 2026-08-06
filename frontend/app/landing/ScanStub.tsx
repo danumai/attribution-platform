@@ -18,7 +18,7 @@ export default function ScanStub() {
       </div>
       <dl className={lp.stubFields}>
         {([
-          ['Code', '7f3a·c19e·4b02'],
+          ['Code', '7f3a·c19e'],
           ['Expires', '30 days'],
           ['Uses', 'Unlimited'],
         ] as const).map(([dt, dd]) => (
@@ -35,11 +35,6 @@ export default function ScanStub() {
           </dd>
         </div>
       </dl>
-      <p className={lp.serial}>
-        <span>Ser. 7f3a-c19e</span>
-        <span>Rev 04</span>
-        <span>Press 01</span>
-      </p>
     </aside>
   );
 }

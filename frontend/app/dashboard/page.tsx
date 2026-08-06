@@ -4,7 +4,18 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
-import { Figures, confirmDialog, promptDialog, toast } from '@/lib/ui';
+import {
+  Empty,
+  Figures,
+  SkeletonCard,
+  SkeletonStrip,
+  SkeletonTable,
+  Split,
+  confirmDialog,
+  formDialog,
+  promptDialog,
+  toast,
+} from '@/lib/ui';
 import { ago, num } from '@/lib/fmt';
 import type { Campaign, Me, Partnership, PublisherOption, Redemption } from '@/lib/types';
 import {
@@ -16,19 +27,17 @@ import {
   code as codeChip,
   codeKey,
   cx,
-  empty,
   fact,
   field,
   hint,
   label,
   linkish,
+  meterInk,
   muted,
   pill,
   queueCount,
   queueRow,
   sectionHead,
-  select,
-  skeleton,
   stamp,
   table,
   tableWrap,
@@ -38,16 +47,6 @@ import {
   thNum,
   tr,
 } from '@/lib/tw';
-
-/** Stands in for a section while its data is in flight. Rendering the real section
- *  against empty arrays would claim "no campaigns yet" to someone who has forty. */
-const Loading = ({ lines = 5 }: { lines?: number }) => (
-  <div className={`${card} mt-3 grid gap-3`} aria-busy="true" aria-label="Loading">
-    {Array.from({ length: lines }, (_, i) => (
-      <div key={i} className={skeleton} style={{ width: `${100 - i * 9}%` }} />
-    ))}
-  </div>
-);
 
 /** Newest first, and never more rows than the caller asked for. */
 function Redemptions({ rows }: { rows: Redemption[] }) {
@@ -103,13 +102,6 @@ export default function Dashboard() {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [newPartner, setNewPartner] = useState({
-    publisher_org_id: '',
-    coin_rate: 50,
-    guest_rate: 10,
-    grace_days: 7,
-  });
-  const [newCampaign, setNewCampaign] = useState({ partnership_id: '', name: '' });
   // Where scans are sent, per platform, plus the publisher's own declared joining bonus.
   const [dest, setDest] = useState({
     landing_url: '',
@@ -182,6 +174,102 @@ export default function Dashboard() {
   // a publisher is the one who has to act on a pending request; a promoter is only waiting
   const awaitingMe = isPromoter ? 0 : partnerships.filter((p) => p.status === 'pending').length;
 
+  /* ---- creation, as dialogs ----
+     These used to be forms parked permanently under their own lists, on screen whether or not
+     anyone wanted to create anything. A creation form is a moment, not furniture. */
+
+  async function newPartnership() {
+    const v = await formDialog({
+      title: 'Request a publisher partnership',
+      body: 'The rates are fixed here, before any campaign can spend against them.',
+      confirmText: 'Request partnership',
+      fields: [
+        {
+          name: 'publisher_org_id',
+          label: 'Publisher',
+          type: 'select',
+          required: true,
+          placeholder: 'Select a publisher…',
+          options: publishers.map((p) => ({
+            value: p.id,
+            label: `${p.name}${p.bonus_label ? ` — ${p.bonus_label}` : ''}${p.ready ? '' : ' (no app registered yet)'}`,
+          })),
+        },
+        {
+          name: 'coin_rate',
+          label: 'Coins granted per verified signup (full tier)',
+          type: 'number',
+          value: '50',
+          required: true,
+        },
+        {
+          name: 'guest_rate',
+          label: 'Coins for an unverified guest (the rest is held back)',
+          type: 'number',
+          value: '10',
+          required: true,
+        },
+        {
+          name: 'grace_days',
+          label: 'Days a guest has to verify and claim the remainder',
+          type: 'number',
+          value: '7',
+          required: true,
+        },
+      ],
+    });
+    if (!v) return;
+    // Worth knowing before a print run, not after: this publisher's scans go nowhere until it
+    // registers a destination. Partnering is still fine — printing codes is not.
+    if (!publishers.find((p) => p.id === v.publisher_org_id)?.ready)
+      toast.info('That publisher has no app or web fallback registered yet, so scans cannot be delivered until it does.');
+    await act(
+      () =>
+        api('/v1/partnerships', {
+          method: 'POST',
+          body: JSON.stringify({
+            publisher_org_id: v.publisher_org_id,
+            coin_rate: +v.coin_rate,
+            guest_rate: +v.guest_rate,
+            grace_days: +v.grace_days,
+          }),
+        }),
+      'Partnership requested — waiting on the publisher.',
+    );
+  }
+
+  async function newCampaign() {
+    const v = await formDialog({
+      title: 'New campaign',
+      body: 'A campaign spends against one active partnership, at that partnership’s rates.',
+      confirmText: 'Create campaign',
+      fields: [
+        {
+          name: 'partnership_id',
+          label: 'Partnership',
+          type: 'select',
+          required: true,
+          placeholder: 'Select…',
+          options: activePartnerships.map((p) => ({
+            value: p.id,
+            label: `${p.publisher_name} — ${p.coin_rate} coins/signup`,
+          })),
+        },
+        {
+          name: 'name',
+          label: 'Campaign name',
+          required: true,
+          placeholder: 'Inflight entertainment promo',
+        },
+      ],
+    });
+    if (!v) return;
+    await act(
+      () => api('/v1/campaigns', { method: 'POST', body: JSON.stringify(v) }),
+      `Campaign "${v.name}" created.`,
+    );
+  }
+
   const items: NavItem[] = [
     { id: 'overview', label: 'Overview', icon: 'overview' },
     { id: 'partnerships', label: 'Partnerships', icon: 'partnerships', badge: awaitingMe },
@@ -194,6 +282,8 @@ export default function Dashboard() {
   // not a count. Print it as one rather than overstating certainty.
   const capped = redemptions.length >= 100;
   const coinsGranted = redemptions.reduce((n, x) => n + (x.coins ?? 0), 0);
+  const verified = redemptions.filter((x) => x.identified).length;
+  const guests = redemptions.length - verified;
   const kpis = [
     { k: 'Active campaigns', v: num(campaigns.filter((c) => c.status === 'active').length), go: 'campaigns' },
     { k: 'Active partnerships', v: num(activePartnerships.length), go: 'partnerships' },
@@ -210,6 +300,8 @@ export default function Dashboard() {
   const noDestination =
     !isPromoter && loaded && profile && !profile.landing_url && !profile.android_package && !profile.ios_app_id;
 
+  const canCreateCampaign = isPromoter && activePartnerships.length > 0;
+
   return (
     <Shell
       org={me}
@@ -219,12 +311,13 @@ export default function Dashboard() {
       title={HEAD[sec].title}
       lede={HEAD[sec].lede}
       actions={
-        sec === 'campaigns' && isPromoter && activePartnerships.length > 0 ? (
-          <button
-            className={linkish}
-            onClick={() => document.getElementById('new-campaign')?.scrollIntoView({ behavior: 'smooth' })}
-          >
+        sec === 'campaigns' && canCreateCampaign ? (
+          <button className={btn} onClick={newCampaign} disabled={busy}>
             New campaign
+          </button>
+        ) : sec === 'partnerships' && isPromoter ? (
+          <button className={btn} onClick={newPartnership} disabled={busy || publishers.length === 0}>
+            Request partnership
           </button>
         ) : null
       }
@@ -243,40 +336,61 @@ export default function Dashboard() {
       {sec === 'overview' && (
         <>
           <h2 className={sectionHead}>Live now</h2>
-          {!loaded ? (
-            <Loading lines={3} />
-          ) : (
-          <Figures className="mt-3" items={kpis} onPick={setSec} />
+          {!loaded ? <SkeletonStrip className="mt-3" /> : <Figures className="mt-3" items={kpis} onPick={setSec} />}
+
+          {/* The split is real — `identified` is per row — but it is drawn from the same capped
+              window as the counts above it, so it says so rather than implying a total. */}
+          {loaded && redemptions.length > 0 && (
+            <div className={cx(card, 'mt-3')}>
+              <div className="flex items-baseline justify-between gap-3">
+                <b className={stamp}>Verified vs guest</b>
+                <span className={muted}>
+                  {capped ? 'newest 100 redemptions' : `${num(redemptions.length)} redemptions`}
+                </span>
+              </div>
+              <Split className="mt-3" verified={verified} guest={guests} />
+              <div className="mt-2.5 flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-ink-soft">
+                <span><b className="font-semibold text-ok">{num(verified)}</b> verified</span>
+                <span><b className="font-semibold text-warn">{num(guests)}</b> still guest</span>
+              </div>
+            </div>
           )}
 
           <h2 className={sectionHead}>Needs attention</h2>
           {!loaded ? (
-            <Loading lines={3} />
+            <SkeletonCard className="mt-3" lines={3} />
           ) : (
-          <div className={cx(card, 'mt-3 p-2')}>
-            {[
-              isPromoter
-                ? ['Partnership requests waiting on a publisher', partnerships.filter((p) => p.status === 'pending').length, 'partnerships']
-                : ['Partnership requests waiting on you', awaitingMe, 'partnerships'],
-              ['Campaigns that cannot pay for one more signup', campaigns.filter((c) => c.status === 'active' && c.budget < c.coin_rate).length, 'campaigns'],
-              ['Paused campaigns', campaigns.filter((c) => c.status === 'paused').length, 'campaigns'],
-            ].map(([k, v, go]) => (
-              <button className={queueRow} key={k as string} onClick={() => setSec(go as string)}>
-                <span className={queueCount(Boolean(v))}>{(v as number) ?? 0}</span>
-                <span>{k as string}</span>
-                <span className="ml-auto text-mut" aria-hidden="true">→</span>
-              </button>
-            ))}
-          </div>
+            <div className={cx(card, 'mt-3 p-2')}>
+              {[
+                isPromoter
+                  ? ['Partnership requests waiting on a publisher', partnerships.filter((p) => p.status === 'pending').length, 'partnerships']
+                  : ['Partnership requests waiting on you', awaitingMe, 'partnerships'],
+                ['Campaigns that cannot pay for one more signup', campaigns.filter((c) => c.status === 'active' && c.budget < c.coin_rate).length, 'campaigns'],
+                ['Paused campaigns', campaigns.filter((c) => c.status === 'paused').length, 'campaigns'],
+              ].map(([k, v, go]) => (
+                <button className={queueRow} key={k as string} onClick={() => setSec(go as string)}>
+                  <span className={queueCount(Boolean(v))}>{(v as number) ?? 0}</span>
+                  <span>{k as string}</span>
+                  <span className="ml-auto text-mut" aria-hidden="true">→</span>
+                </button>
+              ))}
+            </div>
           )}
 
           <h2 className={sectionHead}>Latest redemptions</h2>
           {!loaded ? (
-            <Loading />
+            <SkeletonTable className="mt-3" />
           ) : redemptions.length === 0 ? (
-            <div className={cx(card, empty, "mt-3")}>
-              <p>No rewards granted yet. They appear here the moment a scan converts.</p>
-            </div>
+            <Empty
+              className="mt-3"
+              title="No rewards granted yet"
+              body="A redemption appears here the moment a scan converts and a publisher vouches for the signup."
+              action={
+                canCreateCampaign ? (
+                  <button className={btn} onClick={newCampaign}>Create a campaign</button>
+                ) : undefined
+              }
+            />
           ) : (
             <>
               <Redemptions rows={redemptions.slice(0, 5)} />
@@ -292,81 +406,26 @@ export default function Dashboard() {
 
       {sec === 'partnerships' && (
         <>
-          {isPromoter && (
-            <>
-              <h2 className={sectionHead}>Request a publisher partnership</h2>
-              <div className={cx(card, "mt-3")}>
-                <label className={label}>Publisher</label>
-                <select
-                  className={select}
-                  value={newPartner.publisher_org_id}
-                  onChange={(e) => setNewPartner({ ...newPartner, publisher_org_id: e.target.value })}
-                >
-                  <option value="">Select a publisher…</option>
-                  {publishers.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {p.bonus_label ? ` — ${p.bonus_label}` : ''}
-                      {p.ready ? '' : ' (no app registered yet)'}
-                    </option>
-                  ))}
-                </select>
-                {/* Worth knowing before a print run, not after: this publisher's scans go nowhere
-                    until it registers a destination. */}
-                {publishers.find((p) => p.id === newPartner.publisher_org_id && !p.ready) && (
-                  <p className={hint}>
-                    This publisher has registered no app or web fallback yet, so scans cannot be
-                    delivered until it does. Partnering is still fine — printing codes is not.
-                  </p>
-                )}
-                <label className={label}>Coins granted per verified signup (full tier)</label>
-                <input
-              className={field}
-                  type="number"
-                  value={newPartner.coin_rate}
-                  onChange={(e) => setNewPartner({ ...newPartner, coin_rate: +e.target.value })}
-                />
-                <label className={label}>Coins for an unverified guest (the rest is held back)</label>
-                <input
-              className={field}
-                  type="number"
-                  value={newPartner.guest_rate}
-                  onChange={(e) => setNewPartner({ ...newPartner, guest_rate: +e.target.value })}
-                />
-                <label className={label}>Days a guest has to verify and claim the remainder</label>
-                <input
-              className={field}
-                  type="number"
-                  value={newPartner.grace_days}
-                  onChange={(e) => setNewPartner({ ...newPartner, grace_days: +e.target.value })}
-                />
-                <button
-                  className={btn}
-                  disabled={busy || !newPartner.publisher_org_id}
-                  onClick={() =>
-                    act(
-                      () => api('/v1/partnerships', { method: 'POST', body: JSON.stringify(newPartner) }),
-                      'Partnership requested — waiting on the publisher.',
-                    )
-                  }
-                >
-                  {busy ? 'Sending…' : 'Request partnership'}
-                </button>
-              </div>
-            </>
-          )}
-
           <h2 className={sectionHead}>All partnerships</h2>
           {!loaded ? (
-            <Loading />
+            <SkeletonTable className="mt-3" cols={5} />
           ) : partnerships.length === 0 ? (
-            <div className={cx(card, empty, "mt-3")}>
-              <p>
-                {isPromoter
-                  ? 'No partnerships yet. Request one above — a campaign can only spend against an active partnership.'
-                  : 'No partnerships yet. They appear here when a promoter asks to work with you.'}
-              </p>
-            </div>
+            <Empty
+              className="mt-3"
+              title="No partnerships yet"
+              body={
+                isPromoter
+                  ? 'A campaign can only spend against an active partnership, so this is the first step.'
+                  : 'They appear here when a promoter asks to work with you.'
+              }
+              action={
+                isPromoter ? (
+                  <button className={btn} onClick={newPartnership} disabled={publishers.length === 0}>
+                    Request a partnership
+                  </button>
+                ) : undefined
+              }
+            />
           ) : (
             <div className={tableWrap}>
               <table className={table}>
@@ -393,7 +452,7 @@ export default function Dashboard() {
                       <td className={td}>
                         {!isPromoter && p.status === 'pending' && (
                           <button
-                            className={cx(btnTiny, "my-0.5")}
+                            className={cx(btnTiny, 'my-0.5')}
                             onClick={() =>
                               act(
                                 () => api(`/v1/partnerships/${p.id}/accept`, { method: 'POST' }),
@@ -417,155 +476,128 @@ export default function Dashboard() {
       {sec === 'campaigns' && (
         <>
           <h2 className={sectionHead}>Campaigns</h2>
-          {!loaded && <Loading />}
+          {!loaded && <SkeletonCard className="mt-3" />}
           {loaded && campaigns.length === 0 && (
-            <div className={cx(card, empty, "mt-3")}>
-              <p>
-                {isPromoter
-                  ? 'No campaigns yet. An active partnership is what a campaign spends against — create one below.'
-                  : 'No campaigns yet. They appear here once a promoter you partner with starts one.'}
-              </p>
-            </div>
+            <Empty
+              className="mt-3"
+              title="No campaigns yet"
+              body={
+                isPromoter
+                  ? 'A campaign spends against an active partnership. Once you have one, this is where the codes come from.'
+                  : 'They appear here once a promoter you partner with starts one.'
+              }
+              action={
+                canCreateCampaign ? (
+                  <button className={btn} onClick={newCampaign}>New campaign</button>
+                ) : isPromoter ? (
+                  <button className={btnGhost} onClick={() => setSec('partnerships')}>
+                    Request a partnership first
+                  </button>
+                ) : undefined
+              }
+            />
           )}
           {campaigns.map((c) => {
             // What the promoter actually has to know: how many more signups this budget
             // can still pay for. Zero is the moment scans stop granting coins.
             const covers = c.coin_rate > 0 ? Math.floor(c.budget / c.coin_rate) : 0;
-            // A fact the promoter has to act on prints in the ink that says so: ochre
-            // when the budget is running down, red when it cannot pay for one more signup.
-            const state = covers === 0 ? 'text-bad' : covers < 10 ? 'text-warn' : 'text-ink';
             return (
-            <div className={cx(card, 'mt-3 grid gap-4')} key={c.id}>
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <b className="text-base font-[650] tracking-[-0.018em]">{c.name}</b>{' '}
-                  <span className={cx(pill(c.status), 'ml-2')}>{c.status}</span>
-                  <div className="mt-0.75 text-[12.5px] text-mut tabular-nums">
-                    {c.promoter_name} → {c.publisher_name}
+              <div className={cx(card, 'mt-3 grid gap-4')} key={c.id}>
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <b className="text-base font-[650] tracking-[-0.018em]">{c.name}</b>{' '}
+                    <span className={cx(pill(c.status), 'ml-2')}>{c.status}</span>
+                    <div className="mt-0.75 text-[12.5px] text-mut tabular-nums">
+                      {c.promoter_name} → {c.publisher_name}
+                    </div>
                   </div>
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  {isPromoter && (
-                    <>
-                      <button
-                        className={btnGhost}
-                        onClick={async () => {
-                          const v = await promptDialog({
-                            title: `Fund "${c.name}"`,
-                            body: `At ${num(c.coin_rate)} coins per signup, 1000 coins covers about ${Math.floor(
-                              1000 / c.coin_rate,
-                            )} signups.`,
-                            inputLabel: 'Coins to add',
-                            input: '1000',
-                            confirmText: 'Add funds',
-                          });
-                          if (v)
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {isPromoter && (
+                      <>
+                        <button
+                          className={btnGhost}
+                          onClick={async () => {
+                            const v = await promptDialog({
+                              title: `Fund "${c.name}"`,
+                              body: `At ${num(c.coin_rate)} coins per signup, 1000 coins covers about ${Math.floor(
+                                1000 / c.coin_rate,
+                              )} signups.`,
+                              inputLabel: 'Coins to add',
+                              input: '1000',
+                              confirmText: 'Add funds',
+                            });
+                            if (v)
+                              act(
+                                () =>
+                                  api(`/v1/campaigns/${c.id}/fund`, {
+                                    method: 'POST',
+                                    body: JSON.stringify({ coins: +v }),
+                                  }),
+                                `Funded ${num(+v)} coins.`,
+                              );
+                          }}
+                        >
+                          Fund
+                        </button>
+                        <button
+                          className={btnGhost}
+                          onClick={() =>
                             act(
                               () =>
-                                api(`/v1/campaigns/${c.id}/fund`, {
-                                  method: 'POST',
-                                  body: JSON.stringify({ coins: +v }),
+                                api(`/v1/campaigns/${c.id}`, {
+                                  method: 'PATCH',
+                                  body: JSON.stringify({
+                                    status: c.status === 'active' ? 'paused' : 'active',
+                                  }),
                                 }),
-                              `Funded ${num(+v)} coins.`,
-                            );
-                        }}
-                      >
-                        Fund
-                      </button>
-                      <button
-                        className={btnGhost}
-                        onClick={() =>
-                          act(
-                            () =>
-                              api(`/v1/campaigns/${c.id}`, {
-                                method: 'PATCH',
-                                body: JSON.stringify({
-                                  status: c.status === 'active' ? 'paused' : 'active',
-                                }),
-                              }),
-                            c.status === 'active'
-                              ? `${c.name} paused — scans stop granting coins.`
-                              : `${c.name} is live again.`,
-                          )
-                        }
-                      >
-                        {c.status === 'active' ? 'Pause' : 'Activate'}
-                      </button>
+                              c.status === 'active'
+                                ? `${c.name} paused — scans stop granting coins.`
+                                : `${c.name} is live again.`,
+                            )
+                          }
+                        >
+                          {c.status === 'active' ? 'Pause' : 'Activate'}
+                        </button>
+                        <Link className={btn} href={`/campaigns/${c.id}`}>
+                          QR codes &amp; stats
+                        </Link>
+                      </>
+                    )}
+                    {!isPromoter && (
                       <Link className={btn} href={`/campaigns/${c.id}`}>
-                        QR codes &amp; stats
+                        Stats
                       </Link>
-                    </>
-                  )}
-                  {!isPromoter && (
-                    <Link className={btn} href={`/campaigns/${c.id}`}>
-                      Stats
-                    </Link>
-                  )}
-                </div>
-              </div>
-
-              {/* the facts are one group, so they sit together at the left rather than
-                  spreading across the card — a 1fr grid pushed them a third of a screen apart */}
-              <dl className="flex flex-wrap gap-x-11 gap-y-3.5 border-t border-line-soft pt-3.5">
-                {([
-                  ['Rate', num(c.coin_rate), 'coins / signup', 'text-ink'],
-                  ['Budget', num(c.budget), 'coins', 'text-ink'],
-                  ['Covers', num(covers), 'more signups', state],
-                ] as const).map(([k, v, unit, ink]) => (
-                  <div className="min-w-24" key={k}>
-                    <dt className={stamp}>{k}</dt>
-                    <dd className={cx(fact, ink)}>
-                      {v} <small className="font-sans text-xs font-normal tracking-normal text-mut">{unit}</small>
-                    </dd>
+                    )}
                   </div>
-                ))}
-              </dl>
-            </div>
+                </div>
+
+                {/* the facts are one group, so they sit together at the left rather than
+                    spreading across the card — a 1fr grid pushed them a third of a screen apart.
+
+                    No meter here: this listing carries the budget still remaining but not the
+                    total ever funded, so a bar would have to invent its own ceiling. The real
+                    burn-down lives on the campaign page, where the stats endpoint gives both
+                    halves of the fraction. */}
+                <dl className="flex flex-wrap gap-x-11 gap-y-3.5 border-t border-line-soft pt-3.5">
+                  {([
+                    ['Rate', num(c.coin_rate), 'coins / signup', 'text-ink'],
+                    ['Budget', num(c.budget), 'coins', 'text-ink'],
+                    ['Covers', num(covers), 'more signups', meterInk(covers)],
+                  ] as const).map(([k, v, unit, ink]) => (
+                    <div className="min-w-24" key={k}>
+                      <dt className={stamp}>{k}</dt>
+                      <dd className={cx(fact, ink)}>
+                        {v}{' '}
+                        <small className="font-sans text-xs font-normal tracking-normal text-mut">
+                          {unit}
+                        </small>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
             );
           })}
-
-          {isPromoter && activePartnerships.length > 0 && (
-            <>
-              <h2 className={sectionHead} id="new-campaign">New campaign</h2>
-              <div className={cx(card, "mt-3")}>
-                <label className={label}>Partnership</label>
-                <select
-                  className={select}
-                  value={newCampaign.partnership_id}
-                  onChange={(e) => setNewCampaign({ ...newCampaign, partnership_id: e.target.value })}
-                >
-                  <option value="">Select…</option>
-                  {activePartnerships.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.publisher_name} — {p.coin_rate} coins/signup
-                    </option>
-                  ))}
-                </select>
-                <label className={label}>Campaign name</label>
-                <input
-              className={field}
-                  value={newCampaign.name}
-                  onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
-                  placeholder="Inflight entertainment promo"
-                />
-                <button
-                  className={btn}
-                  disabled={busy || !newCampaign.partnership_id || !newCampaign.name}
-                  onClick={() =>
-                    act(async () => {
-                      await api('/v1/campaigns', {
-                        method: 'POST',
-                        body: JSON.stringify(newCampaign),
-                      });
-                      setNewCampaign({ partnership_id: '', name: '' });
-                    }, `Campaign "${newCampaign.name}" created.`)
-                  }
-                >
-                  {busy ? 'Creating…' : 'Create campaign'}
-                </button>
-              </div>
-            </>
-          )}
         </>
       )}
 
@@ -573,14 +605,13 @@ export default function Dashboard() {
         <>
           <h2 className={sectionHead}>Redemptions</h2>
           {!loaded ? (
-            <Loading lines={6} />
+            <SkeletonTable className="mt-3" rows={8} />
           ) : redemptions.length === 0 ? (
-            <div className={cx(card, empty, "mt-3")}>
-              <p>
-                No rewards granted yet. A redemption is recorded the moment a publisher vouches
-                for a signup that came from one of your codes.
-              </p>
-            </div>
+            <Empty
+              className="mt-3"
+              title="No rewards granted yet"
+              body="A redemption is recorded the moment a publisher vouches for a signup that came from one of your codes."
+            />
           ) : (
             <>
               <Redemptions rows={redemptions} />
@@ -596,7 +627,7 @@ export default function Dashboard() {
       {sec === 'settings' && (
         <>
           <h2 className={sectionHead}>Where scans go</h2>
-          <div className={cx(card, "mt-3")}>
+          <div className={cx(card, 'mt-3')}>
             <p className={muted}>
               A scan is sent straight to your store listing. Nothing redeemable travels with it —
               your app receives no code, and attribution happens server-to-server afterwards.
@@ -634,7 +665,7 @@ export default function Dashboard() {
               your own terms — this platform never issues or fulfils it.
             </p>
             <button
-              className={btn}
+              className={cx(btn, 'mt-5')}
               disabled={busy}
               onClick={() =>
                 act(async () => {
@@ -647,7 +678,7 @@ export default function Dashboard() {
           </div>
 
           <h2 className={sectionHead}>API key</h2>
-          <div className={cx(card, "mt-3")}>
+          <div className={cx(card, 'mt-3')}>
             <p className={muted}>
               Your backend calls <code className={codeChip}>POST /v1/attribution/claim</code> with this key when a new
               user finishes signing up, passing the Play install referrer (Android) or the
@@ -665,7 +696,7 @@ export default function Dashboard() {
               </p>
             )}
             <button
-              className={btnGhost}
+              className={cx(btnGhost, 'mt-4')}
               onClick={async () => {
                 const go = await confirmDialog({
                   title: 'Rotate API key?',

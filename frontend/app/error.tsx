@@ -6,7 +6,6 @@ import {
   Fields,
   Pass,
   PassStamp,
-  Perf,
   Serial,
   Stub,
   passLede,
@@ -48,7 +47,6 @@ export default function Error({ error, reset }: { error: Error; reset: () => voi
             </Link>
           </div>
         </Coupon>
-        <Perf />
         <Stub>
           <Fields
             items={[
@@ -58,7 +56,7 @@ export default function Error({ error, reset }: { error: Error; reset: () => voi
               ['Reference', (error as { digest?: string }).digest ?? (error.message.slice(0, 40) || '—')],
             ]}
           />
-          <Serial items={['No charge', 'Rev 01']} />
+          <Serial items={['No charge']} />
         </Stub>
       </Pass>
     </main>

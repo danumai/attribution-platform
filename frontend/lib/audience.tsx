@@ -27,6 +27,8 @@ export interface Analytics {
     coins: number;
     repeat_scans: number;
     geo_known: number;
+    /** scans that passed through the hand-off screen and reported handset detail */
+    handset_known: number;
     conversion_rate: number;
   };
   dims: Record<string, Bucket[]>;
@@ -55,6 +57,12 @@ function labelFor(dim: string, key: string): string {
   }
   if (dim === 'weekday') return WEEKDAYS[+key] ?? key;
   if (dim === 'hour') return `${key}:00`;
+  // `393x852@3` is a storage format, not a label. Printed as geometry it reads as a handset.
+  if (dim === 'screen') {
+    const m = /^(\d+)x(\d+)@([\d.]+)$/.exec(key);
+    if (m) return `${m[1]} × ${m[2]} @${m[3]}×`;
+  }
+  if (dim === 'network') return key.toUpperCase();
   return key;
 }
 
@@ -136,11 +144,11 @@ function Columns({ dim, rows, empty }: { dim: string; rows: Bucket[]; empty: str
 
   return (
     <div>
-      {/* the ceiling is a perforation, the system's own hairline, so it reads as printed
-          furniture rather than as a second axis competing with the baseline */}
+      {/* the ceiling is the system's own hairline, so it reads as a reference line rather than
+          as a second axis competing with the baseline */}
       <div className="mb-1.5 flex items-center gap-2.5">
         <span className={stamp}>peak</span>
-        <span className="h-0.5 flex-1 bg-[image:var(--perf-h)]" aria-hidden="true" />
+        <span className="h-px flex-1 bg-line" aria-hidden="true" />
         <span className="font-mono text-[11.5px] tabular-nums text-ink-soft">{num(top)}</span>
       </div>
       <div className="flex h-21 items-end gap-0.75 border-b border-line">
@@ -208,6 +216,14 @@ export function Audience({
   // Geo arrives from the CDN in front of the app. Locally there is no CDN, so an empty map is
   // the expected state rather than a fault — say which it is instead of showing a blank panel.
   const geoOff = Boolean(t && t.scans > 0 && t.geo_known === 0);
+
+  // Handset detail only exists for scans that went through the hand-off screen — iOS into a
+  // registered App Store listing. Saying what share that is turns a panel full of "unknown"
+  // from a data fault into the coverage number it actually is.
+  const handsetPct = t?.scans ? Math.round((t.handset_known / t.scans) * 100) : 0;
+  const handsetNote = t?.scans
+    ? `${num(t.handset_known)} of ${num(t.scans)} scans · ${handsetPct}%`
+    : undefined;
 
   const headline = useMemo(
     () => [
@@ -301,6 +317,32 @@ export function Audience({
         </Panel>
         <Panel title="Browser or in-app view" note="channel signal">
           <BarList dim="browser" rows={d.browser ?? []} empty="No scans in this window." />
+        </Panel>
+      </div>
+
+      <h2 className={sectionHead}>Handset</h2>
+      <p className={cx(muted, 'mt-2 max-w-[68ch]')}>
+        Measured on the hand-off screen an iPhone scan passes through on its way to the App
+        Store. It is the same evidence an install is matched against, so this section doubles as
+        the coverage report behind iOS attribution — “unknown” is a scan that was sent straight
+        to a listing, or one where the browser blocked script.
+      </p>
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3">
+        <Panel title="Screen" note={handsetNote}>
+          <BarList
+            dim="screen"
+            rows={d.screen ?? []}
+            empty="No scans in this window."
+          />
+        </Panel>
+        <Panel title="Timezone" note="reported by the device">
+          <BarList dim="tz" rows={d.tz ?? []} empty="No scans in this window." />
+        </Panel>
+        <Panel title="Appearance">
+          <BarList dim="theme" rows={d.theme ?? []} empty="No scans in this window." />
+        </Panel>
+        <Panel title="Connection" note="not reported by Safari">
+          <BarList dim="network" rows={d.network ?? []} empty="No scans in this window." />
         </Panel>
       </div>
 

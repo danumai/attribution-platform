@@ -39,7 +39,7 @@ export default function JourneyModal({ open, onClose }: { open: boolean; onClose
         if (e.target === ref.current) onClose();
       }}
     >
-      <div className={`${lp.modal} ${lp.passShell} ${lp.stocked}`}>
+      <div className={`${lp.modal} ${lp.passShell}`}>
         <button className={lp.modalClose} onClick={onClose} aria-label="Close">
           &times;
         </button>

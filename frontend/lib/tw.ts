@@ -139,8 +139,6 @@ export const thNum = `${th} text-right`;
 export const tableFoot =
   'flex items-center gap-3 border-t border-line bg-card-alt px-4 py-3';
 
-export const empty = 'px-6 py-10 text-center [&_p]:text-mut';
-
 /* ---- the numbers worth glancing at ---- */
 
 /**
@@ -319,9 +317,43 @@ export function health(ok: boolean) {
 export function healthMark(ok: boolean) {
   return cx(
     'grid size-8 shrink-0 place-items-center rounded-full [&_svg]:size-5',
-    ok ? 'bg-ok-soft text-ok' : 'bg-white text-bad',
+    ok ? 'bg-ok-soft text-ok' : 'bg-card text-bad',
   );
 }
+
+/* ---- proportion: meters and splits ---- */
+
+/**
+ * The trough a meter fills. A bar is a width, not a chart library — the same call the audience
+ * panel's BarList already makes.
+ *
+ * Meters exist here because a spend product that prints its budget as an integer has hidden its
+ * only real story. "1,200 coins" says nothing; "1,200 left of 5,000" is the whole picture.
+ */
+export const meter = 'h-1.5 overflow-hidden rounded-full bg-card-sunk';
+
+/**
+ * How full, and in which ink.
+ *
+ * The thresholds are the ones the dashboard was already applying to text colour inline — a
+ * budget that cannot pay for one more signup is `bad`, under ten is `warn`. Lifting them here
+ * is what stops the third call site from picking its own numbers.
+ */
+export function meterFill(ratio: number, state?: 'ok' | 'warn' | 'bad') {
+  const ink = state ?? (ratio <= 0 ? 'bad' : ratio < 0.15 ? 'warn' : 'ok');
+  return cx(
+    'block h-full rounded-full transition-[width] duration-500 ease-out',
+    { ok: 'bg-accent', warn: 'bg-warn-lit', bad: 'bg-bad' }[ink],
+  );
+}
+
+/** the ink a figure takes when the figure itself is the warning */
+export function meterInk(covers: number) {
+  return covers === 0 ? 'text-bad' : covers < 10 ? 'text-warn' : 'text-ink';
+}
+
+/** two proportions in one bar: verified against guest, in the colours the landing page uses */
+export const split = 'flex h-1.5 gap-px overflow-hidden rounded-full bg-card-sunk';
 
 /* ---- QR design studio ---- */
 
@@ -411,7 +443,6 @@ export const page =
 
 /* ---- headings ---- */
 
-export const h1 =
-  'text-[clamp(21px,2.4vw,26px)] font-semibold leading-[1.2] tracking-[-0.024em] text-balance';
+export const h1 = 'text-title text-balance';
 
 export const h3 = 'text-[15px] font-semibold tracking-[-0.014em]';

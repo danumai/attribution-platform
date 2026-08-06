@@ -7,7 +7,6 @@ import {
   Fields,
   Pass,
   PassStamp,
-  Perf,
   Serial,
   Stub,
   passLede,
@@ -93,7 +92,6 @@ function Sim() {
               the platform only bills a promoter when it can name the campaign that earned one.
             </p>
           </Coupon>
-          <Perf />
           <Stub>
             <Fields
               items={[
@@ -102,7 +100,7 @@ function Sim() {
                 ['Promoter charged', '0'],
               ]}
             />
-            <Serial items={['Organic', 'Rev 01']} />
+            <Serial items={['Organic']} />
           </Stub>
         </Pass>
       </main>
@@ -143,7 +141,6 @@ function Sim() {
               </div>
             )}
           </Coupon>
-          <Perf />
           <Stub>
             <Fields
               items={[
@@ -155,7 +152,7 @@ function Sim() {
                   : []),
               ]}
             />
-            <Serial items={[result.pending_fee > 0 ? 'Part held' : 'Posted', 'Rev 01']} />
+            <Serial items={[result.pending_fee > 0 ? 'Part held' : 'Posted']} />
           </Stub>
         </Pass>
       </main>
@@ -205,7 +202,6 @@ function Sim() {
             {err && <div className={`${alertErr} mt-3.5`}>{err}</div>}
           </form>
         </Coupon>
-        <Perf />
         <Stub>
           <Fields
             items={[
@@ -215,7 +211,7 @@ function Sim() {
               ['Match path', referrer.trim() ? 'Referrer' : 'Fingerprint'],
             ]}
           />
-          <Serial items={['Stand-in', 'Rev 01']} />
+          <Serial items={['Stand-in']} />
         </Stub>
       </Pass>
     </main>

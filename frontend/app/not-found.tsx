@@ -5,7 +5,6 @@ import {
   Fields,
   Pass,
   PassStamp,
-  Perf,
   Serial,
   Stub,
   passLede,
@@ -36,7 +35,6 @@ export default function NotFound() {
             Back to the start
           </Link>
         </Coupon>
-        <Perf />
         <Stub>
           <Fields
             items={[
@@ -44,7 +42,7 @@ export default function NotFound() {
               ['Record', 'Not found'],
             ]}
           />
-          <Serial items={['No charge', 'Rev 01']} />
+          <Serial items={['No charge']} />
         </Stub>
       </Pass>
     </main>
