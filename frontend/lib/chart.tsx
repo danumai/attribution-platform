@@ -51,11 +51,15 @@ function useWidth<T extends HTMLElement>() {
  *
  * An axis topped at the data's own maximum prints ticks like 37 and 74, which are numbers
  * about this dataset rather than a scale — the reader has to do arithmetic to place a bar.
+ *
+ * The step never falls below 1. Everything this console plots is a count of things that
+ * happened, and a quiet week — three scans on the best day — would otherwise be scaled
+ * against 0.5 and 1.5, which are not quantities of scans.
  */
-function ticks(max: number, count = 4) {
+export function ticks(max: number, count = 4) {
   if (max <= 0) return { top: 1, lines: [0, 1] };
   const mag = 10 ** Math.floor(Math.log10(max / count));
-  const step = ([1, 2, 5, 10].find((m) => m * mag >= max / count) ?? 10) * mag;
+  const step = Math.max(([1, 2, 5, 10].find((m) => m * mag >= max / count) ?? 10) * mag, 1);
   const top = Math.ceil(max / step) * step;
   const lines: number[] = [];
   for (let v = 0; v <= top + step / 2; v += step) lines.push(v);
@@ -252,13 +256,19 @@ export function Chart({
               shapeRendering="crispEdges"
             />
 
+            {/* Counted back from the newest point, not forward from the oldest: the last tick
+                is the one the reader needs, and an axis stepped forward either drops it or
+                prints it a few pixels from its neighbour. A bar's label sits under the bar,
+                so only a line's two ends need pulling inside the plot. */}
             {labels.map((l, i) =>
-              i % step === 0 || i === n - 1 ? (
+              (n - 1 - i) % step === 0 ? (
                 <text
                   key={i}
                   x={x(i)}
                   y={height - 7}
-                  textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}
+                  textAnchor={
+                    kind === 'bar' ? 'middle' : i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'
+                  }
                   className="fill-mut text-[11px] tabular-nums"
                 >
                   {l}

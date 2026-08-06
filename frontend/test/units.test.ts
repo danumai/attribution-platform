@@ -1,16 +1,19 @@
 /**
- * The three pieces of non-trivial pure logic in the frontend.
+ * The pieces of non-trivial pure logic in the frontend.
  *
- * Everything else here is presentation, which a unit test would only restate. These three are
- * not: `ago` carries a unit across four divisions, `samePlate` decides whether the preset
- * picker keeps its highlight, and `contrastProblem` is the only thing standing between a
- * promoter and a print run of codes no scanner can read.
+ * Everything else here is presentation, which a unit test would only restate. These are not:
+ * `ago` carries a unit across four divisions, `samePlate` decides whether the preset picker
+ * keeps its highlight, `contrastProblem` is the only thing standing between a promoter and a
+ * print run of codes no scanner can read, and `ticks` and `change` are the two places a chart
+ * can quietly misstate its own data — an axis that clips the tallest mark, or a delta
+ * invented out of a window that never had a number in it.
  *
  * `assert`, no framework — same shape as backend/test/*.test.ts.
  */
 import assert from 'node:assert/strict';
-import { ago, num, when } from '../lib/fmt';
+import { ago, change, num, when } from '../lib/fmt';
 import { DEFAULT_STYLE, contrastProblem, samePlate } from '../lib/qr';
+import { ticks } from '../lib/chart';
 
 /* ---------------- ago ---------------- */
 
@@ -68,5 +71,31 @@ assert.match(
 // A transparent background cannot be judged — whatever it prints on decides, so say nothing
 // rather than warn about a contrast that does not exist yet.
 assert.equal(contrastProblem({ dark: '#eeeeee', light: 'transparent' }), null);
+
+/* ---------------- ticks: the y axis a plot is drawn against ---------------- */
+
+// A clean scale, not the data's own maximum: 205 tops out at 300 in hundreds.
+assert.deepEqual(ticks(205).lines, [0, 100, 200, 300]);
+assert.equal(ticks(205).top, 300);
+// Every value on these axes is a count of things that happened. A quiet week must not be
+// scaled against 0.5 and 1.5 — there is no such quantity of scans.
+assert.deepEqual(ticks(2).lines, [0, 1, 2]);
+assert.deepEqual(ticks(1).lines, [0, 1]);
+// No data at all still needs an axis to draw the baseline against.
+assert.deepEqual(ticks(0).lines, [0, 1]);
+// The top is never below the data, or the tallest mark would run out of the plot.
+for (const m of [3, 7, 9, 47, 99, 101, 1234, 98_765])
+  assert.ok(ticks(m).top >= m, `axis top ${ticks(m).top} clips a max of ${m}`);
+
+/* ---------------- change: the delta under a figure ---------------- */
+
+// Two clean windows of three: 30 against 15 is a doubling.
+assert.equal(change([5, 5, 5, 10, 10, 10], 3), 1);
+assert.equal(change([10, 10, 10, 5, 5, 5], 3), -0.5);
+// Not enough history for two full windows is not a zero change — it is no answer.
+assert.equal(change([1, 2, 3], 2), null);
+// Neither is growth from nothing: there is no percentage increase over zero, and printing
+// one would dress an unknown up as a measurement.
+assert.equal(change([0, 0, 4, 4], 2), null);
 
 console.log('frontend units ok');
