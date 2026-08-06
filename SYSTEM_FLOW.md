@@ -6,6 +6,12 @@ what it does and does not defend against.
 - **[Part I — How It Works](#part-i--how-it-works)** — the model, the flows, the money
 - **[Part II — Publisher Integration](#part-ii--publisher-integration)** — wiring your backend to the Partner API
 - **[Part III — Security Model](#part-iii--security-model)** — threat model, controls, and the accepted risks
+- **[Scope of Engagement Mode](#scope-of-engagement-mode)** — what repeat-purchase rewards do and do not cover
+
+There are **two products** here and they share one machine: paying for a new user
+(*acquisition*) and paying for a repeat purchase (*engagement*). If you only know the first,
+read [Two Products, One Machine](#two-products-one-machine) before anything else — every figure
+below now describes both.
 
 Machine-readable API reference: the live **Swagger UI at `/docs`**, generated straight from
 the running controllers — a new route appears there with no extra step.
@@ -894,23 +900,35 @@ walks through them properly, with client code and a production checklist.
     auth: Bearer <token>
 
 3.  Register where scans should send people
-    PATCH /v1/orgs/me   { android_package, ios_app_id, landing_url, bonus_label }
+    PATCH /v1/orgs/me   { android_package, ios_app_id, landing_url, bonus_label,
+                          deeplink_url }
     auth: Bearer <token>
+    deeplink_url is only needed for engagement campaigns: an https origin you have
+    claimed as an Android App Link / iOS Universal Link, e.g. https://you.example/open.
+    Without it an engagement scan simply behaves like an acquisition one.
 
 4.  --- a user scans, lands on the store listing, installs, and signs up in the app.
-        Nothing from the scan reached the app. The publisher's *server* now asks us
-        whether that install was attributable ---
+        Nothing spendable from the scan reached the app. The publisher's *server* now
+        asks us whether that install was attributable ---
 
 5.  Claim the install
     POST /v1/attribution/claim                                  auth: Bearer pk_<api_key>
     → 200 { attributed: true, attribution_id, fee, ... }  or  { attributed: false, reason }
 
+5b. ENGAGEMENT — a returning customer opened the app from a transaction code. Your
+    app read `qrm_code` off the deep link (or off the Play referrer, if they had just
+    installed) and handed it to your backend. Same endpoint, different input:
+    POST /v1/attribution/claim  { code, publisher_user_ref }    auth: Bearer pk_<api_key>
+    → 200 { attributed: true, kind: "engagement", fee, ... }
+    No first-open call, no device signals, no /confirm — it settles in one step.
+
 6.  Later, once the user clears the publisher's own verification bar
     POST /v1/attribution/:id/confirm                            auth: Bearer pk_<api_key>
+    (acquisition only — an engagement row is already full and returns already_full)
 
 7.  Track earnings
-    GET  /v1/redemptions                                                auth: Bearer <token>
-    GET  /v1/campaigns                (budget/coin_rate per campaign)   auth: Bearer <token>
+    GET  /v1/redemptions              (each row carries `kind`)         auth: Bearer <token>
+    GET  /v1/campaigns                (budget + both rates per campaign) auth: Bearer <token>
 ```
 
 ### End user journey
@@ -920,17 +938,27 @@ their phone's browser follows redirects, and the publisher's server does the API
 their behalf.
 
 ```
-1.  Scan the printed/displayed QR code
+1a. ACQUISITION — scan the printed/displayed QR code
     GET  /r/:code                                                      auth: none
     → 302 to the publisher's store listing:
         Android  play.google.com/store/apps/details?id=…&referrer=…&qrm_claim=…
         iOS      apps.apple.com/app/id…            (no payload — none exists to carry)
         other    the publisher's web fallback
       or, if turned away, to /campaign-ended?reason=<rate_limited|invalid|voided|
-      paused|ended|budget|expired|used_up|no_destination>
+      paused|ended|budget|expired|used_up|no_destination|partnership_inactive>
+
+1b. ENGAGEMENT — scan the code on your boarding pass or receipt
+    GET  /r/:code                                                      auth: none
+    → 302 to the publisher's app link, ?qrm_code=…&qrm_fallback=…
+      Your phone's OS decides what happens next, before the request leaves it:
+        app installed      it opens, and hands the code to the publisher's backend
+        not installed      the publisher's page loads and follows qrm_fallback to
+                           the store, where you become an acquisition as well
 
 2.  Install the app and sign up inside it (publisher-owned UI, not this platform's).
-    Nothing from the scan is entered, pasted or redeemed — there is nothing to redeem.
+    You type nothing and paste nothing. On an engagement scan the app receives an
+    opaque transaction reference, which is plumbing between two servers — it is not
+    shown to you, and it is worth nothing without the publisher's own API key.
 
 3.  The publisher's server asks us whether that install was attributable — see Publisher
     journey step 5. The fee is credited to the publisher; the user never sees this call.
@@ -1285,10 +1313,98 @@ organic. Your signup flow must treat it as a normal outcome and carry on.
 | `no_match` | Organic install, or the window expired. The common case. | Nothing. Continue signup. |
 | `campaign_not_active` | The campaign was paused or ended after the scan. | Nothing. |
 | `budget_exhausted` | The promoter's budget ran out. | Nothing. We fail closed rather than go negative. |
-| `already_claimed` | That scan was already matched to a different user. | Nothing. |
+| `already_claimed` | That scan, install or transaction code was already matched to a different user. | Nothing. |
+| `not_engagement` | You sent a `code` from an acquisition campaign, which has no repeat-purchase price. | Fix the call — send the referrer/install_id instead. |
+| `not_a_new_user` | You asserted `is_new_user: false` on an acquisition claim. | Nothing. Acquisition only. |
 
 **`attributed: false` never means "reject this signup".** The user signed up; that happened
 regardless of who gets paid for it.
+
+## 5b. Repeat purchases (engagement campaigns)
+
+If a promoter runs an **engagement** campaign, it mints one single-use code per transaction and
+prints it on the boarding pass or receipt. Your integration for that is one call.
+
+### What reaches your app
+
+The scan sends the phone to the URL you registered as `deeplink_url`, with two parameters:
+
+```
+https://you.example/open?qrm_code=Ab3xKp7wZs1a&qrm_fallback=https%3A%2F%2Fplay.google.com%2F…
+```
+
+**Register `deeplink_url` as a real App Link / Universal Link.** That is the whole mechanism:
+when your app is installed, the OS opens it and never makes the request; when it is not, the
+browser loads that page normally.
+
+Two things to build, both small:
+
+1. **In the app** — read `qrm_code` off the opening URL and send it to your own backend. Never
+   call our API from the app; the key must not ship in a binary.
+2. **On that web page** — if it loads at all, the app was not installed. Redirect to
+   `qrm_fallback` and nothing else:
+
+   ```html
+   <script>
+     const f = new URLSearchParams(location.search).get('qrm_fallback');
+     if (f) location.replace(f);
+   </script>
+   ```
+
+   We build `qrm_fallback` for you rather than letting you assemble it, because on Android it
+   contains the Play install referrer — and a referrer put together wrong is an attribution rate
+   of zero with no error anywhere to tell you.
+
+**On Android the code also survives an install.** `qrm_fallback`'s referrer carries
+`qrm_claim` *and* `qrm_code`, so a customer who scanned a boarding pass without having your app
+yet is both a new signup and a purchase, and you are paid for both. Read the referrer at first
+open as in §3.1 and pull both out of it.
+
+**On iOS it does not.** The App Store has no referrer channel, so a fall-through install loses
+the purchase code. The acquisition half still works — `qrm_fallback` points at our interstitial,
+which collects the fingerprint signals. If you want the purchase reward on that path too, stash
+`qrm_code` on your web page (a cookie, a server-side session) and present it after signup.
+
+### Claiming it
+
+```bash
+curl -X POST https://api.example.com/v1/attribution/claim \
+  -H "Authorization: Bearer $QRM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{ "code": "Ab3xKp7wZs1a", "publisher_user_ref": "user_84213" }'
+```
+
+```jsonc
+{
+  "attributed": true,
+  "attribution_id": "4d8f…",
+  "kind": "engagement",          // vs "acquisition"
+  "match_method": "code",        // the code named the purchase outright
+  "confidence": 100,
+  "fee": 20,                     // engagement_rate
+  "pending_fee": 0,              // no guest tier; nothing to confirm
+  "confirm_deadline": null,
+  "replay": false
+}
+```
+
+You may pass the whole Play referrer string as `code` instead of the bare value — we parse
+`qrm_code` out of it, the same way we parse `qrm_claim` out of `install_referrer`.
+
+### The rules that differ from acquisition
+
+- **`code` is explicit.** We never read it out of `install_referrer` implicitly, even though an
+  engagement referrer carries both. The two are different payouts on different terms, and one
+  call quietly deciding which you meant is an accounting surprise you reconcile by hand later.
+- **The idempotency key is the code, not the user.** A retry with the same code *and the same*
+  `publisher_user_ref` replays. The same code with a **different** user is refused
+  `already_claimed` — that is a forwarded screenshot, not a retry, and replaying would hand a
+  second person the first one's reward.
+- **The same user can claim as many codes as they hold.** That is the entire point. Eleven
+  flights, eleven codes, eleven payouts.
+- **No `/confirm`.** An engagement row is settled on creation; confirming returns
+  `already_full`.
+- **`is_new_user` is ignored.** A repeat customer is not supposed to be new.
 
 ## 6. The two-tier payout
 
@@ -1305,6 +1421,10 @@ proves real.
 
 If a user is already verified at signup, send `identified: true` on the first call and collect
 the full `coin_rate` immediately — no `/confirm` needed.
+
+This whole section is **acquisition only**. There is no guest tier on a repeat purchase: the
+customer already transacted with the promoter, which is a harder fact than any verification bar
+you could apply.
 
 ```bash
 curl -X POST https://api.example.com/v1/attribution/$ATTRIBUTION_ID/confirm \
@@ -1343,6 +1463,11 @@ once. You never need to reconcile a double-payout by hand.
 
 Use a **stable, permanent** `publisher_user_ref` — your internal user id. Not an email that
 can change, not a session id, not a device id that resets on reinstall.
+
+**On an engagement claim the idempotency key is the `code`, not the user.** Retrying with the
+same code and the same user replays; the same code with a different user is refused. Sending
+the *same user* with a *different* code is not a retry at all — it is a second purchase, and it
+pays again. That is the difference between the two products in one sentence.
 
 ## 8. Production checklist
 
@@ -1428,7 +1553,10 @@ Worth asserting in your own test suite:
   completes.
 - A `401` does not break signup.
 
-`e2e-test.sh` in this repo runs the full loop, including both match paths, as a reference.
+`e2e-test.sh` in this repo runs the full loop, including both match paths and both campaign
+modes, as a reference. Section 6c is the engagement flow end to end: mint two codes against one
+campaign, scan both, and assert the same `publisher_user_ref` is paid twice — the assertion that
+was impossible before engagement mode existed, and the one that proves it works.
 
 ## 10. Endpoint quick reference
 
@@ -1438,11 +1566,13 @@ Full request/response schemas: the live Swagger UI at `/docs`.
 |---|---|---|---|
 | `POST` | `/v1/attribution/first-open` | `pk_` API key | Bind this install to a scan. Pays nothing. |
 | `POST` | `/v1/attribution/claim` | `pk_` API key | Is this signup attributable? Pays the fee. |
+| `POST` | `/v1/attribution/claim` + `code` | `pk_` API key | Is this repeat purchase attributable? Pays `engagement_rate`. |
+| `POST` | `/v1/issue` | `pk_` API key (**promoter's**) | Mint one transaction code. Promoter-side, not yours. |
 | `POST` | `/v1/attribution/{id}/confirm` | `pk_` API key | Release the held-back fee |
 | `GET` | `/v1/attribution/{id}` | `pk_` API key | Look up one attribution |
 | `POST` | `/v1/auth/signup` · `/login` | none | Create account / get session token |
 | `POST` | `/v1/api-keys/rotate` | session JWT | New API key, old one dies instantly |
-| `GET` · `PATCH` | `/v1/orgs/me` | session JWT | App package, store id, landing URL, bonus label |
+| `GET` · `PATCH` | `/v1/orgs/me` | session JWT | App package, store id, landing URL, app link, bonus label |
 | `GET` | `/v1/partnerships` | session JWT | Proposed and active partnerships |
 | `POST` | `/v1/partnerships/{id}/accept` | session JWT | Accept the terms (from `pending` only) |
 | `PATCH` | `/v1/partnerships/{id}/rates` | session JWT | Promoter asks to reprice. Pays nothing until accepted |
@@ -1479,6 +1609,13 @@ against. Every control below is enforced in code and asserted in `e2e-test.sh` o
   ┌─ PUBLISHER'S SERVER ─────── authenticated, semi-trusted ──────────┐
   │  Holds a pk_ API key. Asserts "this user signed up" and "this     │
   │  user is identified". We cannot verify either — see §9.1.         │
+  │  On an engagement claim it asserts far less: the transaction code │
+  │  is ours, minted by the promoter, and we check it ourselves.      │
+  └───────────────────────────────────────────────────────────────────┘
+  ┌─ PROMOTER'S SERVER ──────── authenticated, self-limiting ─────────┐
+  │  Holds its own pk_ API key and mints transaction codes against    │
+  │  its own campaigns. It cannot inflate anyone's earnings without   │
+  │  spending its own funded budget to do it — see §9.8.              │
   └───────────────────────────────────────────────────────────────────┘
   ┌─ PROMOTER / PUBLISHER PORTAL ── authenticated, tenant-scoped ─────┐
   │  Session JWT. Every query is filtered by org id — no route takes  │
@@ -1491,8 +1628,13 @@ against. Every control below is enforced in code and asserted in `e2e-test.sh` o
 ```
 
 The single most important property: **the untrusted boundary is never on the money path.**
-The phone receives no token, so there is no credential for a user to steal, replay, forge or
-share. Attribution is asserted server-to-server afterwards by an authenticated party.
+The phone receives no credential, so there is nothing for a user to steal, replay or forge.
+Attribution is asserted server-to-server afterwards by an authenticated party.
+
+On an engagement scan the phone does carry an opaque transaction code onward to the app. It
+still is not a credential — it authenticates nothing, and presenting it without the publisher's
+API key does nothing at all — but it is worth naming the one thing it *can* do: whoever holds
+it can be the person the reward is attributed to, once. See §9.9.
 
 ## 2. Authentication
 
@@ -1501,6 +1643,7 @@ share. Attribution is asserted server-to-server afterwards by an authenticated p
 | Session | JWT, HS256 | 12h | Not stored; verified by signature |
 | Partner API key | `pk_` + 192 bits random | Until rotated | **SHA-256 hash only** |
 | Claim id | 128 bits base64url | One use | Opaque row key, not a credential |
+| Transaction code | 96 bits base64url | One scan, one reward | Opaque row key, not a credential |
 
 - **Keys are never recoverable.** Only the SHA-256 hash is stored. Rotation
   (`POST /v1/api-keys/rotate`) invalidates the previous key on the next request.
@@ -1508,7 +1651,12 @@ share. Attribution is asserted server-to-server afterwards by an authenticated p
   request, so suspending a tenant kills live sessions instantly rather than up to 12h later.
   It also re-reads `type`, so a demotion takes effect at once.
 - **The Partner API checks `suspended` too.** An offboarded publisher's key stops earning
-  fees on the next call, not whenever someone remembers to rotate it.
+  fees on the next call, and a suspended promoter's key stops minting codes on the next call —
+  not whenever someone remembers to rotate it.
+- **The two key types are not interchangeable.** `orgFromKey` takes the required `type`, so a
+  publisher key on `/v1/issue` is a 401 and a promoter key on `/v1/attribution/*` is a 401.
+  Asserted in the e2e suite, because "same credential format" is exactly how that kind of
+  authorisation gap gets shipped.
 - **Default secrets refuse to boot.** `JWT_SECRET` left at its dev value in production is a
   total auth bypass, so the process exits at startup instead of serving with it.
 
@@ -1533,8 +1681,11 @@ concurrency and cannot be bypassed by a bug in a handler.
 
 | Invariant | Enforced by |
 |---|---|
-| One payout per user per campaign | `UNIQUE (campaign_id, publisher_user_ref)` |
-| One payout per scan | `UNIQUE (scan_id)` + `consumed` flag under a row lock |
+| One payout per user per campaign (acquisition) | `UNIQUE (campaign_id, publisher_user_ref) WHERE kind='acquisition'` |
+| One payout per issued code (engagement) | `UNIQUE (qr_code_id) WHERE kind='engagement'` |
+| One code per transaction | `UNIQUE (campaign_id, issued_ref)` on `qr_codes` |
+| One payout per scan (acquisition) | `UNIQUE (scan_id) WHERE kind='acquisition'` + `consumed` flag under a row lock |
+| A row's `kind` matches which index guards it | `CHECK (kind='engagement') = (qr_code_id IS NOT NULL)` |
 | Ledger always balances to zero | Append-only double entry; asserted in the suite |
 | Budget can never go negative | `SELECT … FOR UPDATE` on the balance row before every debit |
 | `guest_rate <= coin_rate` | `CHECK` constraint in the migration |
@@ -1595,6 +1746,8 @@ user's attribution to another.
 |---|---|
 | `publisher_user_ref` | 200 |
 | `install_referrer` | 1000 |
+| `code` (engagement claim) | 1000, then matched against the issued-code shape |
+| `issued_ref` | 200 |
 | `ip` | 45 (longest IPv6 text form) |
 | `user_agent` | 500 |
 | `name`, campaign `name` | 120 |
@@ -1700,11 +1853,64 @@ A leaked `JWT_SECRET` forges any session. Marked at `backend/src/modules/auth/to
 
 *Lever:* ES256 with a KMS-held private key.
 
-### 9.7 Not built yet, on purpose
+### 9.8 A promoter can mint codes for purchases that did not happen
+`/v1/issue` takes the promoter's word that a transaction occurred. We cannot see into a booking
+system any more than we can see into a publisher's app.
+
+**This one is largely self-limiting**, which is why it is not mitigated further: every code the
+promoter mints is a code that, when redeemed, moves money *out of the promoter's own funded
+budget* and into the publisher's. Inventing purchases means paying a publisher for nothing. The
+attack that is left is collusion between the two — a promoter and publisher inflating volume
+together to defraud a third party such as an investor or a rebate scheme — and no technical
+control inside a two-party ledger can catch that.
+
+*Levers:* `issued_ref` is stored on every code, so an audit can reconcile issuance against the
+promoter's own transaction records; the campaign budget caps total exposure; issuance is scoped
+to campaigns the promoter owns and to `engagement` mode. **Commercially, both sides are
+counterparties under contract** — this is a contractual control with technical support.
+
+### 9.9 A transaction code can be forwarded
+The code is printed on a boarding pass or receipt. Somebody can photograph it, forward it, or
+post it. Whoever scans and claims it first is the person the reward attributes to.
+
+Accepted because the alternatives are worse than the problem. Binding the code to a passenger
+identity would require this platform to hold one, which §7 exists to avoid; requiring the
+publisher to match its own user against the promoter's customer record would put personal data
+across a boundary neither side wants it to cross.
+
+What bounds it: the code is single-use, so a shared code is **one** misdirected reward and not
+a faucet. A second person presenting it is refused `already_claimed` rather than paid. Expiry
+(30 days by default) bounds the window. And the reward is worth `engagement_rate` — a number
+the promoter chose, and one deliberately smaller than an acquisition.
+
+*Levers:* shorten `expires_in_days` at issuance; lower `engagement_rate`; print the passenger
+name beside the code so a gate agent or cashier can see a mismatch. A per-user daily cap is the
+next technical control worth adding if forwarding is ever measured rather than assumed.
+
+### 9.10 No per-user cap on engagement rewards, on purpose
+There is no cooldown and no daily ceiling on how many purchase rewards one
+`publisher_user_ref` can collect. A frequent flyer collecting forty in a year is the product
+working, not an anomaly, and any cap tight enough to catch abuse would also refuse them.
+
+The real ceiling is upstream: **one code per transaction, minted by the party that took the
+money.** Somebody who wants more rewards has to buy more tickets. The campaign budget caps
+total spend regardless.
+
+*Lever:* if static counter-stickers are ever added (see §9.11), they break that link — a code
+nobody had to buy anything for — and a per-user cooldown becomes required rather than optional.
+It is not needed for per-transaction issuance.
+
+### 9.11 Not built yet, on purpose
 - **Real payment processing** — funding a campaign credits the ledger directly; production
   would put a PSP checkout in front of it
 - **One login per company** — no teams, roles or invitations yet (login *is* the org)
 - **Automated fraud alerts** to a team's Slack or email
+- **Static counter codes for shops with no POS integration** — deliberately deferred; see the
+  scope note below
+- **Bulk issuance** — `/v1/issue` is one call per transaction. A nightly batch of ten thousand
+  bookings is ten thousand calls, well inside the 600/min per-key ceiling only if it is spread
+  out. A batch endpoint is the obvious next addition if a partner needs it.
+- **Changing a campaign's mode** — no endpoint, on purpose (see Figure 5)
 
 None of it touches the core promise: **fees can't be duplicated, lost, or paid out twice —
 and nothing this platform issues can unlock anything inside an app.**
@@ -1715,6 +1921,57 @@ Report privately to the address on the deployment's security page. Please do not
 issue for anything touching the money path in §3.
 
 ---
+---
+
+# Scope of Engagement Mode
+
+What was built, what was deliberately left out, and where the levers are. Written so the next
+person to open this does not have to re-derive which omissions were decisions.
+
+## In scope — built and covered by the suite
+
+| Area | What landed |
+|---|---|
+| **Data model** | `campaigns.mode`; `partnerships.engagement_rate` + `proposed_engagement_rate`; `qr_codes.issued_ref`; `redemptions.kind` + `qr_code_id`; `orgs.deeplink_url` |
+| **Guarantees** | Three partial unique indexes (see [Figure 2c](#figure-2c-one-scan-two-payouts)), one CHECK tying `kind` to `qr_code_id`, one CHECK bounding `engagement_rate` |
+| **Issuance** | `POST /v1/issue`, promoter API key, idempotent on `issued_ref`, scoped to own + active + engagement campaigns |
+| **Credentials** | Promoters get a `pk_` key at signup; `POST /v1/api-keys/rotate` serves both tenant types; the two key types are not interchangeable |
+| **Scan path** | Engagement destination resolution (`qrm_code` + `qrm_fallback`), `qrm_code` in the Play referrer, `GET /i/:claim_id` so the iOS fall-through keeps its fingerprint |
+| **Payout** | Engagement branch on `POST /v1/attribution/claim`; same budget lock, same double-entry ledger, same rollback-on-refusal; replay on retry, `already_claimed` on a different user |
+| **Pricing** | `engagement_rate` through `validateRates`, so partnership creation, the promoter's proposal, the publisher's accept/decline and the admin patch all agree by construction |
+| **Reporting** | `mode` and `kind` columns in the portal and admin console; engagement counts on the admin overview; analytics rewritten to a LATERAL aggregate so a two-payout scan is not counted twice |
+| **Tests** | `e2e-test.sh` §6c — 20 assertions, including the two that matter most: the same `publisher_user_ref` paid twice for two tickets, and acquisition still refusing exactly that |
+
+## Deliberately out of scope
+
+Each of these was considered and declined for a stated reason, not overlooked.
+
+| Left out | Why | When to add it |
+|---|---|---|
+| **Static counter codes** (a sticker at the till, unlimited scans) | Nothing ties a scan to a purchase, so "one per code" stops meaning "one per purchase". A corner shop with no POS is a real customer, but it is a different security model, not a smaller one. | When a partner without a POS is worth the per-user cooldown and daily cap it would require. |
+| **Per-user cooldown / daily cap** | Redundant while codes are minted per transaction — the cap is already "one per purchase" and the budget bounds total spend. Any cap tight enough to catch abuse would refuse a frequent flyer. | Immediately, if static codes land. See §9.10. |
+| **Binding a code to a named customer** | Would require this platform to hold an end-user identity, which §7 exists to avoid, or to put personal data across the promoter/publisher boundary. | Probably never here; print the name beside the code instead. |
+| **Bulk issuance endpoint** | One call per transaction is the honest shape and fits inside the 600/min per-key ceiling for normal volume. | When a partner's nightly batch cannot be spread out. |
+| **Changing a campaign's mode** | The guarantees are partial indexes over rows that already exist; flipping the mode strands a run of redemptions under a rule they were never checked against. Two campaigns is the honest answer. | Never. This is a correctness boundary, not a missing feature. |
+| **A guest tier on engagement** | A repeat customer already transacted with the promoter — a harder fact than any verification bar the publisher could apply. A held-back delta would be solving a problem that does not exist here. | Never. |
+| **iOS purchase-reward survival through an install** | The App Store has no referrer channel. Nothing we build changes that. | If SKAdNetwork / AdAttributionKit is ever adopted for the acquisition path, revisit. |
+| **Measuring engagement deep-link drop-off** | Same gap as §9.2b: when the OS opens the app we never see the request, so "app opened" is unobservable from here. | Publisher-side instrumentation is the only place this can be counted. |
+
+## Known limits to state plainly
+
+- **iOS fall-through loses the purchase reward.** A traveller with no app scanning a boarding
+  pass on an iPhone gets attributed as an acquisition but not as a purchase, unless the
+  publisher's own web page stashes `qrm_code` before forwarding. Inherent to the platform.
+- **A forwarded code pays whoever claims it first**, once. See §9.9.
+- **The compliance argument is thinner than for acquisition.** `qrm_code` reaches the app. The
+  reasoning is in [Figure 8](#figure-8-why-the-qr-unlocks-nothing) and the recommendation there
+  is to have it reviewed before shipping to a store-listed app.
+- **Deep links need publisher-side work.** `deeplink_url` only functions if the publisher has
+  actually registered it as an App Link / Universal Link and their page follows
+  `qrm_fallback`. Misconfigured, it fails soft — engagement scans behave like acquisition ones
+  — which is safe but silent.
+
+---
 
 ## The One-Minute Pitch
 
@@ -1722,3 +1979,8 @@ issue for anything touching the money path in §3.
 > the publisher's store listing or gets safely turned away with a reason. The install is
 > matched back server-to-server — never by anything the phone carried — and the money only
 > ever moves once, in the right direction, with a double-entry trail behind it.
+>
+> And when the brand is an airline rather than a poster, the same machine sells a second
+> thing: one code per ticket, one reward per code, so the traveller who flies eleven times is
+> paid eleven times — with the same ledger, the same budget lock, and the same refusal to pay
+> anyone twice for one purchase.
