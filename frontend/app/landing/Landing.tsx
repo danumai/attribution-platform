@@ -5,6 +5,7 @@ import JourneyFlow from './JourneyFlow';
 import JourneyTrigger from './JourneyTrigger';
 import BudgetPlanner from './BudgetPlanner';
 import Faq from './Faq';
+import { ThemeToggle } from '@/lib/theme';
 import * as lp from '@/lib/lp';
 import './landing.css';
 
@@ -130,6 +131,7 @@ export default function Landing() {
           <div className="flex items-center gap-2.5">
             {/* the nav cannot hold a wordmark and two actions on a phone;
                 signing in lives in the page */}
+            <ThemeToggle className="max-[480px]:hidden" />
             <Link href="/login" className={`${lp.btnGhost} max-[480px]:hidden`}>
               Sign in
             </Link>
