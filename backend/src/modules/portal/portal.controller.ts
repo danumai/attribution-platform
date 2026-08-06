@@ -242,12 +242,20 @@ export class PortalController {
   async patchCampaign(
     @Session() s: SessionClaims,
     @Param('id') id: string,
-    @Body() b: { status: string },
+    @Body() b: { name?: string; status?: string },
   ) {
     await this.promoterCampaign(s.org_id, id);
-    if (!['active', 'paused', 'ended'].includes(b.status))
-      throw new BadRequestException('status must be active|paused|ended');
-    return prisma.campaign.update({ where: { id }, data: { status: b.status } });
+    // Absent = leave unchanged, same shape as `PATCH orgs/me`, so a rename does not have to
+    // restate the status (and quietly reactivate an ended campaign) to change the name.
+    const data: { name?: string; status?: string } = {};
+    if ('name' in b) data.name = str(b.name, 'name', 120)!;
+    if ('status' in b) {
+      if (!['active', 'paused', 'ended'].includes(b.status!))
+        throw new BadRequestException('status must be active|paused|ended');
+      data.status = b.status;
+    }
+    if (!Object.keys(data).length) throw new BadRequestException('nothing to update');
+    return prisma.campaign.update({ where: { id }, data });
   }
 
   @Get('campaigns/:id/stats')

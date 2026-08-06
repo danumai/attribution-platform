@@ -316,6 +316,36 @@ export default function Dashboard() {
     );
   }
 
+  // Name and status in one dialog: the two things a promoter owns on a running campaign.
+  // `ended` is here and not on a button of its own because it is the one status a campaign
+  // does not come back from — worth the extra click and the confirm dialog costs a whole form.
+  async function editCampaign(c: Campaign) {
+    const v = await formDialog({
+      title: `Edit "${c.name}"`,
+      confirmText: 'Save changes',
+      fields: [
+        { name: 'name', label: 'Campaign name', value: c.name, required: true },
+        {
+          name: 'status',
+          label: 'Status',
+          type: 'select',
+          value: c.status,
+          hint: 'Paused and ended campaigns stop granting coins. Ending is permanent.',
+          options: [
+            { value: 'active', label: 'Active' },
+            { value: 'paused', label: 'Paused' },
+            { value: 'ended', label: 'Ended' },
+          ],
+        },
+      ],
+    });
+    if (!v) return;
+    await act(
+      () => api(`/v1/campaigns/${c.id}`, { method: 'PATCH', body: JSON.stringify(v) }),
+      `"${v.name}" saved${v.status === c.status ? '' : ` — now ${v.status}`}.`,
+    );
+  }
+
   const items: NavItem[] = [
     { id: 'overview', label: 'Overview', icon: 'overview' },
     { id: 'partnerships', label: 'Partnerships', icon: 'partnerships', badge: awaitingMe },
@@ -619,24 +649,8 @@ export default function Dashboard() {
                         >
                           Fund
                         </button>
-                        <button
-                          className={btnGhost}
-                          onClick={() =>
-                            act(
-                              () =>
-                                api(`/v1/campaigns/${c.id}`, {
-                                  method: 'PATCH',
-                                  body: JSON.stringify({
-                                    status: c.status === 'active' ? 'paused' : 'active',
-                                  }),
-                                }),
-                              c.status === 'active'
-                                ? `${c.name} paused — scans stop granting coins.`
-                                : `${c.name} is live again.`,
-                            )
-                          }
-                        >
-                          {c.status === 'active' ? 'Pause' : 'Activate'}
+                        <button className={btnGhost} onClick={() => editCampaign(c)}>
+                          Edit
                         </button>
                         <Link className={btn} href={`/campaigns/${c.id}`}>
                           QR codes &amp; stats

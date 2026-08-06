@@ -55,6 +55,15 @@ CAMP=$(curl -s -XPOST $API/v1/campaigns -H "Authorization: Bearer $PRO_TOKEN" -H
 CAMP_ID=$(echo "$CAMP" | j .id)
 BUDGET=$(curl -s -XPOST $API/v1/campaigns/$CAMP_ID/fund -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"coins":100}' | j .budget)
 [ "$BUDGET" = "100" ] && pass "campaign funded: 100 coins" || fail "budget=$BUDGET"
+# A rename must not restate the status to keep it — a name-only patch that reset status would
+# quietly reactivate a paused campaign, and the rest of this script runs on this one.
+PAUSED=$(curl -s -XPATCH $API/v1/campaigns/$CAMP_ID -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"status":"paused"}' | j .status)
+RENAMED=$(curl -s -XPATCH $API/v1/campaigns/$CAMP_ID -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"name":"Inflight promo v2"}')
+[ "$PAUSED" = "paused" ] && [ "$(echo "$RENAMED" | j .name)" = "Inflight promo v2" ] && [ "$(echo "$RENAMED" | j .status)" = "paused" ] \
+  && pass "promoter renamed the campaign without touching its status" || fail "patch campaign: $PAUSED / $RENAMED"
+NOTMINE=$(curl -s -o /dev/null -w '%{http_code}' -XPATCH $API/v1/campaigns/$CAMP_ID -H "Authorization: Bearer $PUB_TOKEN" -H 'Content-Type: application/json' -d '{"name":"hijacked"}')
+[ "$NOTMINE" = "403" ] && pass "publisher cannot rename the promoter's campaign (403)" || fail "rename guard: $NOTMINE"
+curl -s -XPATCH $API/v1/campaigns/$CAMP_ID -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"status":"active"}' >/dev/null
 
 echo "4. QR generation + customization"
 QR=$(curl -s -XPOST $API/v1/campaigns/$CAMP_ID/qr-codes -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
