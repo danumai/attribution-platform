@@ -4,6 +4,10 @@
 // CHECK constraints (org type, campaign/partnership status, guest_rate <= coin_rate, ...) are
 // not expressible in the Prisma schema. They live in the migration SQL instead. Prisma's
 // differ ignores them, so they persist across `migrate dev` rather than being dropped as drift.
+//
+// The same is true of the two PARTIAL unique indexes on `redemptions` — see the note on that
+// model. Those are not ignored by the differ, so this schema is applied with `migrate deploy`
+// against the migration SQL, never regenerated from the models.
 
 generator client {
   provider = "prisma-client"
@@ -27,6 +31,10 @@ model Org {
   api_key_hash  String?
   /// publishers only; web fallback for desktop scans and publishers with no app yet
   landing_url   String?
+  /// publishers only; an https URL registered as an Android App Link / iOS Universal Link.
+  /// Engagement scans are sent here so the OS opens the app when it is installed and falls
+  /// back to the store when it is not — a question no server can answer and both platforms can.
+  deeplink_url  String?
   /// publishers only; Play listing a scan sends Android phones to (com.example.app)
   android_package String?
   /// publishers only; numeric App Store id a scan sends iPhones to
@@ -55,12 +63,17 @@ model Partnership {
   guest_rate        Int      @default(10)
   /// how long after a guest redemption the delta can still be claimed
   grace_days        Int      @default(7)
+  /// coins paid for one repeat purchase in an `engagement` campaign. Its own number because it
+  /// is its own product: `coin_rate` prices somebody who was not a user before, this prices a
+  /// customer who came back. Deliberately unrelated to the two above — no pair rule.
+  engagement_rate   Int      @default(20)
   /// A repricing the promoter has asked for and the publisher has not agreed to yet. NULL = no
   /// open proposal. Nothing pays out at these numbers: the columns above stay in force until
   /// the publisher accepts, which copies these over them and clears them. Set and cleared as a
   /// pair, so the `guest_rate <= coin_rate` rule can be checked on the pair the way it is above.
-  proposed_coin_rate  Int?
-  proposed_guest_rate Int?
+  proposed_coin_rate       Int?
+  proposed_guest_rate      Int?
+  proposed_engagement_rate Int?
   /// pending | active | suspended — enforced by CHECK. `pending` is only ever "waiting on the
   /// publisher"; an admin pausing the relationship uses `suspended`, which `accept` cannot lift.
   status            String   @default("pending")
@@ -82,6 +95,10 @@ model Campaign {
   name           String
   /// active | paused | ended — enforced by CHECK
   status         String   @default("active")
+  /// acquisition | engagement — enforced by CHECK. Selects which payout guarantee applies:
+  /// one per user per campaign (acquisition), or one per issued code (engagement, so a
+  /// traveller who flies eleven times is paid for eleven flights).
+  mode           String   @default("acquisition")
   created_at     DateTime @default(now()) @db.Timestamptz(6)
 
   partnership Partnership  @relation(fields: [partnership_id], references: [id])
@@ -105,11 +122,18 @@ model QrCode {
   max_uses    Int?
   uses        Int       @default(0)
   voided      Boolean   @default(false)
+  /// The promoter's own reference for the transaction this code was minted against — a PNR, an
+  /// order number, a receipt line. Nothing reads it; it exists so minting is idempotent, and a
+  /// booking webhook that fires twice collides here instead of issuing two rewards. NULL for
+  /// every code designed in the portal, and NULLs are distinct in a unique index.
+  issued_ref  String?
   created_at  DateTime  @default(now()) @db.Timestamptz(6)
 
-  campaign Campaign @relation(fields: [campaign_id], references: [id])
-  scans    Scan[]
+  campaign    Campaign     @relation(fields: [campaign_id], references: [id])
+  scans       Scan[]
+  redemptions Redemption[]
 
+  @@unique([campaign_id, issued_ref])
   @@index([campaign_id])
   @@map("qr_codes")
 }
@@ -167,7 +191,11 @@ model Scan {
 
   qr_code    QrCode      @relation(fields: [qr_code_id], references: [id])
   campaign   Campaign    @relation(fields: [campaign_id], references: [id])
-  redemption Redemption?
+  /// At most two, and never two of a kind: one acquisition (the scanner was a new user) and
+  /// one engagement (the scanner had just bought something). A boarding pass scanned by
+  /// somebody with no app yet is honestly both. Enforced by two partial unique indexes — see
+  /// the note on `Redemption`.
+  redemptions Redemption[]
   install    Install?
 
   @@index([campaign_id])
@@ -225,14 +253,24 @@ model Install {
 model Redemption {
   id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   campaign_id         String    @db.Uuid
-  scan_id             String    @unique @db.Uuid
+  /// Not `@unique` up here even though it is unique in the database: that index is partial too
+  /// (acquisitions only), so one scan can carry both a signup and a purchase reward.
+  scan_id             String    @db.Uuid
   /// NULL only for signups that arrived on the legacy single-call path
   install_id          String?   @unique @db.Uuid
+  /// The issued code this repeat-purchase reward was paid against. Set on `engagement` rows and
+  /// NULL on `acquisition` ones — a CHECK ties the two together, so `kind` can never disagree
+  /// with which of the two partial unique indexes a row is actually living under.
+  qr_code_id          String?   @db.Uuid
   publisher_user_ref  String
   coins               Int
   identified          Boolean   @default(true)
-  /// referrer | fingerprint — how the install was tied back to the scan. Deterministic
-  /// matches are auditable; probabilistic ones are the ones to sample for fraud.
+  /// acquisition | engagement — copied off the campaign because the money invariant for each
+  /// is a partial unique index, and an index cannot reach through a join to read the mode.
+  kind                String    @default("acquisition")
+  /// referrer | fingerprint | code — how the payout was tied back to a scan. Deterministic
+  /// matches are auditable; probabilistic ones are the ones to sample for fraud. `code` is the
+  /// engagement path: the code was minted against one transaction and scanned once.
   match_method        String    @default("referrer")
   /// copied off the install rather than joined: every fraud-review list renders it per row
   confidence          Int       @default(100)
@@ -242,9 +280,18 @@ model Redemption {
   campaign Campaign @relation(fields: [campaign_id], references: [id])
   scan     Scan     @relation(fields: [scan_id], references: [id])
   install  Install? @relation(fields: [install_id], references: [id])
+  qr_code  QrCode?  @relation(fields: [qr_code_id], references: [id])
 
-  /// one reward per user per campaign, race-proof
-  @@unique([campaign_id, publisher_user_ref])
+  /// The payout guarantees are PARTIAL unique indexes and live in the migration SQL, for the
+  /// same reason the CHECK constraints do — Prisma cannot express a `WHERE` on an index:
+  ///
+  ///   UNIQUE (campaign_id, publisher_user_ref) WHERE kind = 'acquisition'
+  ///   UNIQUE (scan_id)                         WHERE kind = 'acquisition'
+  ///   UNIQUE (qr_code_id)                      WHERE kind = 'engagement'
+  ///
+  /// Declaring either up here would create a *total* unique index instead, and the first one
+  /// would re-impose "one payout per user, ever" on the engagement rows this whole feature
+  /// exists to allow. Look them up with `findFirst`, never `findUnique`.
   @@index([created_at(sort: Desc)])
   @@map("redemptions")
 }
@@ -284,6 +331,10 @@ model AuditLog {
   target        String
   detail        Json     @default("{}")
   created_at    DateTime @default(now()) @db.Timestamptz(6)
+  /// Admin's read mark, and the only mutable field here. An entry written by a *tenant* is
+  /// something the platform did not do itself, so it sits in the admin's notifications until
+  /// this is set. Admin's own entries never show up there and never need it.
+  acknowledged_at DateTime? @db.Timestamptz(6)
 
   actor Org? @relation(fields: [actor_org_id], references: [id])
 

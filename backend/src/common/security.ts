@@ -158,27 +158,35 @@ const isLocal = (h: string) =>
   h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.localhost');
 
 /**
- * The web fallback a scan lands on when the publisher has no app registered for that
- * platform (or the scan came from a desktop). It carries no token — but it is still an
- * open redirect off our origin, so it is a pre-approved destination rather than free text:
- * rejecting every non-http(s) scheme kills `javascript:`/`data:` redirect XSS, and
+ * A publisher-registered URL a scan can be redirected to. It carries no token — but it is
+ * still an open redirect off our origin, so it is a pre-approved destination rather than free
+ * text: rejecting every non-http(s) scheme kills `javascript:`/`data:` redirect XSS, and
  * requiring https outside localhost stops a scan being downgraded to cleartext.
+ *
+ * Two fields go through here and both are redirect targets, which is the whole reason this
+ * takes the name rather than hard-coding one: `landing_url`, the web fallback for a desktop
+ * scan or a publisher with no app, and `deeplink_url`, where an engagement scan is sent so the
+ * OS can open the app. https is also what makes the second one work at all — App Links and
+ * Universal Links are only ever claimed on https origins.
  */
-export function validateLandingUrl(raw: unknown): string | null {
+function validateRedirectUrl(raw: unknown, name: string): string | null {
   if (raw === undefined || raw === null || raw === '') return null;
-  if (typeof raw !== 'string') throw new BadRequestException('landing_url must be a string');
+  if (typeof raw !== 'string') throw new BadRequestException(`${name} must be a string`);
   let u: URL;
   try {
     u = new URL(raw);
   } catch {
-    throw new BadRequestException('landing_url must be an absolute URL');
+    throw new BadRequestException(`${name} must be an absolute URL`);
   }
   if (u.protocol !== 'https:' && !(u.protocol === 'http:' && isLocal(u.hostname)))
-    throw new BadRequestException('landing_url must use https (http allowed only for localhost)');
+    throw new BadRequestException(`${name} must use https (http allowed only for localhost)`);
   if (u.username || u.password)
-    throw new BadRequestException('landing_url must not embed credentials');
+    throw new BadRequestException(`${name} must not embed credentials`);
   return u.toString();
 }
+
+export const validateLandingUrl = (raw: unknown) => validateRedirectUrl(raw, 'landing_url');
+export const validateDeeplinkUrl = (raw: unknown) => validateRedirectUrl(raw, 'deeplink_url');
 
 // ---------- response headers ----------
 /**

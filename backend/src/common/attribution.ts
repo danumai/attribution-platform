@@ -71,6 +71,8 @@ export interface AppTargets {
   android_package: string | null;
   ios_app_id: string | null;
   landing_url: string | null;
+  /** engagement only; an https origin the publisher has claimed as an App Link / Universal Link */
+  deeplink_url?: string | null;
 }
 
 /**
@@ -79,10 +81,23 @@ export interface AppTargets {
  *
  * `claim_id` goes in Play's `referrer` (an install-attribution channel, not app content).
  * The App Store has no equivalent, which is exactly why iOS needs the fingerprint path.
+ *
+ * `code` is the engagement addition and rides in the same referrer, for the same reason and
+ * under the same limits: it is an opaque transaction reference, it is useless without the
+ * publisher's server-side API key, and Play's referrer is the one channel that survives an
+ * install. Carrying it is what lets a traveller who had no app yet be paid for *both* the
+ * signup and the ticket they bought — the referrer is the only place both facts can travel.
  */
-export function storeUrl(platform: Platform, t: AppTargets, claimId: string): string | null {
+export function storeUrl(
+  platform: Platform,
+  t: AppTargets,
+  claimId: string,
+  code?: string,
+): string | null {
   if (platform === 'android' && t.android_package) {
-    const referrer = `utm_source=qrmarketer&utm_medium=qr&qrm_claim=${claimId}`;
+    const referrer =
+      `utm_source=qrmarketer&utm_medium=qr&qrm_claim=${claimId}` +
+      (code ? `&qrm_code=${code}` : '');
     return `https://play.google.com/store/apps/details?id=${encodeURIComponent(
       t.android_package,
     )}&referrer=${encodeURIComponent(referrer)}`;
@@ -93,10 +108,60 @@ export function storeUrl(platform: Platform, t: AppTargets, claimId: string): st
   return t.landing_url;
 }
 
+/**
+ * Where an *engagement* scan is sent: the publisher's App Link / Universal Link, carrying the
+ * transaction code and the store URL to fall back to.
+ *
+ * There is no "is the app installed" check here, or anywhere else in this codebase, because
+ * both mobile platforms already answer that question — correctly, offline, before the request
+ * leaves the handset — and no server can:
+ *
+ *   installed      the OS intercepts the https URL and opens the app with `qrm_code`. We never
+ *                  see the request. The app hands the code to its own backend, which claims the
+ *                  purchase reward with its API key.
+ *   not installed  the browser loads the publisher's page normally, which forwards to
+ *                  `qrm_fallback` — a store URL we built, so the Play referrer inside it cannot
+ *                  be assembled wrong by a third party. The traveller installs, signs up, and
+ *                  is attributed as an acquisition; on Android the referrer also carries the
+ *                  code, so the purchase reward survives the install too.
+ *
+ * A publisher with no `deeplink_url` registered simply gets the acquisition destination. The
+ * campaign still works — the code reaches them through the referrer on Android — so this is a
+ * setting that improves an engagement campaign rather than one that gates it.
+ */
+export function engagementUrl(
+  platform: Platform,
+  t: AppTargets,
+  claimId: string,
+  code: string,
+  fallback?: string | null,
+): string | null {
+  const store = fallback ?? storeUrl(platform, t, claimId, code);
+  if (!t.deeplink_url) return store;
+  const u = new URL(t.deeplink_url);
+  u.searchParams.set('qrm_code', code);
+  if (store) u.searchParams.set('qrm_fallback', store);
+  return u.toString();
+}
+
 /** Pull our claim id back out of a raw Play Install Referrer string. */
 export function claimIdFromReferrer(referrer?: string | null): string | null {
   if (!referrer || typeof referrer !== 'string') return null;
   const m = /(?:^|[&?])qrm_claim=([A-Za-z0-9_-]{6,64})(?:&|$)/.exec(referrer.trim());
+  return m ? m[1] : null;
+}
+
+/**
+ * The engagement equivalent: pull the transaction code out of a referrer string, so a publisher
+ * that already reads the referrer at first open does not need a second integration to collect
+ * the purchase reward on an install that came from a boarding pass.
+ *
+ * Shaped like `newShortCode()` — base64url out of `randomBytes`, so it survives a referrer
+ * without escaping. Anything else is not a code we issued and must not be looked up.
+ */
+export function codeFromReferrer(referrer?: string | null): string | null {
+  if (!referrer || typeof referrer !== 'string') return null;
+  const m = /(?:^|[&?])qrm_code=([A-Za-z0-9_-]{6,64})(?:&|$)/.exec(referrer.trim());
   return m ? m[1] : null;
 }
 

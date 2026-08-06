@@ -80,6 +80,7 @@ const TABS = [
   { id: 'Redemptions', icon: 'redemptions', group: 'Traffic' },
   { id: 'QR codes', icon: 'qr', group: 'Traffic' },
   { id: 'Ledger', icon: 'ledger', group: 'Money' },
+  { id: 'Notifications', icon: 'audit', group: 'Money' },
   { id: 'Audit log', icon: 'audit', group: 'Money' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
@@ -96,6 +97,8 @@ const HEAD: Record<Tab, string> = {
   Redemptions: 'Every signup a publisher vouched for.',
   'QR codes': 'Issued codes, their limits and their state.',
   Ledger: 'Account balances and the entries behind them.',
+  Notifications:
+    'What tenants have done that nobody here has acknowledged — a funded budget, a repriced partnership. Marking one handled moves it out of here; the audit log keeps it forever.',
   'Audit log': 'Every privileged override, newest first.',
 };
 
@@ -380,6 +383,7 @@ interface AdminData {
   qrCodes?: QrCode[];
   ledger?: Ledger;
   audit?: AuditEntry[];
+  notifications?: AuditEntry[];
   analytics?: Analytics;
 }
 
@@ -397,10 +401,10 @@ export default function Admin() {
   const [ledgerAccount, setLedgerAccount] = useState('');
   const [days, setDays] = useState(30);
 
-  /** The seven endpoints no filter on this page affects. */
+  /** The eight endpoints no filter on this page affects. */
   const loadCore = useCallback(async () => {
     try {
-      const [overview, orgs, partnerships, campaigns, redemptions, qrCodes, audit] =
+      const [overview, orgs, partnerships, campaigns, redemptions, qrCodes, audit, notifications] =
         await Promise.all([
           api<AdminOverview>('/v1/admin/overview'),
           api<AdminOrg[]>('/v1/admin/orgs?limit=1000'),
@@ -409,8 +413,9 @@ export default function Admin() {
           api<Redemption[]>('/v1/admin/redemptions?limit=1000'),
           api<QrCode[]>('/v1/admin/qr-codes?limit=1000'),
           api<AuditEntry[]>('/v1/admin/audit-log?limit=500'),
+          api<AuditEntry[]>('/v1/admin/notifications?limit=500'),
         ]);
-      setD((p) => ({ ...p, overview, orgs, partnerships, campaigns, redemptions, qrCodes, audit }));
+      setD((p) => ({ ...p, overview, orgs, partnerships, campaigns, redemptions, qrCodes, audit, notifications }));
       setLoadErr('');
     } catch (e: any) {
       setLoadErr(e.message);
@@ -534,7 +539,12 @@ export default function Admin() {
         label: t.id,
         icon: t.icon,
         group: t.group || undefined,
-        badge: t.id === 'Partnerships' ? o?.pending_partnerships : undefined,
+        badge:
+          t.id === 'Partnerships'
+            ? o?.pending_partnerships
+            : t.id === 'Notifications'
+              ? o?.open_notifications
+              : undefined,
       }))}
       active={tab}
       onSelect={(id) => setTab(id as Tab)}
@@ -637,6 +647,7 @@ export default function Admin() {
             <h2 className={sectionHead}>Needs attention</h2>
             <div className={cx(card, 'mt-3 p-2')}>
               {[
+                ['Tenant changes you have not acknowledged', o.open_notifications, 'Notifications'],
                 ['Partnerships waiting on a publisher', o.pending_partnerships, 'Partnerships'],
                 ['Suspended organizations', o.suspended_orgs, 'Organizations'],
                 ['Voided QR codes', o.voided_codes, 'QR codes'],
@@ -649,7 +660,7 @@ export default function Admin() {
                   </span>
                 </button>
               ))}
-              {!o.pending_partnerships && !o.suspended_orgs && !o.voided_codes && (
+              {!o.open_notifications && !o.pending_partnerships && !o.suspended_orgs && !o.voided_codes && (
                 <p className={cx(muted, 'px-3 py-2.5')}>Nothing is waiting on you.</p>
               )}
             </div>
@@ -764,8 +775,15 @@ export default function Admin() {
           cols={[
             { h: 'Promoter', get: (x) => x.promoter_name },
             { h: 'Publisher', get: (x) => x.publisher_name },
-            ...(['coin_rate', 'guest_rate', 'grace_days'] as const).map((f) => ({
-              h: f === 'grace_days' ? 'Grace (days)' : f === 'coin_rate' ? 'Coins / signup' : 'Guest rate',
+            ...(['coin_rate', 'guest_rate', 'engagement_rate', 'grace_days'] as const).map((f) => ({
+              h:
+                f === 'grace_days'
+                  ? 'Grace (days)'
+                  : f === 'coin_rate'
+                    ? 'Coins / signup'
+                    : f === 'engagement_rate'
+                      ? 'Coins / purchase'
+                      : 'Guest rate',
               sort: (x: any) => x[f],
               get: (x: any) => (
                 <input
@@ -806,7 +824,16 @@ export default function Admin() {
             { h: 'Campaign', get: (x) => x.name },
             { h: 'Promoter', get: (x) => x.promoter_name },
             { h: 'Publisher', get: (x) => x.publisher_name },
-            { h: 'Rate', num: true, get: (x) => x.coin_rate },
+            // Which guarantee this campaign's redemptions live under. Worth a column of its
+            // own because it changes what every other number on the row means: an engagement
+            // campaign's conversion is per purchase, not per person.
+            { h: 'Pays for', sort: (x) => x.mode, get: (x) => pill(x.mode === 'engagement' ? 'repeat' : 'signup') },
+            {
+              h: 'Rate',
+              num: true,
+              sort: (x) => (x.mode === 'engagement' ? x.engagement_rate : x.coin_rate),
+              get: (x) => (x.mode === 'engagement' ? x.engagement_rate : x.coin_rate),
+            },
             // `scans`/`redemptions` are counted only by the admin listing, hence optional
             { h: 'Scans', num: true, get: (x) => x.scans ?? 0 },
             { h: 'Redemptions', num: true, get: (x) => x.redemptions ?? 0 },
@@ -821,7 +848,15 @@ export default function Admin() {
               num: true,
               sort: (x) => x.budget,
               get: (x) => (
-                <span className={x.budget < x.coin_rate ? 'text-bad' : ''}>{num(x.budget)}</span>
+                <span
+                  className={
+                    x.budget < (x.mode === 'engagement' ? x.engagement_rate : x.coin_rate)
+                      ? 'text-bad'
+                      : ''
+                  }
+                >
+                  {num(x.budget)}
+                </span>
               ),
             },
             {
@@ -970,7 +1005,15 @@ export default function Admin() {
             { h: 'Promoter', get: (x) => x.promoter_name },
             { h: 'Publisher', get: (x) => x.publisher_name },
             { h: 'Publisher user', sort: (x) => x.publisher_user_ref, get: (x) => <code>{x.publisher_user_ref}</code> },
-            { h: 'Kind', sort: (x) => x.identified, get: (x) => pill(x.identified ? 'identified' : 'guest') },
+            { h: 'Pays for', sort: (x) => x.kind, get: (x) => pill(x.kind === 'engagement' ? 'repeat' : 'signup') },
+            // An engagement row is always settled in full — there is no guest tier for somebody
+            // who already transacted — so this column only ever varies on acquisitions.
+            {
+              h: 'Tier',
+              sort: (x) => x.identified,
+              get: (x) =>
+                x.kind === 'engagement' ? '—' : pill(x.identified ? 'identified' : 'guest'),
+            },
             { h: 'Upgraded', sort: (x) => x.upgraded_at ?? '', get: (x) => when(x.upgraded_at) },
             { h: 'Coins', num: true, sort: (x) => x.coins, get: (x) => num(x.coins) },
             {
@@ -1107,6 +1150,59 @@ export default function Admin() {
               { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
               { h: 'Amount', num: true, sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'text-bad' : 'text-ok'}>{num(x.amount)}</span> },
               { h: 'Ref', sort: (x) => x.ref, get: (x) => <code>{x.ref}</code> },
+            ]}
+          />
+        </>
+      )}
+
+      {/* The unread end of the audit log. Same rows, same shape — what makes this a separate
+          tab is that leaving it is an action: a budget the platform did not fund itself is news
+          exactly once. */}
+      {tab === 'Notifications' && (
+        <>
+          {(d.notifications?.length ?? 0) > 0 && (
+            <div className="mt-3 flex justify-end">
+              <button
+                className={btnGhost}
+                disabled={busy}
+                onClick={() => post('/v1/admin/notifications/ack', {}, 'Inbox cleared.')}
+              >
+                Mark all handled
+              </button>
+            </div>
+          )}
+          <Table
+            loading={loading}
+            rows={d.notifications ?? []}
+            empty="Nothing from a tenant is waiting — every budget change has been seen."
+            cols={[
+              { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
+              {
+                h: 'Who',
+                sort: (x) => x.actor_name ?? '',
+                get: (x) => (
+                  <>
+                    {x.actor_name ?? 'system'}
+                    {x.actor_type && <span className={cx(muted, 'ml-1.5')}>{x.actor_type}</span>}
+                  </>
+                ),
+              },
+              { h: 'Action', sort: (x) => x.action, get: (x) => <code>{x.action}</code> },
+              { h: 'Target', sort: (x) => x.target, get: (x) => <code>{x.target}</code> },
+              {
+                h: 'Detail',
+                sort: (x) => JSON.stringify(x.detail),
+                get: (x) => (
+                  <span className={cx(muted, 'whitespace-pre-wrap')}>{JSON.stringify(x.detail)}</span>
+                ),
+              },
+              {
+                h: '',
+                get: (x) =>
+                  link('Mark handled', () =>
+                    post('/v1/admin/notifications/ack', { ids: [x.id] }, 'Marked handled.'),
+                  ),
+              },
             ]}
           />
         </>

@@ -106,11 +106,17 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
               sc.language, sc.platform, sc.referer_host,
               sc.screen, sc.tz, sc.dark, sc.client,
               q.code, c.name AS campaign_name,
-              r.id IS NOT NULL AS converted
+              r.n > 0 AS converted
        FROM scans sc
        JOIN qr_codes q  ON q.id = sc.qr_code_id
        JOIN campaigns c ON c.id = sc.campaign_id
-       LEFT JOIN redemptions r ON r.scan_id = sc.id
+       -- Aggregated rather than joined straight through, because one scan can now carry two
+       -- redemptions: an acquisition (the scanner was a new user) and an engagement (they had
+       -- just bought something). A plain LEFT JOIN would emit that scan twice and silently
+       -- inflate every scan count on this dashboard.
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS n FROM redemptions r WHERE r.scan_id = sc.id
+       ) r ON true
        WHERE sc.scanned_at > now() - make_interval(days => $2::int)
          AND ($1::uuid IS NULL OR sc.campaign_id = $1::uuid)
      )
@@ -120,14 +126,21 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
   );
 
   const totalsPromise = prisma.$queryRawUnsafe<Record<string, number>[]>(
+    // Same fan-out hazard as above, and here it would have double-counted the scan total
+    // itself. `conversions` counts scans that paid at least once — a scan that produced both a
+    // signup and a purchase reward is still one converted scan — while `coins` sums both,
+    // because the campaign budget really did pay for both.
     `SELECT count(*)::int                                        AS scans,
             count(DISTINCT sc.ip)::int                           AS devices,
-            count(r.id)::int                                     AS conversions,
+            count(*) FILTER (WHERE r.n > 0)::int                 AS conversions,
             coalesce(sum(r.coins), 0)::int                       AS coins,
             count(*) FILTER (WHERE sc.country IS NOT NULL)::int   AS geo_known,
             count(*) FILTER (WHERE sc.screen IS NOT NULL)::int    AS handset_known
      FROM scans sc
-     LEFT JOIN redemptions r ON r.scan_id = sc.id
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int AS n, coalesce(sum(coins), 0)::int AS coins
+       FROM redemptions r WHERE r.scan_id = sc.id
+     ) r ON true
      WHERE sc.scanned_at > now() - make_interval(days => $2::int)
        AND ($1::uuid IS NULL OR sc.campaign_id = $1::uuid)`,
     campaignId,

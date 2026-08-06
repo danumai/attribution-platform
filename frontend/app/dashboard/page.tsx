@@ -152,6 +152,7 @@ export default function Dashboard() {
     landing_url: '',
     android_package: '',
     ios_app_id: '',
+    deeplink_url: '',
     bonus_label: '',
   });
   const setDestField = (k: keyof typeof dest) => (e: ChangeEvent<HTMLInputElement>) =>
@@ -175,6 +176,7 @@ export default function Dashboard() {
         landing_url: self.landing_url ?? '',
         android_package: self.android_package ?? '',
         ios_app_id: self.ios_app_id ?? '',
+        deeplink_url: self.deeplink_url ?? '',
         bonus_label: self.bonus_label ?? '',
       });
     } catch (e: any) {
@@ -264,6 +266,13 @@ export default function Dashboard() {
           value: '7',
           required: true,
         },
+        {
+          name: 'engagement_rate',
+          label: 'Coins per repeat purchase (repeat-purchase campaigns only)',
+          type: 'number',
+          value: '20',
+          required: true,
+        },
       ],
     });
     if (!v) return;
@@ -280,6 +289,7 @@ export default function Dashboard() {
             coin_rate: +v.coin_rate,
             guest_rate: +v.guest_rate,
             grace_days: +v.grace_days,
+            engagement_rate: +v.engagement_rate,
           }),
         }),
       'Partnership requested — waiting on the publisher.',
@@ -311,6 +321,14 @@ export default function Dashboard() {
           required: true,
           hint: 'Cannot exceed the full tier.',
         },
+        {
+          name: 'engagement_rate',
+          label: 'Coins per repeat purchase',
+          type: 'number',
+          value: String(p.proposed_engagement_rate ?? p.engagement_rate),
+          required: true,
+          hint: 'Priced on its own — a returning customer is not an acquisition.',
+        },
       ],
     });
     if (!v) return;
@@ -318,7 +336,11 @@ export default function Dashboard() {
       () =>
         api(`/v1/partnerships/${p.id}/rates`, {
           method: 'PATCH',
-          body: JSON.stringify({ coin_rate: +v.coin_rate, guest_rate: +v.guest_rate }),
+          body: JSON.stringify({
+            coin_rate: +v.coin_rate,
+            guest_rate: +v.guest_rate,
+            engagement_rate: +v.engagement_rate,
+          }),
         }),
       `Sent to ${p.publisher_name} — the rates in force do not change until they accept.`,
     );
@@ -346,6 +368,20 @@ export default function Dashboard() {
           label: 'Campaign name',
           required: true,
           placeholder: 'Inflight entertainment promo',
+        },
+        {
+          name: 'mode',
+          label: 'What this campaign pays for',
+          type: 'select',
+          required: true,
+          value: 'acquisition',
+          options: [
+            { value: 'acquisition', label: 'New signups — one payout per person, ever' },
+            {
+              value: 'engagement',
+              label: 'Repeat purchases — one payout per transaction code you issue',
+            },
+          ],
         },
       ],
     });
@@ -676,11 +712,19 @@ export default function Dashboard() {
                       <td className={td}>{p.publisher_name}</td>
                       <td className={tdNum}>
                         {num(p.guest_rate)} / {num(p.coin_rate)}
+                        {/* Repeat purchases are priced separately and are not part of the
+                            guest/full split, so they get their own line rather than a third
+                            number in a pair that reads as one tier of the other. */}
+                        <div className={cx(muted, 'tabular-nums')}>
+                          {num(p.engagement_rate)} per repeat purchase
+                        </div>
                         {/* The rates in force stay the headline; the proposal is printed under
                             them, because nothing is paid at a proposal. */}
                         {p.proposed_coin_rate !== null && (
                           <div className={cx(muted, 'tabular-nums')}>
                             asking {num(p.proposed_guest_rate ?? 0)} / {num(p.proposed_coin_rate)}
+                            {' · '}
+                            {num(p.proposed_engagement_rate ?? 0)} repeat
                           </div>
                         )}
                       </td>
@@ -893,6 +937,18 @@ export default function Dashboard() {
               placeholder="https://example.com/get-the-app"
               onChange={setDestField('landing_url')}
             />
+            <label className={label}>App link (repeat-purchase campaigns)</label>
+            <input
+              className={field}
+              value={dest.deeplink_url}
+              placeholder="https://example.com/open"
+              onChange={setDestField('deeplink_url')}
+            />
+            <p className={muted}>
+              An https URL you have registered as an Android App Link / iOS Universal Link. Scans
+              on a repeat-purchase campaign are sent here, so the phone opens your app when it is
+              installed and falls back to the store when it is not — the OS decides, not us.
+            </p>
             <label className={label}>Your joining bonus, in your own words</label>
             <input
               className={field}

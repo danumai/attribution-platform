@@ -16,6 +16,7 @@ import { BASE_URL, FRONTEND_URL } from '../../config';
 import { QrStyle, isAdvanced, renderPng, renderSvg, validateStyle } from '../../common/qr';
 import {
   detectPlatform,
+  engagementUrl,
   normCores,
   normDark,
   normLang,
@@ -65,6 +66,7 @@ export class PublicController {
           select: {
             id: true,
             status: true,
+            mode: true,
             partnership: {
               select: {
                 status: true,
@@ -76,6 +78,7 @@ export class PublicController {
                     landing_url: true,
                     android_package: true,
                     ios_app_id: true,
+                    deeplink_url: true,
                   },
                 },
               },
@@ -99,7 +102,36 @@ export class PublicController {
     // and no web fallback would otherwise eat the print run's uses redirecting nobody.
     const platform = detectPlatform(req.headers['user-agent'] ?? '');
     const claim_id = newClaimId();
-    const destination = storeUrl(platform, campaign.partnership.publisher, claim_id);
+    const publisher = campaign.partnership.publisher;
+
+    /**
+     * An engagement scan is sent to the publisher's App Link / Universal Link instead of
+     * straight to the store, so the OS can open the app when it is installed — which for a
+     * returning traveller is the normal case, and the one the whole flow exists for.
+     *
+     * Two things ride along, and neither is spendable on its own:
+     *
+     *   qrm_code      the transaction code. The app hands it to its own backend, which claims
+     *                 the purchase reward with its server-side API key. Inert without that key.
+     *   qrm_fallback  where to go if the app is not installed. Built here rather than left to
+     *                 the publisher's page because it contains the Play install referrer, and a
+     *                 referrer assembled wrong is an attribution rate of zero with no error.
+     *
+     * On iOS the fallback is the interstitial rather than the bare App Store listing: a
+     * traveller without the app is about to become an acquisition too, and the signals that
+     * make an iOS acquisition matchable can only be read in a browser, right here.
+     */
+    const engagement = campaign.mode === 'engagement';
+    const iosHandoff = platform === 'ios' && publisher.ios_app_id;
+    const destination = engagement
+      ? engagementUrl(
+          platform,
+          publisher,
+          claim_id,
+          code,
+          iosHandoff ? `${BASE_URL}/i/${claim_id}` : null,
+        )
+      : storeUrl(platform, publisher, claim_id);
     if (!destination) return end('no_destination');
 
     // One transaction, because the two writes are one fact. A use claimed without the matching
@@ -145,8 +177,14 @@ export class PublicController {
     // Android with a Play listing deliberately skips it: the referrer already names the exact
     // scan, so a hop would cost conversion and buy nothing. Desktop and app-less publishers
     // skip it too — there is no install to attribute either way.
-    if (platform === 'ios' && campaign.partnership.publisher.ios_app_id)
-      return this.interstitial(res, claim_id, campaign.partnership.publisher.name, 'ios');
+    //
+    // An engagement scan with a deep link registered skips it as well, and for a third reason:
+    // the code already names the transaction deterministically, so there is no fingerprint to
+    // collect and the ~900ms hold would be pure conversion cost. The traveller most likely has
+    // the app already; if they do not, `qrm_fallback` sends them through `/i/:claim_id`, which
+    // is this same page — so the signals are still collected in the one case that needs them.
+    if (iosHandoff && !(engagement && publisher.deeplink_url))
+      return this.interstitial(res, claim_id, publisher.name, 'ios');
 
     // Straight to the store listing. No token, no code, no query the app can read and spend —
     // on Android the claim id travels only inside Play's install-referrer channel, which is
@@ -185,6 +223,38 @@ export class PublicController {
     res.send(
       interstitialHtml({ destination, go: `${BASE_URL}/go/${claim_id}`, nonce, store }),
     );
+  }
+
+  /**
+   * The interstitial, reached from an engagement deep link that found no app installed.
+   *
+   * `/r/:code` normally renders this page inline, which is fine when the decision is ours to
+   * make. On an engagement scan it is not: the OS decides whether the app opens, offline and
+   * after we have already answered. So the hand-off screen needs a URL of its own to be the
+   * `qrm_fallback` of a deep link that did not resolve — and the traveller who lands here is
+   * exactly the one whose iOS acquisition would otherwise be unmatchable, because nothing
+   * would ever have read this handset's timezone, screen or locale.
+   *
+   * No use is burned and no scan is created: `/r/:code` already did both, and this only names
+   * the scan it made. An unknown or already-bound claim id is turned away rather than
+   * re-rendered, so a replayed link cannot re-open the signal window on a paid attribution.
+   */
+  @Get('i/:claimId')
+  async handoff(@Param('claimId') claimId: string, @Req() req: Request, @Res() res: Response) {
+    const end = (reason: string) =>
+      res.redirect(`${FRONTEND_URL}/campaign-ended?reason=${reason}`);
+    if (await rateLimited(`go:${clientIp(req)}`, 30)) return end('rate_limited');
+    const scan = await prisma.scan.findUnique({
+      where: { claim_id: claimId },
+      select: {
+        consumed: true,
+        campaign: {
+          select: { partnership: { select: { publisher: { select: { name: true } } } } },
+        },
+      },
+    });
+    if (!scan || scan.consumed) return end('invalid');
+    return this.interstitial(res, claimId, scan.campaign.partnership.publisher.name, 'ios');
   }
 
   /**

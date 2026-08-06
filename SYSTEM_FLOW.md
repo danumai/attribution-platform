@@ -24,6 +24,32 @@ bridge — and the agreed marketing fee gets paid automatically, safely, with no
 into the app; the install is tied back to the scan afterwards, server-to-server. That
 separation is deliberate — see [Figure 8](#figure-8-why-the-qr-unlocks-nothing).
 
+## Two Products, One Machine
+
+There are two things a promoter can buy here, and every table, index and endpoint below is
+shared between them. A campaign's `mode` picks one at creation and it never changes.
+
+| | `acquisition` | `engagement` |
+|---|---|---|
+| **Pays for** | a person who was not a user before | a repeat purchase by anyone |
+| **Guarantee** | one payout per user per campaign, **ever** | one payout per **issued code** |
+| **Priced at** | `coin_rate` / `guest_rate` (two tiers) | `engagement_rate` (one tier) |
+| **Codes** | designed in the portal, printed, many scans | minted per transaction by the promoter's server, single-use |
+| **Match** | referrer (Android) or fingerprint (iOS) | the code itself — no matching to do |
+| **Stages** | scan → install → signup → reward | scan → reward |
+| **Example** | a poster in an airport terminal | NovoAir printing a code on every boarding pass |
+
+Acquisition is the original product and is unchanged. Engagement exists because
+`UNIQUE (campaign_id, publisher_user_ref)` — exactly right for buying a new user — is exactly
+wrong for an airline: a traveller who flies eleven times a year is eleven purchases, and a
+shop's regular is a purchase a week. Both modes are described in full below;
+[Figure 2b](#figure-2b-the-engagement-lifecycle) is the second lifecycle.
+
+**They are not alternatives on a single scan.** A traveller with no app yet scans a boarding
+pass, installs, signs up, *and* has bought a ticket. That one scan is honestly an acquisition
+and honestly a purchase, and both are paid — see
+[Figure 2c](#figure-2c-one-scan-two-payouts).
+
 ---
 
 ## The People Involved
@@ -113,18 +139,139 @@ stored only as a SHA-256 hash — rotating it invalidates the old one immediatel
                                   API (server-to-server)
 ```
 
-**Step 1 sets three numbers**, and they are the whole commercial deal:
+**Step 1 sets four numbers**, and they are the whole commercial deal:
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `coin_rate` | 50 | Fee for a **verified** signup (the full price) |
 | `guest_rate` | 10 | Fee paid immediately for an **unverified guest** |
 | `grace_days` | 7 | How long the guest has to verify and release the difference |
+| `engagement_rate` | 20 | Fee for one **repeat purchase**, in an engagement campaign |
 
-`guest_rate` can never exceed `coin_rate` — the database enforces it.
+`guest_rate` can never exceed `coin_rate` — the database enforces it. `engagement_rate` is
+deliberately **not** bounded against either. The guest rate is a *part* of the coin rate, which
+is why the held-back delta can never be negative; a repeat purchase is not part of an
+acquisition, it is a different thing being bought, and a partnership may honestly price it
+above a signup or at a tenth of one.
+
+All four are proposed and accepted as one set — see [repricing](#promoter-journey).
 
 These are **marketing fees in platform credits**, paid promoter → publisher. They are not
 user currency, they never enter an app, and nothing in this system grants a user anything.
+
+---
+
+## Figure 2b: The Engagement Lifecycle
+
+The second product. Steps 1–4 are the same partnership and the same funded campaign; what
+changes is where codes come from and what happens at the end.
+
+```
+ STEP 1–5   Partnership, then a campaign created with mode: "engagement",
+            then funded. Identical to Figure 2.
+                │
+                ▼
+ STEP 6   ── ONE CODE PER TRANSACTION ─────────────────────────────────
+            NovoAir sells a seat. Its booking system calls
+              POST /v1/issue { campaign_id, issued_ref: "PNR-7X42QK" }
+              → 201 { code, scan_url }        single-use, 30-day expiry
+            The code is printed on the boarding pass / emailed with the receipt.
+
+            Idempotent on issued_ref: a booking webhook that fires twice
+            gets the same code back, never a second reward for one seat.
+                │
+                ▼
+ STEP 7   ── THE SCAN ──────────────────────────────────────────────────
+            The traveller scans it. Same gauntlet as every other scan
+            (rate limit, voided, active, budget, atomic single-use claim).
+            The destination is the only thing that differs:
+
+              302 → https://publisher.example/open
+                       ?qrm_code=<code>
+                       &qrm_fallback=<store url we built>
+                │
+                ├─ app installed ──► the OS intercepts the App Link /
+                │                    Universal Link. The app opens with
+                │                    qrm_code. We never see the request.
+                │
+                └─ not installed ──► the publisher's page loads and follows
+                                     qrm_fallback to the store. See Figure 2c.
+                │
+                ▼
+ STEP 8   ── THE PAYOUT ────────────────────────────────────────────────
+            The app hands qrm_code to its OWN backend, which calls
+              POST /v1/attribution/claim { code, publisher_user_ref }
+              → 200 { attributed: true, kind: "engagement", fee: 20 }
+
+            No install stage. No fingerprint. No window to guess inside.
+            The code was minted against one named transaction and scanned
+            once, so match_method is `code` and confidence is 100.
+```
+
+**Why there is no matching step.** Everything in the acquisition flow exists because a phone
+walks off to a store and has to be recognised when it comes back. A boarding-pass code skips
+all of it: the promoter's booking system minted it against a named purchase, the traveller
+scanned that exact code, and the publisher presents that exact code back. `code` is stronger
+evidence than a referrer, because it names a *purchase* rather than a device.
+
+**Why there is no guest tier.** `identified` splits an acquisition fee because a brand-new
+account is worth less until somebody vouches for it. A repeat customer already transacted with
+the promoter, which is a harder fact than any verification bar the publisher could apply. An
+engagement payout settles in one step, and `/confirm` has nothing to release.
+
+**Why there is no "is the app installed" check** anywhere in this codebase: both mobile
+platforms already answer that question, correctly, offline, before the request leaves the
+handset. No server can. `deeplink_url` is how the publisher hands that decision to the OS.
+
+---
+
+## Figure 2c: One Scan, Two Payouts
+
+The case that shapes three database indexes, and the reason engagement is not simply "a second
+kind of campaign".
+
+```
+   A traveller with NO APP YET scans their boarding pass.
+
+         one scan
+             │
+    ┌────────┴─────────┐
+    │                  │
+    ▼                  ▼
+ they are a         they just bought
+ NEW USER           A TICKET
+    │                  │
+    │  install,        │  the app reads qrm_code from the
+    │  first-open,     │  same Play install referrer
+    │  signup          │
+    ▼                  ▼
+ acquisition       engagement
+ pays coin_rate    pays engagement_rate
+ (or guest tier)
+```
+
+Both are owed. The traveller genuinely is a new user *and* genuinely bought something, and the
+promoter agreed to pay for both. On Android the Play install referrer carries `qrm_claim` and
+`qrm_code` together, which is what lets one scan survive an install carrying both facts.
+
+Making that work required the guards to stop sharing a flag:
+
+| Fact | Guard | Scope |
+|---|---|---|
+| one install per scan | `scans.consumed` | acquisition only |
+| one signup per scan | `UNIQUE (scan_id)` | **`WHERE kind = 'acquisition'`** |
+| one signup per user per campaign | `UNIQUE (campaign_id, publisher_user_ref)` | **`WHERE kind = 'acquisition'`** |
+| one reward per issued code | `UNIQUE (qr_code_id)` | **`WHERE kind = 'engagement'`** |
+
+Before this, a total `UNIQUE (scan_id)` meant whichever call arrived second was refused — and
+which one that was depended on the publisher's call ordering, which is not a rule anyone can
+reason about. Partial indexes make the two facts independent, which is what they always were.
+
+**On iOS the fall-through is weaker**, and honestly so: the App Store has no referrer channel,
+so `qrm_code` cannot survive an install. `qrm_fallback` points at `/i/:claim_id` — the same
+interstitial an acquisition scan gets — so the *acquisition* half still works. The purchase
+reward is lost unless the publisher's own web page stashes the code before sending them on.
+That is inherent to iOS, not a bug in the integration.
 
 ---
 
@@ -139,9 +286,12 @@ turns the user away with an explanation rather than a broken page.
        ──► code voided?                       ──► voided
        ──► campaign active?                   ──► paused / ended
        ──► budget left?                       ──► budget
-       ──► resolve destination from the UA:
-             android → Play, ios → App Store,
-             else    → publisher web fallback ──► no_destination
+       ──► resolve destination from the UA and the campaign mode:
+             acquisition → android: Play, ios: App Store,
+                           else:    publisher web fallback
+             engagement  → the publisher's app link, carrying
+                           qrm_code + qrm_fallback (see Figure 2b)
+                                                    ──► no_destination
        ──► claim one use, atomically:
              not expired AND uses < max_uses  ──► expired / used_up
        ──► record the pending claim
@@ -149,8 +299,20 @@ turns the user away with an explanation rather than a broken page.
        ──► iOS with a registered App Store id?
              yes → 200, the hand-off screen (collects tz/screen/locale/cores/
                    appearance, then forwards via GET /go/:claim_id)
-             no  → 302 straight to the store listing
+             no  → 302 straight to the destination
 ```
+
+Every check above the destination line is identical in both modes, deliberately: budget,
+status, expiry, single-use and the per-IP ceiling are money and abuse controls, and an
+engagement campaign is not a reason to relax any of them. **`mode` changes where a scan is
+sent and nothing else about this path.**
+
+An engagement scan with a deep link registered also skips the iOS interstitial, for a third
+reason on top of the two below: the code already names the transaction deterministically, so
+there is no fingerprint to collect and the ~900ms hold would be pure conversion cost. A
+traveller who turns out *not* to have the app reaches the same page anyway, via
+`qrm_fallback` → `GET /i/:claim_id`, so the signals are still collected in the one case that
+needs them.
 
 **Why iOS gets an extra hop.** Android's referrer names the exact scan, so an interstitial
 there would cost conversion and buy nothing — it is skipped. iOS has no referrer channel at
@@ -175,6 +337,12 @@ app and no web fallback would otherwise eat a print run's uses redirecting nobod
 inside Play's `referrer` parameter — an install-attribution channel, not app content. On
 iOS there is no such channel, so the URL is the bare store listing and the match happens on
 device fingerprint instead. Either way the app receives no code it could redeem.
+
+On an **engagement** scan the app does receive `qrm_code`. That is a real difference and it is
+argued honestly in [Figure 8](#figure-8-why-the-qr-unlocks-nothing) rather than glossed here:
+the code is an opaque transaction reference, single-use, short-lived, and inert without the
+publisher's server-side API key — the same trust model as Play's install referrer — but it is
+not nothing, and it is the one place this system's compliance story needs reading twice.
 
 The interstitial does not weaken this. It lives on our origin, never reaches the app, and
 deliberately prints no reference number — it shows a timestamp instead, so there is nothing
@@ -367,13 +535,28 @@ is [Part III](#part-iii--security-model).
 
 ```
   ✔  Nothing redeemable ever reaches a device
-      — the scan redirect carries no token, key or code; the only identifier that leaves
-        our origin is an opaque claim id inside Play's install-referrer channel, and it
-        is useless without the publisher's server-side API key
+      — the scan redirect carries no token or key. On an acquisition scan the only
+        identifier that leaves our origin is an opaque claim id inside Play's
+        install-referrer channel; on an engagement scan an opaque transaction code
+        travels alongside it. Neither is spendable: both are lookup keys that do nothing
+        without the publisher's server-side API key. See Figure 8.
 
-  ✔  One fee per user per campaign
-      — a UNIQUE (campaign_id, publisher_user_ref) constraint, so it holds under a race,
-        not just under a check
+  ✔  One fee per user per campaign  (ACQUISITION)
+      — UNIQUE (campaign_id, publisher_user_ref) WHERE kind = 'acquisition', so it holds
+        under a race, not just under a check
+
+  ✔  One reward per issued code  (ENGAGEMENT)
+      — UNIQUE (qr_code_id) WHERE kind = 'engagement'. This is what makes "one payout per
+        purchase" true: the promoter's own booking system mints one code per transaction,
+        so the code IS the purchase. Two simultaneous claims for one boarding pass pay once.
+
+  ✔  One code per transaction
+      — UNIQUE (campaign_id, issued_ref) on qr_codes, so a booking webhook that fires
+        twice returns the first code instead of minting a second reward for one seat
+
+  ✔  A shared code pays its first claimant only
+      — a retry by the same publisher_user_ref replays; a DIFFERENT user presenting the
+        same code is refused already_claimed rather than handed the first user's reward
 
   ✔  One install per scan
       — the scan row is taken FOR UPDATE SKIP LOCKED and marked consumed inside the
@@ -383,6 +566,17 @@ is [Part III](#part-iii--security-model).
   ✔  One signup per install
       — installs.redeemed is flipped by the same UPDATE that tests it, so two simultaneous
         signups for one install cannot both proceed; the loser is told already_claimed
+
+  ✔  The two payouts on one scan cannot race each other
+      — UNIQUE (scan_id) is scoped WHERE kind = 'acquisition', and scans.consumed guards
+        only the install. A boarding pass scanned by somebody with no app yet is honestly
+        both an acquisition and a purchase; before this, whichever call arrived second was
+        refused, and which one that was depended on the publisher's call ordering
+
+  ✔  A campaign's mode cannot change after it has paid anything
+      — there is no endpoint to change it. The guarantees above are partial indexes over
+        rows that already exist, and flipping the mode would leave a run of redemptions
+        living under a rule they were never checked against
 
   ✔  A probabilistic match is never a guess
       — hashed IP + platform scores 55 against a floor of 70, and an exact tie between two
@@ -407,7 +601,13 @@ is [Part III](#part-iii--security-model).
   ✔  Store destinations are validated
       — package names and App Store ids are pattern-checked in the API and by a CHECK
         constraint, because they are interpolated into the store URL a scan redirects to;
-        the web fallback is https-only, no javascript:/data:, no embedded credentials
+        the web fallback and the engagement deep link are https-only (http for localhost
+        alone), no javascript:/data:, no embedded credentials
+
+  ✔  Only the promoter that owns a campaign can mint codes against it
+      — ownership and mode are both inside the WHERE clause on /v1/issue, so somebody
+        else's campaign is a 404 rather than a permission error, and an acquisition
+        campaign refuses transaction codes outright
 
   ✔  Every admin override is written to the audit log
       — who, what, why, when
@@ -426,13 +626,19 @@ Three kinds of ledger account, and every transfer touches exactly two of them:
                ▼
         campaign:{id}                     "CAMPAIGN BUDGET" (e.g. 5,000 credits)
                │
-               │  redemption:{id}          -50 / +50
+               │  redemption:{id}          -50 / +50   (acquisition, full tier)
                │  upgrade:{id}             -40 / +40   (guest → verified top-up)
+               │  redemption:{id}          -20 / +20   (engagement, one purchase)
                ▼
         publisher:{org_id}                "PUBLISHER EARNINGS"
 
   Balances live in account_balances and are updated in the same transaction as the
   ledger rows — the ledger is the truth, the balance is the fast read.
+
+  Both products spend from the same account under the same lock, so an engagement
+  campaign can no more overspend than an acquisition one. The ledger ref shape is
+  identical too -- a repeat purchase is a redemption like any other; only `kind` and
+  the rate it was priced at differ.
 
   When the budget hits zero the QR stops redirecting and sends people to
   /campaign-ended?reason=budget instead.
@@ -449,11 +655,15 @@ audited.
 ```
 ┌────────────────────────────────────────────────┐
 │  PROMOTER                                       │
-│  • request partnerships, set the three rates    │
-│  • create, fund, pause and end campaigns        │
+│  • request partnerships, set the four rates     │
+│  • create, fund, pause and end campaigns, in    │
+│    either mode (acquisition | engagement)       │
 │  • design QR codes (colors, size, quiet zone,   │
 │    error correction, center logo) and download  │
 │    print-ready SVG or PNG                       │
+│  • see and rotate their OWN API key, used by    │
+│    their booking system / POS to mint one       │
+│    transaction code per purchase                │
 │  • void a code whose print run went astray      │
 │  • scans / installs / fees / budget left        │
 └────────────────────────────────────────────────┘
@@ -463,7 +673,8 @@ audited.
 │  • accept or ignore partnership requests        │
 │  • see and rotate their Partner API key         │
 │  • register the Play package and App Store id   │
-│    scans redirect to, plus a web fallback       │
+│    scans redirect to, plus a web fallback and   │
+│    an app link for repeat-purchase campaigns    │
 │  • declare their own joining bonus as a label   │
 │  • what they've earned, campaign by campaign    │
 └────────────────────────────────────────────────┘
@@ -507,28 +718,56 @@ policy language:
 
 ```
   1. The QR is a measurement artifact, not a key.
-       A scan resolves to a store listing. It carries no token, no code, no claim.
-       On Android an opaque id rides in Play's install-referrer channel — the same
-       channel every attribution SDK uses — and it is inert without the publisher's
-       server-side API key. On iOS it carries nothing at all.
+       A scan resolves to a store listing or the publisher's own app link. It carries
+       no token and nothing spendable. What DOES travel is an opaque lookup key —
+       `qrm_claim` on an acquisition scan, and additionally `qrm_code` on an
+       engagement one — and neither does anything without the publisher's
+       server-side API key. On an iOS acquisition scan nothing travels at all.
          → there is no code path by which a scan can unlock in-app content, even
-           if a publisher wanted one.
+           if a publisher wanted one. The API returns no amount and no grant.
 
   2. What moves between companies is a marketing fee, not user currency.
        The ledger transfers platform credits promoter → publisher for an acquired
-       user. Nothing is credited to an end user, by anyone, anywhere in this system.
-         → this is an ad network's cost-per-acquisition, not a currency marketplace.
+       user or a repeat purchase. Nothing is credited to an end user, by anyone,
+       anywhere in this system.
+         → this is an ad network's cost-per-acquisition and cost-per-transaction,
+           not a currency marketplace.
 
   3. The joining bonus is the publisher's own, granted by the publisher.
-       /v1/attribution/claim answers one question: "is this install attributable?"
+       /v1/attribution/claim answers one question: "is this attributable?"
        It returns no amount to grant and no instruction to grant anything. The
-       publisher applies its own new-user policy, funded by its own free-grant
-       allowance — which is exactly what it does for organic users too.
+       publisher applies its own policy, funded by its own free-grant allowance —
+       which is exactly what it does for organic users too.
          → `bonus_label` is a description the publisher writes about itself. The
            platform stores it for reporting and never acts on it.
 ```
 
-**What still has to hold on the publisher's side.** Two things this platform cannot enforce
+### Engagement mode is where this argument gets thinner — read this
+
+Everything above was written for a flow where the phone receives nothing. Engagement mode puts
+`qrm_code` in the app's hands, and the user-visible experience is closer to "scan a code, get
+something" than any acquisition scan ever was. That is exactly the shape 3.1.1 names, so it
+deserves the argument spelled out rather than assumed:
+
+**What still holds.** The code is an opaque transaction reference, not a bearer credential. It
+is single-use, short-lived, minted server-side against a purchase the promoter already took
+money for, and it is worth nothing to anybody who cannot present it *with the publisher's
+server-side API key*. That is the same trust model as Play's install referrer, which every
+attribution SDK on both stores relies on. The API still returns no amount, no currency and no
+instruction to grant; the publisher decides what a customer gets, under its own policy, from
+its own allowance.
+
+**What genuinely changed.** The user is now scanning something they were handed *because they
+bought a ticket*, and something good happens in the app afterwards. Whether the store operators
+read that as measurement or as an unlock mechanism is not a question this codebase can settle.
+The e2e assertion that a scan redirect leaks no spendable token had to be scoped to acquisition
+scans, and that scoping is the compliance surface.
+
+**Recommendation.** Have this reviewed before shipping engagement campaigns to a store-listed
+app. Keep `qrm_code` opaque, single-use and short-lived so it reads as measurement. Do not let
+it become anything a user could read aloud, type in, or share as value.
+
+**What still has to hold on the publisher's side.** Three things this platform cannot enforce
 for them, and which belong in the integration agreement:
 
 - the app must not present a "scan a QR code for coins" flow, or any in-app scanner tied to
@@ -536,9 +775,11 @@ for them, and which belong in the integration agreement:
   own camera
 - the bonus must be a genuine free grant the publisher chooses to make, not a purchase
   routed around IAP
+- `qrm_code` must be consumed by the app's backend and never shown to the user as a redeemable
+  value — it is plumbing, not a coupon
 
-The e2e suite asserts the first half of this structurally: a scan redirect containing
-anything that looks like a spendable token fails the build.
+The e2e suite asserts the first half of this structurally: an acquisition scan redirect
+containing anything that looks like a spendable token fails the build.
 
 ---
 
@@ -549,10 +790,12 @@ anything that looks like a spendable token fails the build.
 | `POST /v1/auth/signup`, `/login` | none | Anyone creating or using an account |
 | `GET /r/:code` | none | Phones, on scan |
 | `GET /go/:claim_id` | none | The iOS interstitial forwarding itself to the store (30/min per IP) |
+| `GET /i/:claim_id` | none | The interstitial itself, when an engagement deep link found no app (30/min per IP) |
 | `GET /v1/qr-codes/:id/image` | none | The QR preview and print downloads (120/min per IP) |
 | `GET /healthz` | none | Load balancer — reports 503 if Postgres is unreachable |
 | `/v1/*` portal routes | session JWT (12h) | Promoter and publisher dashboards |
 | `/v1/attribution/*` | `pk_…` API key | The **publisher's server**, never a browser and never the app |
+| `POST /v1/issue` | `pk_…` API key | The **promoter's server** — booking system or POS, one call per transaction |
 | `/v1/admin/*` | session JWT + admin role | Super admin console |
 
 Every route sits under a 300/min per-IP ceiling in addition to the specific limits noted
@@ -564,45 +807,66 @@ balancer.
 ## Role Flows, End to End
 
 Every step below names the exact HTTP call. `Bearer <token>` is the session JWT from
-signup/login; `Bearer pk_…` is the publisher's Partner API key.
+signup/login; `Bearer pk_…` is an API key — **both** tenant types get one at signup now, and
+they are not interchangeable: the publisher's calls `/v1/attribution/*` and earns fees, the
+promoter's calls `/v1/issue` and spends them.
 
 ### Promoter journey
 
 ```
-1.  Create an account
+1.  Create an account — this also mints an API key, shown once
     POST /v1/auth/signup            { type: "promoter", name, email, password }
-    → 201 { token, org }                                              auth: none
+    → 201 { token, org, api_key }                                     auth: none
+    (only needed for engagement campaigns; POST /v1/api-keys/rotate reissues it)
 
 2.  Browse publishers to partner with
     GET  /v1/publishers                                                auth: Bearer <token>
 
-3.  Propose partnership terms (coin_rate, guest_rate, grace_days)
-    POST /v1/partnerships           { publisher_org_id, coin_rate, guest_rate, grace_days }
+3.  Propose partnership terms — all four rates
+    POST /v1/partnerships   { publisher_org_id, coin_rate, guest_rate, grace_days,
+                              engagement_rate }
     → 201 partnership, status "pending"                                auth: Bearer <token>
 
 4.  Wait for the publisher to accept (poll or reload)
     GET  /v1/partnerships                                              auth: Bearer <token>
 
-5.  Create a campaign under the now-active partnership
-    POST /v1/campaigns              { partnership_id, name }
+5.  Create a campaign under the now-active partnership. `mode` is fixed here and
+    there is no endpoint to change it — run both products as two campaigns.
+    POST /v1/campaigns   { partnership_id, name,
+                           mode: "acquisition" | "engagement" }   ← default acquisition
     → 201 campaign, budget 0                                           auth: Bearer <token>
 
 6.  Fund it (ledger credit; PSP checkout in production)
     POST /v1/campaigns/:id/fund     { coins }
     → 201 { budget }                                                   auth: Bearer <token>
 
-7.  Design and generate a QR code
+7a. ACQUISITION — design and generate a QR code by hand, for a print run
     POST /v1/campaigns/:id/qr-codes { style, expires_in_days, max_uses }
     → 201 { code, scan_url, ... }                                      auth: Bearer <token>
     GET  /v1/qr-codes/:id/image?format=svg   (or png)   ← print-ready   auth: none
+
+7b. ENGAGEMENT — your booking system / POS mints one code per transaction, in code.
+    This is a machine call at transaction volume, not a design step.
+    POST /v1/issue   { campaign_id, issued_ref: "PNR-7X42QK", expires_in_days }
+    → 201 { code, scan_url, expires_at, replay }                    auth: Bearer pk_…
+    Idempotent on issued_ref — a retried booking webhook returns the same code
+    with replay: true rather than minting a second reward for one purchase.
+    Render it however you already render a boarding pass or receipt; the QR image
+    endpoint above works on these codes too.
 
 8.  Watch it perform
     GET  /v1/campaigns/:id/stats                                       auth: Bearer <token>
     GET  /v1/redemptions                                                auth: Bearer <token>
 
-9.  Pause, resume, or end the campaign as needed
-    PATCH /v1/campaigns/:id         { status: "paused"|"active"|"ended" }
-    auth: Bearer <token>
+9.  Rename it, pause, resume, or end it — either field alone, absent = unchanged
+    PATCH /v1/campaigns/:id         { name, status: "paused"|"active"|"ended" }
+    auth: Bearer <token> — notifies the admin
+
+9b. Reprice the partnership. A request, not a change: the agreed rates keep paying
+    out until the publisher accepts, and every campaign under it is priced on them.
+    All three rates move as one proposal, even if only one of them changed.
+    PATCH /v1/partnerships/:id/rates { coin_rate, guest_rate, engagement_rate }
+    → 200 partnership with proposed_* set, live rates untouched    auth: Bearer <token>
 
 10. Void a code whose print run went astray (tighten only — never loosen)
     POST /v1/qr-codes/:id/void                                         auth: Bearer <token>
@@ -622,6 +886,12 @@ walks through them properly, with client code and a production checklist.
 2.  Review and accept an incoming partnership request
     GET  /v1/partnerships                                              auth: Bearer <token>
     POST /v1/partnerships/:id/accept                                   auth: Bearer <token>
+
+2b. Rule on a repricing the promoter has asked for. Until this call, the rates you
+    agreed to are the rates you are paid.
+    POST /v1/partnerships/:id/rates/accept    ← the proposal becomes the price
+    POST /v1/partnerships/:id/rates/decline   ← cleared; they can ask again
+    auth: Bearer <token>
 
 3.  Register where scans should send people
     PATCH /v1/orgs/me   { android_package, ios_app_id, landing_url, bonus_label }
@@ -720,7 +990,14 @@ Seeded from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on first boot — never created via
     POST  /v1/admin/orgs/:id/offboard { reason }   ← suspends + revokes key + ends campaigns
     auth: Bearer <token> (admin) — all audited
 
-9.  Review the trail
+9.  Read what tenants have done and clear it
+    GET  /v1/admin/notifications?limit=   ← the unacknowledged end of the audit log:
+                                            entries whose actor is a tenant, so the
+                                            platform did not do it itself
+    POST /v1/admin/notifications/ack { ids }   ← omit `ids` to clear the whole inbox
+    auth: Bearer <token> (admin)
+
+10. Review the trail — everything, forever, acknowledged or not
     GET  /v1/admin/audit-log?limit=
     auth: Bearer <token> (admin)
 ```
@@ -1168,6 +1445,8 @@ Full request/response schemas: the live Swagger UI at `/docs`.
 | `GET` · `PATCH` | `/v1/orgs/me` | session JWT | App package, store id, landing URL, bonus label |
 | `GET` | `/v1/partnerships` | session JWT | Proposed and active partnerships |
 | `POST` | `/v1/partnerships/{id}/accept` | session JWT | Accept the terms (from `pending` only) |
+| `PATCH` | `/v1/partnerships/{id}/rates` | session JWT | Promoter asks to reprice. Pays nothing until accepted |
+| `POST` | `/v1/partnerships/{id}/rates/accept` · `/decline` | session JWT | Publisher rules on an open proposal |
 | `GET` | `/v1/redemptions` | session JWT | Your last 100 attributions, for reconciliation |
 
 **Two credentials, never mixed:**

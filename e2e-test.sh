@@ -31,8 +31,10 @@ PUB=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
 PUB_TOKEN=$(echo "$PUB" | j .token); PUB_ID=$(echo "$PUB" | j .org.id); API_KEY=$(echo "$PUB" | j .api_key)
 PRO=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
   -d "{\"name\":\"Air Dhaka $S\",\"email\":\"pro$S@t.com\",\"password\":\"password123\",\"type\":\"promoter\"}")
-PRO_TOKEN=$(echo "$PRO" | j .token); PRO_ID=$(echo "$PRO" | j .org.id)
+PRO_TOKEN=$(echo "$PRO" | j .token); PRO_ID=$(echo "$PRO" | j .org.id); PRO_KEY=$(echo "$PRO" | j .api_key)
 [ -n "$API_KEY" ] && pass "publisher got one-time API key" || fail "no API key"
+# The promoter has a server too now — it mints one code per ticket sold on /v1/issue.
+[ -n "$PRO_KEY" ] && pass "promoter got one-time API key (transaction issuance)" || fail "no promoter API key"
 
 echo "2. Partnership"
 PART=$(curl -s -XPOST $API/v1/partnerships -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
@@ -196,6 +198,116 @@ MISS=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $
   -d '{"ip":"203.0.113.99","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US"}')
 [ "$(echo "$MISS" | j .attributed)" = "false" ] && pass "an organic install is unattributed, not an error" || fail "organic: $MISS"
 [ "$(echo "$MISS" | j .reason)" = "no_match" ] && pass "unattributed answer names its reason" || fail "reason: $MISS"
+
+echo "6c. Repeat purchases — the same traveller, paid again for the next ticket"
+# Everything above pays for an *acquisition*: one person, one signup, one fee, forever. This
+# section is the other product. NovoAir sells a seat, its booking system mints a code against
+# that booking, and the traveller who flies eleven times a year is paid eleven times.
+#
+# The whole difference is which guarantee applies. Acquisition: one payout per user per
+# campaign. Engagement: one payout per issued code — so "one per purchase", because the only
+# system that can know a purchase happened is the one that took the money.
+
+ECAMP=$(curl -s -XPOST $API/v1/campaigns -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"partnership_id\":\"$PART_ID\",\"name\":\"Boarding pass rewards\",\"mode\":\"engagement\"}")
+ECAMP_ID=$(echo "$ECAMP" | j .id)
+[ "$(echo "$ECAMP" | j .mode)" = "engagement" ] && pass "engagement campaign created" || fail "mode: $ECAMP"
+BADMODE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/campaigns -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"partnership_id\":\"$PART_ID\",\"name\":\"x\",\"mode\":\"whatever\"}")
+[ "$BADMODE" = "400" ] && pass "an unknown campaign mode is rejected (400)" || fail "mode guard: $BADMODE"
+curl -s -XPOST $API/v1/campaigns/$ECAMP_ID/fund -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{"coins":100}' >/dev/null
+
+# Issuance. The booking system calls this, not a human — the portal's QR studio is for print
+# artwork and this is one machine call per transaction.
+ISS() { curl -s -XPOST $API/v1/issue -H "Authorization: Bearer $PRO_KEY" -H 'Content-Type: application/json' -d "$1"; }
+T1=$(ISS "{\"campaign_id\":\"$ECAMP_ID\",\"issued_ref\":\"PNR-AAA$S\"}")
+ECODE=$(echo "$T1" | j .code)
+[ -n "$ECODE" ] && pass "promoter's booking system minted a code for one ticket" || fail "issue: $T1"
+# A booking webhook fires twice. It must not hand one traveller two rewards for one seat.
+T1B=$(ISS "{\"campaign_id\":\"$ECAMP_ID\",\"issued_ref\":\"PNR-AAA$S\"}")
+[ "$(echo "$T1B" | j .code)" = "$ECODE" ] && [ "$(echo "$T1B" | j .replay)" = "true" ] \
+  && pass "re-issuing the same booking reference replays the original code" || fail "issue idempotency: $T1B"
+# Minting against an acquisition campaign would produce a code that scans, pays a signup fee
+# once, and then silently never pays a purchase reward however many tickets are bought.
+WRONGC=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/issue -H "Authorization: Bearer $PRO_KEY" \
+  -H 'Content-Type: application/json' -d "{\"campaign_id\":\"$CAMP_ID\",\"issued_ref\":\"PNR-NOPE$S\"}")
+[ "$WRONGC" = "404" ] && pass "cannot issue transaction codes against an acquisition campaign (404)" || fail "issue mode guard: $WRONGC"
+# The publisher's key is not the promoter's, and neither opens the other's door.
+XKEY=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/issue -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' -d "{\"campaign_id\":\"$ECAMP_ID\",\"issued_ref\":\"PNR-X$S\"}")
+[ "$XKEY" = "401" ] && pass "a publisher key cannot mint transaction codes (401)" || fail "key separation: $XKEY"
+
+# The scan. An engagement code is sent to the publisher's App Link so the OS can open the app
+# when it is installed — the one question no server can answer and both platforms already do.
+curl -s -XPATCH $API/v1/orgs/me -H "Authorization: Bearer $PUB_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"deeplink_url":"http://localhost:3000/publisher-sim"}' >/dev/null
+ELOC=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$ECODE")
+echo "$ELOC" | grep -q '^http://localhost:3000/publisher-sim?' \
+  && pass "engagement scan is sent to the publisher's app link" || fail "engagement redirect: $ELOC"
+echo "$ELOC" | grep -q "qrm_code=$ECODE" && pass "the transaction code travels to the app" || fail "no qrm_code: $ELOC"
+# Built by us, not by the publisher's page: it contains the Play install referrer, and a
+# referrer assembled wrong is an attribution rate of zero with no error anywhere.
+echo "$ELOC" | grep -q 'qrm_fallback=https%3A%2F%2Fplay.google.com' \
+  && pass "a phone without the app falls through to the store listing we built" || fail "no fallback: $ELOC"
+echo "$ELOC" | grep -q 'qrm_claim' && pass "the fallback still carries the acquisition claim id" || fail "fallback lost the claim: $ELOC"
+
+# The payout. No install stage, no fingerprint, no window to guess inside: the code names the
+# purchase outright, which is stronger evidence than a referrer names a device.
+EC() { curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' -d "$1"; }
+FLYER="flyer$S@x.com"
+E1=$(EC "{\"code\":\"$ECODE\",\"publisher_user_ref\":\"$FLYER\"}")
+[ "$(echo "$E1" | j .attributed)" = "true" ] && pass "purchase reward paid on the transaction code" || fail "engagement claim: $E1"
+[ "$(echo "$E1" | j .kind)" = "engagement" ] && pass "recorded as a repeat purchase, not a signup" || fail "kind: $E1"
+[ "$(echo "$E1" | j .match_method)" = "code" ] && [ "$(echo "$E1" | j .confidence)" = "100" ] \
+  && pass "match method is the code itself, at full confidence" || fail "method: $E1"
+[ "$(echo "$E1" | j .fee)" = "20" ] && pass "paid at the engagement rate (20), not the signup rate" || fail "fee: $E1"
+[ "$(echo "$E1" | j .pending_fee)" = "0" ] && pass "no guest tier — a repeat customer already transacted" || fail "pending: $E1"
+
+# A lost response is the normal reason a publisher calls twice.
+E1R=$(EC "{\"code\":\"$ECODE\",\"publisher_user_ref\":\"$FLYER\"}")
+[ "$(echo "$E1R" | j .replay)" = "true" ] && [ "$(echo "$E1R" | j .attribution_id)" = "$(echo "$E1" | j .attribution_id)" ] \
+  && pass "a retried claim replays the original answer" || fail "replay: $E1R"
+# A forwarded screenshot is not a retry. Replaying here would hand a second person the reward
+# the first one earned, and tell the publisher it was attributed.
+ESTOLEN=$(EC "{\"code\":\"$ECODE\",\"publisher_user_ref\":\"thief$S@x.com\"}")
+[ "$(echo "$ESTOLEN" | j .attributed)" = "false" ] && [ "$(echo "$ESTOLEN" | j .reason)" = "already_claimed" ] \
+  && pass "a shared code pays the first user only, never a second" || fail "shared code: $ESTOLEN"
+
+# THE HEADLINE. Same traveller, second ticket, second code — and they are paid again. This is
+# the assertion the old UNIQUE (campaign_id, publisher_user_ref) made impossible, and the only
+# reason this whole mode exists.
+ECODE2=$(ISS "{\"campaign_id\":\"$ECAMP_ID\",\"issued_ref\":\"PNR-BBB$S\"}" | j .code)
+curl -s -A "$ANDROID" -o /dev/null "$API/r/$ECODE2"
+E2=$(EC "{\"code\":\"$ECODE2\",\"publisher_user_ref\":\"$FLYER\"}")
+[ "$(echo "$E2" | j .attributed)" = "true" ] && [ "$(echo "$E2" | j .fee)" = "20" ] \
+  && pass "the SAME traveller is paid again for a second ticket" || fail "repeat purchase refused: $E2"
+[ "$(echo "$E2" | j .attribution_id)" != "$(echo "$E1" | j .attribution_id)" ] \
+  && pass "the second purchase is its own attribution, not a replay of the first" || fail "collapsed into one: $E2"
+EREM=$(curl -s $API/v1/campaigns/$ECAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+[ "$EREM" = "60" ] && pass "budget charged exactly twice (100→60), once per purchase" || fail "engagement budget: $EREM"
+
+# The regression that matters most: acquisition mode must be bit-for-bit what it was. The
+# partial index is the only thing standing between "paid twice for two tickets" and "paid
+# twice for one signup", and the second one is a bug in the money path.
+# A second, genuinely different scan of the acquisition code — a new claim id, a new pending
+# attribution, everything the engagement flow would have been paid twice for. Here it must not
+# be: the user has already counted for this campaign and the fee was bought once.
+ALOC=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+AREF=$(printf '%s' "$ALOC" | sed 's/.*&referrer=//' | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(decodeURIComponent(d.trim())))")
+ABEFORE=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+AREPLAY=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"install_referrer\":\"$AREF\",\"publisher_user_ref\":\"viewer$S@x.com\"}")
+[ "$(echo "$AREPLAY" | j .replay)" = "true" ] && [ "$(echo "$AREPLAY" | j .attribution_id)" = "$RED_ID" ] \
+  && pass "acquisition still pays one fee per user per campaign, ever" || fail "acquisition regression: $AREPLAY"
+AAFTER=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+[ "$AAFTER" = "$ABEFORE" ] && pass "the refused second acquisition moved no money" || fail "acquisition double-charged: $ABEFORE -> $AAFTER"
+# And the two modes do not answer each other's questions.
+NOTENG=$(EC "{\"code\":\"$CODE\",\"publisher_user_ref\":\"crossover$S@x.com\"}")
+[ "$(echo "$NOTENG" | j .reason)" = "not_engagement" ] \
+  && pass "a code from an acquisition campaign earns no purchase reward" || fail "cross-mode: $NOTENG"
+BADCODE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' -d "{\"code\":\"!!! not a code !!!\",\"publisher_user_ref\":\"x$S\"}")
+[ "$BADCODE" = "400" ] && pass "a malformed code is a 400, never a silent fallthrough" || fail "code shape: $BADCODE"
 
 echo "7. Security & fraud guards"
 REPLAY=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
@@ -369,6 +481,32 @@ OV=$(A $API/v1/admin/overview)
 [ "$(echo "$OV" | j .ledger_balanced)" = "true" ] && pass "overview reports a balanced ledger" || fail "overview: $OV"
 [ "$(echo "$OV" | j .scans)" -ge 3 ] && pass "overview counts scans platform-wide" || fail "scan count: $OV"
 
+# The promoter has funded, renamed and repriced by now, so the inbox must be carrying it. This
+# is the notification path: one stream, and the actor is what decides whether it needs an eye.
+NOTIF=$(A "$API/v1/admin/notifications?limit=500")
+FUNDED=$(echo "$NOTIF" | j ".filter(n=>n.action==='campaign.fund'&&n.target==='campaign:$CAMP_ID')[0].detail.budget")
+[ -n "$FUNDED" ] && pass "promoter's budget top-up reached the admin inbox (budget $FUNDED)" || fail "no fund notification: $NOTIF"
+# Everything a tenant has done in the sections above, from the one stream. A write that stops
+# emitting is a write the admin silently loses sight of, so the whole set is asserted at once.
+for WROTE in partnership.create partnership.accept campaign.create campaign.patch \
+             partnership.rates.propose partnership.rates.accept partnership.rates.decline \
+             org.patch qr_code.void; do
+  echo "$NOTIF" | grep -q "$WROTE" || fail "no notification for $WROTE"
+done
+pass "every tenant write reaches the inbox (9 kinds, one stream)"
+[ "$(echo "$OV" | j .open_notifications)" -ge 2 ] && pass "overview counts the unacknowledged ones" || fail "open_notifications: $OV"
+NID=$(echo "$NOTIF" | j ".filter(n=>n.action==='campaign.fund')[0].id")
+ACKED=$(A -XPOST $API/v1/admin/notifications/ack -H 'Content-Type: application/json' -d "{\"ids\":[\"$NID\"]}" | j .acknowledged)
+LEFT=$(A "$API/v1/admin/notifications?limit=500" | j ".filter(n=>n.id==='$NID').length")
+AGAIN=$(A -XPOST $API/v1/admin/notifications/ack -H 'Content-Type: application/json' -d "{\"ids\":[\"$NID\"]}" | j .acknowledged)
+[ "$ACKED" = "1" ] && [ "$LEFT" = "0" ] && [ "$AGAIN" = "0" ] \
+  && pass "acknowledging clears it from the inbox exactly once" || fail "ack=$ACKED left=$LEFT again=$AGAIN"
+# ...and the record itself is untouched: the audit log is not an inbox and does not empty.
+A "$API/v1/admin/audit-log?limit=500" | grep -q 'campaign.fund' && pass "the audit log still holds it" || fail "ack deleted history"
+ACKALL=$(A -XPOST $API/v1/admin/notifications/ack -H 'Content-Type: application/json' -d '{}' | j .acknowledged)
+EMPTY=$(A "$API/v1/admin/notifications" | j .length)
+[ "$ACKALL" -ge 1 ] && [ "$EMPTY" = "0" ] && pass "mark-all-handled empties the inbox ($ACKALL entries)" || fail "ack all: $ACKALL / $EMPTY"
+
 SCAN0=$(A "$API/v1/admin/scans?campaign_id=$CAMP_ID" | j '[0]')
 # `--` and -F: short codes are base64url, so one starting with `-` is otherwise read as flags
 echo "$SCAN0" | grep -qF -- "$CODE" && pass "scan log shows QR code, device and conversion" || fail "scans: $SCAN0"
@@ -392,6 +530,10 @@ BACK=$(curl -s -o /dev/null -w '%{http_code}' $API/v1/campaigns -H "Authorizatio
 PRE_ADJ=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 ADJ=$(A -XPOST $API/v1/admin/campaigns/$CAMP_ID/adjust -H 'Content-Type: application/json' -d '{"coins":75,"reason":"goodwill"}' | j .budget)
 [ "$ADJ" = "$((PRE_ADJ + 75))" ] && pass "admin budget adjustment credits the campaign" || fail "adjust: $PRE_ADJ → $ADJ"
+# The inbox was emptied above, and this credit was the platform's own doing — an admin must not
+# be notified of itself, or the badge never reaches zero and stops meaning anything.
+SELFNOTIF=$(A "$API/v1/admin/notifications" | j .length)
+[ "$SELFNOTIF" = "0" ] && pass "admin's own adjustment raises no notification" || fail "self-notification: $SELFNOTIF"
 OVER=$(A -XPOST $API/v1/admin/campaigns/$CAMP_ID/adjust -H 'Content-Type: application/json' -d '{"coins":-999}' | j .statusCode)
 [ "$OVER" = "400" ] && pass "clawback below zero rejected" || fail "overdraw: $OVER"
 

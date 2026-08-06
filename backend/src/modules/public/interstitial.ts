@@ -190,12 +190,23 @@ body::before{
   content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
   background-image:${FIBRE}; background-size:180px; opacity:.05; mix-blend-mode:multiply;
 }
+/* The pool of light the card is lying in. Transparent across the middle on purpose: the
+   perforation notches are punched in var(--paper) and must match the desk exactly where they
+   sit, so the falloff only ever starts outside the card. */
+body::after{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:radial-gradient(116% 80% at 50% 32%,transparent 44%,rgba(26,23,18,.15) 100%);
+}
 
 /* ---------- the pass ---------- */
 .pass{
   position:relative; z-index:1; isolation:isolate;
   width:100%; max-width:400px;
-  background:var(--stock); border-radius:14px;
+  /* Raking light rather than a flat fill — the same source the inset hairlines below already
+     imply, so the stock reads as lit paper instead of a swatch. Static: a moving specular on a
+     400px card is a full repaint every frame on the cheap Androids that scan most of these. */
+  background:linear-gradient(168deg,#fdfaf4,var(--stock) 44%,#f4eee0);
+  border-radius:14px;
   /* Lying on the desk: two inset hairlines for a lit top edge and a shaded bottom one, a
      tight contact pair, and a long negative-spread cast. Never a lift, never coloured. */
   box-shadow:
@@ -225,10 +236,11 @@ body::before{
 }
 .plate svg{display:block; color:var(--ink)}
 /* The validation loop: the reader crossing the plate. Same idiom as the console's scan
-   sweep, and the plate's only looping element. */
+   sweep, and the plate's only looping element. The beam has a trail behind its leading edge,
+   which is what separates a reader crossing glass from a div sliding down. */
 .sweep{
-  position:absolute; left:0; right:0; height:2px; top:0;
-  background:var(--blue); box-shadow:0 0 0 1px rgba(28,57,187,.18);
+  position:absolute; left:0; right:0; height:14px; top:0;
+  background:linear-gradient(180deg,rgba(28,57,187,0),rgba(28,57,187,.16) 62%,var(--blue) 100%);
   opacity:0;
 }
 
@@ -251,8 +263,18 @@ body::before{
 /* The destination's tile. A real app icon: squircle-ish radius, a lit top edge, a contact
    shadow and a long cast — the one object on this page that is not printed, because it is a
    picture of software rather than of stationery. */
+/* The tile casts its own light onto the stock around it. This is the one object on the page
+   that is emissive rather than printed, and the bloom is what says so — it is also the thing
+   that grows into the hand-off, so the last frame before the store is the destination's own
+   colour filling the screen rather than a card fading out. */
+.dest{position:relative; flex:none}
+.dest::before{
+  content:""; position:absolute; inset:-30%; z-index:0; border-radius:50%; pointer-events:none;
+  background:radial-gradient(closest-side,var(--bloom),transparent 74%);
+  filter:blur(8px); opacity:.55;
+}
 .tile{
-  position:relative; width:62px; height:62px; flex:none; border-radius:15px;
+  position:relative; z-index:1; width:62px; height:62px; flex:none; border-radius:15px;
   display:grid; place-items:center; overflow:hidden;
   box-shadow:
     0 1px 0 rgba(255,255,255,.45) inset, 0 0 0 1px rgba(26,23,18,.08),
@@ -262,6 +284,11 @@ body::before{
 .tile.ios{background:linear-gradient(155deg,#28b8ff,#0a63f5)}
 .tile.android{background:linear-gradient(155deg,#fff,#e9edf4)}
 .tile.web{background:linear-gradient(155deg,#39415a,#161b26)}
+/* The bloom is the tile's own light, so it is the tile's own colour — the same reason the
+   marks are not recoloured into press blue. */
+.dest.ios{--bloom:rgba(30,124,255,.62)}
+.dest.android{--bloom:rgba(0,186,110,.42)}
+.dest.web{--bloom:rgba(70,86,128,.5)}
 /* Specular pass across the glass. Parked off the left edge so it is invisible at rest. */
 .tile::after{
   content:""; position:absolute; inset:-30%; z-index:2; pointer-events:none;
@@ -291,31 +318,45 @@ h1{
 /* ---------- perforation + stub ---------- */
 .perf{position:relative; height:1px; margin:26px 0 0;
   background:repeating-linear-gradient(90deg,var(--rule) 0 5px,transparent 5px 11px)}
-/* Notches filled with the page ground, so the card reads as physically punched. */
+/* Notches filled with the page ground, so the card reads as physically punched — with the
+   stock's cut edge shadowed on the side the light comes from. */
 .perf::before,.perf::after{
   content:""; position:absolute; top:50%; width:22px; height:22px; border-radius:50%;
   background:var(--paper); transform:translateY(-50%);
+  box-shadow:inset 1px 1px 2px rgba(26,23,18,.14);
 }
 .perf::before{left:-11px}
 .perf::after{right:-11px}
 
 .stub{padding:20px clamp(22px,6vw,30px) clamp(22px,6vw,26px); position:relative}
-.track{height:3px; border-radius:999px; background:var(--rule-soft); overflow:hidden}
-.bar{display:block; height:100%; width:100%; background:var(--blue); transform-origin:left center; transform:scaleX(0)}
+.track{height:3px; border-radius:999px; background:var(--rule-soft); overflow:hidden;
+  box-shadow:inset 0 1px 1px rgba(26,23,18,.07)}
+/* The gradient is painted before the scaleX, so the lit end stays pinned to the bar's leading
+   edge for the whole feed — the rule has a head, the way a printer's does. */
+.bar{display:block; height:100%; width:100%; transform-origin:left center; transform:scaleX(0);
+  background:linear-gradient(90deg,var(--blue-deep),var(--blue) 55%,var(--blue-lit) 94%,#7f97ff)}
 .note{margin:14px 0 0; font-size:11.5px; line-height:1.45; color:var(--ink-mute)}
 
 /* ---------- the manual key ---------- */
 .go{
   display:flex; align-items:center; justify-content:center; gap:8px;
   margin-top:18px; padding:13px 20px; border-radius:8px;
-  background:var(--blue); color:#fff; text-decoration:none;
+  background:linear-gradient(180deg,var(--blue-lit),var(--blue) 56%,var(--blue-deep));
+  color:#fff; text-decoration:none;
   font-size:15px; font-weight:600; letter-spacing:-.006em;
-  /* Seated key: a printed edge under the control, collapsing on press. */
-  box-shadow:0 1px 0 var(--blue-deep), 0 1px 2px rgba(20,42,140,.28);
-  transition:background .12s linear, transform .06s linear, box-shadow .06s linear;
+  /* Seated key: a lit top bevel, a printed edge under the control, and a short cast onto the
+     stub. All three collapse on press, so the key travels rather than just tinting. */
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.24) inset,
+    0 1px 0 var(--blue-deep), 0 2px 3px rgba(20,42,140,.26),
+    0 10px 18px -10px rgba(20,42,140,.5);
+  /* filter rather than background: a gradient does not interpolate, and a key that snaps
+     colour on press is the one place on this page a scanner would feel the seam. */
+  transition:filter .12s linear, transform .06s linear, box-shadow .06s linear;
 }
-.go:hover{background:var(--blue-lit)}
-.go:active{transform:translateY(1px); box-shadow:0 0 0 var(--blue-deep)}
+.go:hover{filter:brightness(1.08)}
+.go:active{transform:translateY(1px);
+  box-shadow:0 1px 0 rgba(255,255,255,.24) inset, 0 0 0 var(--blue-deep)}
 .go:focus-visible{outline:2px solid var(--blue); outline-offset:3px}
 
 /* Landscape on a short phone: the card must never need scrolling to reach the key. */
@@ -333,7 +374,10 @@ h1{
    One rehearsed sequence, ~560ms end to end, exponential ease-out. Everything is fully
    legible with animation off — these rules only ever animate *to* the resting state. */
 @media (prefers-reduced-motion:no-preference){
-  .pass{animation:land .34s cubic-bezier(.16,1,.3,1) both}
+  /* The card is dropped onto the desk, not blurred into focus: a filter on a 400px surface is
+     the one uncomposited frame budget item on this page, and the first paint is exactly where
+     a mid-range handset cannot afford it. The small elements below still get the blur. */
+  .pass{animation:settle .42s cubic-bezier(.16,1,.3,1) both}
   .plate{animation:land .34s cubic-bezier(.16,1,.3,1) .04s both}
   /* The sweep runs twice inside the hold and stops — a loop nobody is left to watch is
      the kind of animation this system's motion rules exist to forbid. */
@@ -341,6 +385,9 @@ h1{
   /* The tile is the last thing to arrive and it arrives from depth, because it is the only
      object here that is not on the desk. */
   .tile{animation:seat .42s cubic-bezier(.16,1,.3,1) .16s both}
+  /* The light arrives with the object that emits it, one beat behind the seat so it reads as
+     the tile switching on rather than a glow that was always there. */
+  .dest::before{animation:bloom .52s cubic-bezier(.16,1,.3,1) .22s both}
   .tile::after{animation:glint 1.15s cubic-bezier(.4,0,.2,1) .34s 2}
   /* Traffic on the route, in the direction the scan is about to travel. Two passes, ending
      as the hand-off takes over from it. */
@@ -367,6 +414,9 @@ h1{
      not the arrival curve — this is a departure, and it should read as one. */
   body.leaving .pass{animation:recede var(--exit) cubic-bezier(.4,0,.2,1) forwards}
   body.leaving .tile{animation:launch var(--exit) cubic-bezier(.4,0,.2,1) forwards}
+  /* The bloom opens past the card's edge while the stock is still at full opacity, so the
+     dominant thing in the last frames is the destination's own colour. */
+  body.leaving .dest::before{animation:flare var(--exit) cubic-bezier(.4,0,.2,1) forwards}
   body.leaving .route i{animation:rush .26s cubic-bezier(.5,0,1,1) forwards}
   body.leaving .route i:nth-child(2){animation-delay:.04s}
   body.leaving .route i:nth-child(3){animation-delay:.08s}
@@ -374,25 +424,34 @@ h1{
 }
 @keyframes land{from{opacity:0; transform:translateY(9px); filter:blur(6px)}
   to{opacity:1; transform:none; filter:none}}
+/* Dropped flat onto the desk. Transform and opacity only — this one runs on the whole card. */
+@keyframes settle{from{opacity:0; transform:translateY(14px) scale(.986)}
+  to{opacity:1; transform:none}}
 /* The display line struck by a bottom-up wipe — the second plate of the press run. */
 @keyframes strike{from{opacity:0; clip-path:inset(100% 0 0 0); transform:translateY(4px)}
   to{opacity:1; clip-path:inset(0 0 0 0); transform:none}}
 @keyframes stamp{from{opacity:0; transform:translateY(5px) scale(.985)}
   to{opacity:1; transform:none}}
-@keyframes sweep{0%{opacity:0; top:2%} 12%{opacity:1} 88%{opacity:1} 100%{opacity:0; top:98%}}
+/* Starts with the beam's head just inside the top edge and its trail off-plate, ends with the
+   head off the bottom — so the plate is never showing a stopped bar of colour. */
+@keyframes sweep{0%{opacity:0; top:-14px} 14%{opacity:1} 86%{opacity:1} 100%{opacity:0; top:100%}}
 @keyframes feed{from{transform:scaleX(0)} to{transform:scaleX(1)}}
 /* Seated from above and behind, the way an icon settles onto a home screen. */
 @keyframes seat{from{opacity:0; transform:scale(.78) translateY(-6px)} to{opacity:1; transform:none}}
 @keyframes glint{0%{transform:translateX(-130%)} 55%,100%{transform:translateX(130%)}}
-@keyframes travel{0%{opacity:0} 18%{opacity:1} 82%{opacity:1}
-  100%{opacity:0; transform:translateX(46px)}}
+@keyframes bloom{from{opacity:0; transform:scale(.5)} to{opacity:.55; transform:none}}
+@keyframes flare{to{opacity:1; transform:scale(2.4)}}
+/* Stretched at speed and round again at either end: a unit of traffic, not a sliding dot. */
+@keyframes travel{0%{opacity:0; transform:none} 18%{opacity:1}
+  54%{transform:translateX(24px) scaleX(2.4)}
+  82%{opacity:1} 100%{opacity:0; transform:translateX(46px) scaleX(1)}}
 @keyframes rush{to{opacity:0; transform:translateX(80px) scaleX(2.4)}}
 /* Opacity holds through the first half so the tile is never dimmed by its own parent while
    it is the thing being looked at. */
 @keyframes recede{0%{opacity:1; transform:none}
   55%{opacity:1}
-  100%{opacity:0; transform:scale(.955) translateY(-10px); filter:blur(4px)}}
-@keyframes launch{to{transform:scale(1.42) translateY(-6px)}}
+  100%{opacity:0; transform:scale(.94) translateY(-14px)}}
+@keyframes launch{to{transform:scale(1.5) translateY(-8px)}}
 </style></head>
 <body>
 <main class="pass">
@@ -418,7 +477,9 @@ h1{
 
       <div class="route" aria-hidden="true"><i></i><i></i><i></i></div>
 
-      <div class="tile ${store}" role="img" aria-label="${esc(mark.title)}">${mark.svg}</div>
+      <div class="dest ${store}">
+        <div class="tile ${store}" role="img" aria-label="${esc(mark.title)}">${mark.svg}</div>
+      </div>
     </div>
 
     <h1>${esc(heading).replace(/ ([^ ]+)$/, '&nbsp;$1')}</h1>

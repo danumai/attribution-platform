@@ -14,7 +14,14 @@ import {
   validateBonusLabel,
   validateIosAppId,
 } from '../../common/attribution';
-import { clientIp, rateLimited, sha256, str, validateLandingUrl } from '../../common/security';
+import {
+  clientIp,
+  rateLimited,
+  sha256,
+  str,
+  validateDeeplinkUrl,
+  validateLandingUrl,
+} from '../../common/security';
 import { prisma } from '../../database/prisma';
 import { asOrgType, newApiKey, signSession } from './tokens';
 
@@ -44,6 +51,7 @@ export class AuthController {
       landing_url?: string;
       android_package?: string;
       ios_app_id?: string;
+      deeplink_url?: string;
       bonus_label?: string;
     },
   ) {
@@ -67,7 +75,13 @@ export class AuthController {
     const android_package = validateAndroidPackage(b.android_package);
     const ios_app_id = validateIosAppId(b.ios_app_id);
     const bonus_label = validateBonusLabel(b.bonus_label);
-    const apiKey = b.type === 'publisher' ? newApiKey() : null;
+    const deeplink_url = validateDeeplinkUrl(b.deeplink_url);
+    // Both tenant types get one now, because both have a server that calls this platform.
+    // A publisher's key answers "is this attributable" and earns fees; a promoter's mints a
+    // transaction code per purchase on `/v1/issue` and spends them. Minting one unconditionally
+    // is also what keeps the two paths symmetric — a promoter that later runs an engagement
+    // campaign does not have to discover that its account was created without a credential.
+    const apiKey = newApiKey();
     let org;
     try {
       org = await prisma.org.create({
@@ -76,10 +90,11 @@ export class AuthController {
           type: b.type,
           email,
           password_hash: await bcrypt.hash(password, 10),
-          api_key_hash: apiKey ? sha256(apiKey) : null,
+          api_key_hash: sha256(apiKey),
           landing_url,
           android_package,
           ios_app_id,
+          deeplink_url,
           bonus_label,
         },
         select: { id: true, name: true, type: true },
@@ -91,7 +106,7 @@ export class AuthController {
     return {
       token: signSession({ org_id: org.id, type: asOrgType(org.type) }),
       org,
-      // shown once — publisher must store it
+      // shown once — store it now; only a rotation can ever issue another
       api_key: apiKey,
     };
   }

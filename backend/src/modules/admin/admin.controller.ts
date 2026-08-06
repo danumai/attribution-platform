@@ -45,6 +45,12 @@ export class AdminController {
         (SELECT count(*)::int FROM partnerships WHERE status='pending')   AS pending_partnerships,
         (SELECT count(*)::int FROM campaigns)                             AS campaigns,
         (SELECT count(*)::int FROM campaigns WHERE status='active')       AS active_campaigns,
+        (SELECT count(*)::int FROM campaigns WHERE mode='engagement')     AS engagement_campaigns,
+        -- Split out because they are different products and their conversion rates are not
+        -- comparable: an acquisition converts once per person ever, an engagement payout
+        -- converts once per purchase, and averaging the two describes neither.
+        (SELECT count(*)::int FROM redemptions WHERE kind='engagement')   AS engagement_redemptions,
+        (SELECT coalesce(sum(coins),0)::int FROM redemptions WHERE kind='engagement') AS engagement_coins,
         (SELECT count(*)::int FROM qr_codes)                              AS qr_codes,
         (SELECT count(*)::int FROM scans)                                 AS scans,
         (SELECT count(*)::int FROM scans WHERE scanned_at > now() - interval '24 hours') AS scans_24h,
@@ -66,7 +72,12 @@ export class AdminController {
         (SELECT count(*)::int FROM account_balances b
            LEFT JOIN (SELECT account, sum(amount)::int AS s FROM ledger_entries GROUP BY account) e
              ON e.account = b.account
-          WHERE b.balance <> coalesce(e.s, 0))                            AS drifted_accounts`;
+          WHERE b.balance <> coalesce(e.s, 0))                            AS drifted_accounts,
+        -- What tenants have done that nobody here has looked at yet — a funded budget, a
+        -- repriced partnership. The same slice GET /notifications serves, counted for the badge.
+        (SELECT count(*)::int FROM audit_log a
+           JOIN orgs ao ON ao.id = a.actor_org_id
+          WHERE a.acknowledged_at IS NULL AND ao.type <> 'admin')          AS open_notifications`;
     return {
       ...o,
       // ledger is double-entry: every ref sums to zero, so the whole book must too
@@ -278,6 +289,7 @@ export class AdminController {
         partnership: {
           select: {
             coin_rate: true,
+            engagement_rate: true,
             promoter: { select: { name: true } },
             publisher: { select: { name: true } },
           },
@@ -290,6 +302,7 @@ export class AdminController {
     return rows.map(({ partnership, _count, ...c }) => ({
       ...c,
       coin_rate: partnership.coin_rate,
+      engagement_rate: partnership.engagement_rate,
       promoter_name: partnership.promoter.name,
       publisher_name: partnership.publisher.name,
       scans: _count.scans,
@@ -374,6 +387,51 @@ export class AdminController {
     return prisma.qrCode.findUnique({ where: { id } });
   }
 
+  /**
+   * The admin's inbox: everything a *tenant* did that nobody here has acknowledged yet.
+   *
+   * Not a second table. A promoter funding a campaign was already written to the audit log — it
+   * just landed in a list of admin overrides where nothing marked it as news. The actor is the
+   * whole rule: an entry with a tenant behind it is something the platform did not do itself,
+   * so it stays here until it is acknowledged. Every tenant action that gets audited from now
+   * on arrives here for free, which is the point of having one stream instead of two.
+   *
+   * The audit log stays the record; this is only the unread end of it.
+   */
+  @Get('notifications')
+  async notifications(@Query('limit') limit?: string) {
+    const rows = await prisma.auditLog.findMany({
+      where: { acknowledged_at: null, actor: { type: { not: 'admin' } } },
+      include: { actor: { select: { name: true, email: true, type: true } } },
+      orderBy: { created_at: 'desc' },
+      take: capped(limit),
+    });
+    return rows.map(({ actor, ...a }) => ({
+      ...a,
+      actor_name: actor?.name ?? null,
+      actor_email: actor?.email ?? null,
+      actor_type: actor?.type ?? null,
+    }));
+  }
+
+  /** Mark the named entries read, or the whole inbox when `ids` is omitted. */
+  @Post('notifications/ack')
+  async ackNotifications(@Body() b: { ids?: string[] }) {
+    if (b.ids !== undefined && (!Array.isArray(b.ids) || b.ids.some((i) => typeof i !== 'string')))
+      throw new BadRequestException('ids must be an array of strings');
+    const { count } = await prisma.auditLog.updateMany({
+      // Acknowledging is not a way to reach into admin's own entries or to re-date one already
+      // handled: the same slice the inbox reads is the only slice this can touch.
+      where: {
+        acknowledged_at: null,
+        actor: { type: { not: 'admin' } },
+        ...(b.ids ? { id: { in: b.ids } } : {}),
+      },
+      data: { acknowledged_at: new Date() },
+    });
+    return { acknowledged: count };
+  }
+
   @Get('audit-log')
   async auditLog(@Query('limit') limit?: string) {
     const rows = await prisma.auditLog.findMany({
@@ -455,7 +513,9 @@ export class AdminController {
         client: true,
         consumed: true,
         qr_code: { select: { code: true } },
-        redemption: { select: { coins: true, match_method: true } },
+        // Plural since a boarding-pass scan by somebody with no app yet pays twice — once as
+        // an acquisition, once as the purchase it also was.
+        redemptions: { select: { coins: true, match_method: true, kind: true } },
         campaign: {
           select: {
             id: true,
@@ -493,10 +553,15 @@ export class AdminController {
       campaign_name: s.campaign.name,
       promoter_name: s.campaign.partnership.promoter.name,
       publisher_name: s.campaign.partnership.publisher.name,
-      redeemed: s.redemption !== null,
-      coins: s.redemption?.coins ?? null,
+      redeemed: s.redemptions.length > 0,
+      // Summed, not first: this column is "what this scan cost the campaign budget", and a
+      // scan that was both an acquisition and a purchase cost it both.
+      coins: s.redemptions.length
+        ? s.redemptions.reduce((n, r) => n + r.coins, 0)
+        : null,
       // fingerprint matches are the probabilistic ones — the set worth sampling for fraud
-      match_method: s.redemption?.match_method ?? null,
+      match_method: s.redemptions.map((r) => r.match_method).join('+') || null,
+      kind: s.redemptions.map((r) => r.kind).join('+') || null,
     }));
   }
 

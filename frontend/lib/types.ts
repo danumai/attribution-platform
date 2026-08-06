@@ -30,6 +30,8 @@ export interface Me {
   landing_url: string | null;
   android_package: string | null;
   ios_app_id: string | null;
+  /** where an engagement scan is sent so the OS can open the app if it is installed */
+  deeplink_url: string | null;
   bonus_label: string | null;
   suspended: boolean;
   earnings?: number;
@@ -50,6 +52,8 @@ export interface Partnership {
   coin_rate: number;
   guest_rate: number;
   grace_days: number;
+  /** what one repeat purchase pays in an engagement campaign */
+  engagement_rate: number;
   status: string;
   created_at: string;
   promoter_name: string;
@@ -57,6 +61,7 @@ export interface Partnership {
   /** a repricing the promoter has asked for; null until it is accepted or declined */
   proposed_coin_rate: number | null;
   proposed_guest_rate: number | null;
+  proposed_engagement_rate: number | null;
 }
 
 export interface Campaign {
@@ -64,8 +69,11 @@ export interface Campaign {
   partnership_id: string;
   name: string;
   status: string;
+  /** acquisition = one payout per user ever; engagement = one per issued transaction code */
+  mode: 'acquisition' | 'engagement';
   created_at: string;
   coin_rate: number;
+  engagement_rate: number;
   promoter_name: string;
   publisher_name: string;
   budget: number;
@@ -109,7 +117,11 @@ export interface Redemption {
   publisher_user_ref: string;
   coins: number;
   identified: boolean;
+  /** which payout guarantee this row lives under */
+  kind: 'acquisition' | 'engagement';
+  /** `code` is the engagement path — the transaction code named the purchase outright */
   match_method: string;
+  qr_code_id: string | null;
   upgraded_at: string | null;
   created_at: string;
   campaign_name: string;
@@ -148,6 +160,9 @@ export interface AdminOverview {
   scans: number;
   scans_24h: number;
   redemptions: number;
+  engagement_campaigns: number;
+  engagement_redemptions: number;
+  engagement_coins: number;
   identified_redemptions: number;
   guest_redemptions: number;
   voided_codes: number;
@@ -156,6 +171,8 @@ export interface AdminOverview {
   ledger_sum: number;
   ledger_balanced: boolean;
   conversion_rate: number;
+  /** tenant actions nobody on the platform side has acknowledged yet */
+  open_notifications: number;
 }
 
 export interface AdminScan {
@@ -185,8 +202,11 @@ export interface AdminScan {
   promoter_name: string;
   publisher_name: string;
   redeemed: boolean;
+  /** summed: one scan can pay both an acquisition and a purchase reward */
   coins: number | null;
+  /** `+`-joined when a scan paid twice, e.g. `referrer+code` */
   match_method: string | null;
+  kind: string | null;
 }
 
 export interface LedgerEntry {
@@ -216,4 +236,7 @@ export interface AuditEntry {
   created_at: string;
   actor_name: string | null;
   actor_email: string | null;
+  /** `/v1/admin/notifications` only: which kind of tenant did this */
+  actor_type?: string | null;
+  acknowledged_at?: string | null;
 }

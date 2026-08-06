@@ -21,7 +21,7 @@ import {
 import { QrStyle, validateStyle } from '../../common/qr';
 import { capped } from '../../common/paging';
 import { validateRates } from '../../common/rates';
-import { sha256, str, validateLandingUrl } from '../../common/security';
+import { sha256, str, validateDeeplinkUrl, validateLandingUrl } from '../../common/security';
 import { scanAnalytics } from '../../database/analytics';
 import { audit, balance, balances, ledger } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
@@ -67,6 +67,7 @@ export class PortalController {
       coin_rate?: number;
       guest_rate?: number;
       grace_days?: number;
+      engagement_rate?: number;
     },
   ) {
     if (s.type !== 'promoter') throw new ForbiddenException('promoters only');
@@ -83,13 +84,18 @@ export class PortalController {
     // anything the promoter left out. Same rules the admin patch runs, from one definition.
     const rates = validateRates(b);
     try {
-      return await prisma.partnership.create({
+      const created = await prisma.partnership.create({
         data: {
           promoter_org_id: s.org_id,
           publisher_org_id: b.publisher_org_id,
           ...rates,
         },
       });
+      await audit(s.org_id, 'partnership.create', `partnership:${created.id}`, {
+        publisher_org_id: b.publisher_org_id,
+        ...rates,
+      });
+      return created;
     } catch (e: any) {
       if (e.code === 'P2002') throw new BadRequestException('partnership already exists');
       if (e.code === 'P2003') throw new BadRequestException('publisher not found');
@@ -128,6 +134,7 @@ export class PortalController {
       data: { status: 'active' },
     });
     if (!updated.count) throw new NotFoundException();
+    await audit(s.org_id, 'partnership.accept', `partnership:${id}`);
     return prisma.partnership.findUnique({ where: { id } });
   }
 
@@ -147,7 +154,7 @@ export class PortalController {
   async proposeRates(
     @Session() s: SessionClaims,
     @Param('id') id: string,
-    @Body() b: { coin_rate?: number; guest_rate?: number },
+    @Body() b: { coin_rate?: number; guest_rate?: number; engagement_rate?: number },
   ) {
     const current = await prisma.partnership.findFirst({
       where: { id, promoter_org_id: s.org_id, status: 'active' },
@@ -155,16 +162,31 @@ export class PortalController {
     if (!current) throw new NotFoundException('no active partnership with that id');
     // Resolved against the row, so the pair rule is judged on the post-accept numbers: moving
     // only the coin rate has to clear the guest rate already in force.
-    const { coin_rate, guest_rate } = validateRates(b, current);
-    if (coin_rate === current.coin_rate && guest_rate === current.guest_rate)
+    const { coin_rate, guest_rate, engagement_rate } = validateRates(b, current);
+    if (
+      coin_rate === current.coin_rate &&
+      guest_rate === current.guest_rate &&
+      engagement_rate === current.engagement_rate
+    )
       throw new BadRequestException('those are the rates already in force');
+    // Written as a set even when only one moved: the proposal columns are all-or-nothing in the
+    // database, and a publisher accepting must see every number it is agreeing to, not a delta
+    // it has to resolve against whatever the live rates happened to be when it clicked.
     const updated = await prisma.partnership.update({
       where: { id },
-      data: { proposed_coin_rate: coin_rate, proposed_guest_rate: guest_rate },
+      data: {
+        proposed_coin_rate: coin_rate,
+        proposed_guest_rate: guest_rate,
+        proposed_engagement_rate: engagement_rate,
+      },
     });
     await audit(s.org_id, 'partnership.rates.propose', `partnership:${id}`, {
-      from: { coin_rate: current.coin_rate, guest_rate: current.guest_rate },
-      to: { coin_rate, guest_rate },
+      from: {
+        coin_rate: current.coin_rate,
+        guest_rate: current.guest_rate,
+        engagement_rate: current.engagement_rate,
+      },
+      to: { coin_rate, guest_rate, engagement_rate },
     });
     return updated;
   }
@@ -185,37 +207,72 @@ export class PortalController {
       where: { id, publisher_org_id: s.org_id, proposed_coin_rate: { not: null } },
     });
     if (!p) throw new NotFoundException('no open rate proposal');
-    const cleared = { proposed_coin_rate: null, proposed_guest_rate: null };
+    const cleared = {
+      proposed_coin_rate: null,
+      proposed_guest_rate: null,
+      proposed_engagement_rate: null,
+    };
     // Compare-and-set on the proposal itself: if the promoter revised it between this
-    // publisher's read and its click, the click applied a price nobody is looking at.
+    // publisher's read and its click, the click applied a price nobody is looking at. All three
+    // are in the WHERE for that reason — a revision that moved only the engagement rate is
+    // still a different proposal from the one on screen.
     const updated = await prisma.partnership.updateMany({
-      where: { id, proposed_coin_rate: p.proposed_coin_rate, proposed_guest_rate: p.proposed_guest_rate },
+      where: {
+        id,
+        proposed_coin_rate: p.proposed_coin_rate,
+        proposed_guest_rate: p.proposed_guest_rate,
+        proposed_engagement_rate: p.proposed_engagement_rate,
+      },
       data: accept
-        ? { coin_rate: p.proposed_coin_rate!, guest_rate: p.proposed_guest_rate!, ...cleared }
+        ? {
+            coin_rate: p.proposed_coin_rate!,
+            guest_rate: p.proposed_guest_rate!,
+            engagement_rate: p.proposed_engagement_rate!,
+            ...cleared,
+          }
         : cleared,
     });
     if (!updated.count) throw new BadRequestException('the proposal changed — reload and look again');
     await audit(s.org_id, `partnership.rates.${accept ? 'accept' : 'decline'}`, `partnership:${id}`, {
       coin_rate: p.proposed_coin_rate,
       guest_rate: p.proposed_guest_rate,
+      engagement_rate: p.proposed_engagement_rate,
     });
     return prisma.partnership.findUnique({ where: { id } });
   }
 
   // ---------- campaigns ----------
 
+  /**
+   * `mode` is fixed at creation and there is no endpoint to change it, deliberately. It selects
+   * which payout guarantee the campaign's redemptions live under, and those are partial unique
+   * indexes over rows that already exist — flipping a campaign to `engagement` after it has
+   * paid acquisitions would leave a run of rows sitting under a rule they were never checked
+   * against. Two campaigns is the honest way to run both, and they can share a partnership.
+   */
   @Post('campaigns')
   async createCampaign(
     @Session() s: SessionClaims,
-    @Body() b: { partnership_id: string; name: string },
+    @Body() b: { partnership_id: string; name: string; mode?: string },
   ) {
     const name = str(b.name, 'name', 120)!;
+    const mode = b.mode ?? 'acquisition';
+    if (!['acquisition', 'engagement'].includes(mode))
+      throw new BadRequestException('mode must be acquisition|engagement');
     const partnership = await prisma.partnership.findFirst({
       where: { id: b.partnership_id, promoter_org_id: s.org_id, status: 'active' },
       select: { id: true },
     });
     if (!partnership) throw new BadRequestException('no active partnership with that id');
-    return prisma.campaign.create({ data: { partnership_id: b.partnership_id, name } });
+    const created = await prisma.campaign.create({
+      data: { partnership_id: b.partnership_id, name, mode },
+    });
+    await audit(s.org_id, 'campaign.create', `campaign:${created.id}`, {
+      name,
+      mode,
+      partnership_id: b.partnership_id,
+    });
+    return created;
   }
 
   @Get('campaigns')
@@ -231,6 +288,7 @@ export class PortalController {
         partnership: {
           select: {
             coin_rate: true,
+            engagement_rate: true,
             promoter: { select: { name: true } },
             publisher: { select: { name: true } },
           },
@@ -242,6 +300,7 @@ export class PortalController {
     return rows.map(({ partnership, ...c }) => ({
       ...c,
       coin_rate: partnership.coin_rate,
+      engagement_rate: partnership.engagement_rate,
       promoter_name: partnership.promoter.name,
       publisher_name: partnership.publisher.name,
       budget: budgets.get(`campaign:${c.id}`) ?? 0,
@@ -304,9 +363,12 @@ export class PortalController {
         throw e;
       });
     // Money entered the system without a payment record; the ledger alone does not say who
-    // asked for it.
-    await audit(s.org_id, 'campaign.fund', `campaign:${id}`, { coins: b.coins });
-    return { budget: await balance(`campaign:${id}`) };
+    // asked for it. This is also the admin's notification that it happened (see
+    // `GET /v1/admin/notifications`), so it carries the budget it landed on and not just the
+    // delta — "+5000" is a number an operator then has to go and look up.
+    const budget = await balance(`campaign:${id}`);
+    await audit(s.org_id, 'campaign.fund', `campaign:${id}`, { coins: b.coins, budget });
+    return { budget };
   }
 
   @Patch('campaigns/:id')
@@ -326,7 +388,11 @@ export class PortalController {
       data.status = b.status;
     }
     if (!Object.keys(data).length) throw new BadRequestException('nothing to update');
-    return prisma.campaign.update({ where: { id }, data });
+    const updated = await prisma.campaign.update({ where: { id }, data });
+    // Audited for the same reason funding is: it is a tenant changing something the platform is
+    // answerable for, and the admin's inbox is built out of exactly those entries.
+    await audit(s.org_id, 'campaign.patch', `campaign:${id}`, data);
+    return updated;
   }
 
   @Get('campaigns/:id/stats')
@@ -405,7 +471,12 @@ export class PortalController {
   // loosening a limit is an admin override so it lands in the audit log.
   @Post('qr-codes/:id/void')
   async voidQr(@Session() s: SessionClaims, @Param('id') id: string) {
-    return this.updateOwnQr(s.org_id, id, { voided: true });
+    const qr = await this.updateOwnQr(s.org_id, id, { voided: true });
+    // Killing a code is the one QR action worth an admin's attention — a print run just stopped
+    // working, and the support call about it arrives before anyone thinks to check a log.
+    // Issuing and restyling codes are routine and stay out of the inbox on purpose.
+    await audit(s.org_id, 'qr_code.void', `qr_code:${id}`, { code: qr?.code });
+    return qr;
   }
 
   @Patch('qr-codes/:id')
@@ -443,14 +514,22 @@ export class PortalController {
 
   // ---------- publisher settings ----------
 
+  /**
+   * Both machine callers rotate their key here. A publisher's key earns fees on
+   * `/v1/attribution/*`; a promoter's mints transaction codes on `/v1/issue` — opposite ends
+   * of the same relationship, same credential, same one-call revocation.
+   */
   @Post('api-keys/rotate')
   async rotateKey(@Session() s: SessionClaims) {
-    if (s.type !== 'publisher') throw new ForbiddenException('publishers only');
+    if (s.type === 'admin') throw new ForbiddenException('tenants only');
     const api_key = newApiKey();
     await prisma.org.update({
       where: { id: s.org_id },
       data: { api_key_hash: sha256(api_key) },
     });
+    // The old key stops earning fees the moment this lands, so a publisher whose attribution
+    // calls start 401ing is usually this event. Never the key itself, only that it happened.
+    await audit(s.org_id, 'org.rotate_key', `org:${s.org_id}`);
     return { api_key };
   }
 
@@ -466,6 +545,7 @@ export class PortalController {
         landing_url: true,
         android_package: true,
         ios_app_id: true,
+        deeplink_url: true,
         bonus_label: true,
         suspended: true,
       },
@@ -481,7 +561,7 @@ export class PortalController {
    * Where scans go, and what the publisher says it gives new users. Absent = leave unchanged;
    * an explicit `""` or `null` clears the field.
    *
-   * Publishers only: these are the four fields the scan redirect reads off the *publisher*
+   * Publishers only: these are the five fields the scan redirect reads off the *publisher*
    * side of a partnership. A promoter setting them wrote columns that nothing ever reads.
    */
   @Patch('orgs/me')
@@ -492,6 +572,8 @@ export class PortalController {
       landing_url?: string;
       android_package?: string;
       ios_app_id?: string;
+      /** an https origin claimed as an Android App Link / iOS Universal Link */
+      deeplink_url?: string;
       bonus_label?: string;
     },
   ) {
@@ -500,13 +582,18 @@ export class PortalController {
       landing_url: validateLandingUrl(b.landing_url),
       android_package: validateAndroidPackage(b.android_package),
       ios_app_id: validateIosAppId(b.ios_app_id),
+      deeplink_url: validateDeeplinkUrl(b.deeplink_url),
       bonus_label: validateBonusLabel(b.bonus_label),
     };
     // Filter on whether the key was *sent*, not on the validated value: every validator
     // returns null for a cleared field too, so filtering on the value made clearing impossible.
-    return prisma.org.update({
+    const data = Object.fromEntries(Object.entries(fields).filter(([k]) => k in b));
+    // Where every scan on this publisher's codes lands. A promoter's whole print run follows
+    // this field, so the platform is answerable for a change to it even though it is the
+    // publisher's own to make.
+    const updated = await prisma.org.update({
       where: { id: s.org_id },
-      data: Object.fromEntries(Object.entries(fields).filter(([k]) => k in b)),
+      data,
       select: {
         id: true,
         name: true,
@@ -514,9 +601,14 @@ export class PortalController {
         landing_url: true,
         android_package: true,
         ios_app_id: true,
+        deeplink_url: true,
         bonus_label: true,
       },
     });
+    // After the write, like every other notification here: an entry for a change that was
+    // rejected is an inbox item about something that never happened.
+    await audit(s.org_id, 'org.patch', `org:${s.org_id}`, data);
+    return updated;
   }
 
   @Get('redemptions')

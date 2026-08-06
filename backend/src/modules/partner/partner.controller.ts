@@ -35,6 +35,7 @@ import {
   DeviceSignals,
   Platform,
   claimIdFromReferrer,
+  codeFromReferrer,
   decide,
   detectPlatform,
   normCores,
@@ -44,27 +45,12 @@ import {
   normTz,
 } from '../../common/attribution';
 import { recordDecision } from '../../common/obs';
-import { ipHash, rateLimited, sha256, str } from '../../common/security';
+import { ipHash, sha256, str } from '../../common/security';
 import { ledger, lockedBalance } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
+import { orgFromKey } from './api-key';
 
-async function publisherFromKey(auth: string) {
-  const key = (auth ?? '').replace(/^Bearer /, '');
-  if (!key.startsWith('pk_')) throw new UnauthorizedException('missing API key');
-  const hash = sha256(key);
-  // ponytail: in-process per-key ceiling, generous enough that no honest signup flow hits it.
-  // Move to the shared Redis limiter when >1 instance runs, or it becomes N× this number.
-  if (await rateLimited(`partner:${hash}`, 600))
-    throw new UnauthorizedException('rate limit exceeded, slow down');
-  const publisher = await prisma.org.findFirst({
-    // `suspended` matters here as much as it does at login: offboarding a publisher has to
-    // stop its server earning fees immediately, and its API key never expires on its own.
-    where: { type: 'publisher', api_key_hash: hash, suspended: false },
-    select: { id: true, name: true, bonus_label: true },
-  });
-  if (!publisher) throw new UnauthorizedException('invalid API key');
-  return publisher;
-}
+const publisherFromKey = (auth: string) => orgFromKey(auth, 'publisher');
 
 interface ClaimableScan {
   id: string;
@@ -297,6 +283,69 @@ async function claimInstall(tx: Tx, publisherId: string, installId: string): Pro
   };
 }
 
+/** What an engagement claim resolves to: one issued code, its scan, and what it pays. */
+interface ClaimableCode {
+  qr_code_id: string;
+  scan_id: string;
+  campaign_id: string;
+  campaign_name: string;
+  status: string;
+  engagement_rate: number;
+}
+
+/**
+ * The engagement path: a code minted against one real purchase, scanned once, paid once.
+ *
+ * There is no matching to do here and that is the point. The acquisition paths exist because a
+ * phone walks off to a store and has to be recognised when it comes back — deterministically if
+ * Play kept the referrer, probabilistically and reluctantly if it did not. A boarding-pass code
+ * skips all of it: the promoter's booking system minted it against a named transaction, the
+ * traveller scanned that exact code, and the publisher is presenting that exact code back. So
+ * `match_method` is `code` and confidence is 100, and neither is a flattering label — this is
+ * the strongest evidence in the system, stronger than a referrer, because the code names a
+ * purchase rather than a device.
+ *
+ * Note what is deliberately NOT checked: `scans.consumed`. That flag is the acquisition guard —
+ * one install per scan — and an engagement reward is a different fact about the same scan. A
+ * traveller with no app scans a boarding pass, installs, signs up and has bought a ticket: that
+ * is genuinely an acquisition and genuinely a purchase, and both are payable. Sharing one flag
+ * between them would make the two race, and whichever call arrived second would be told the
+ * scan was already spent. The engagement guarantee is its own partial unique index instead.
+ */
+async function claimCode(tx: Tx, publisherId: string, code: string): Promise<ClaimableCode | { reason: string }> {
+  // `FOR UPDATE OF q` holds the code row for the rest of the transaction, so two simultaneous
+  // claims for one boarding pass serialise here rather than both reaching the INSERT and
+  // relying on the unique index to tell one of them it lost.
+  const rows = await tx.$queryRaw<(ClaimableCode & { mode: string })[]>`
+    SELECT q.id AS qr_code_id, s.id AS scan_id, c.id AS campaign_id, c.name AS campaign_name,
+           c.status, c.mode, p.engagement_rate
+    FROM qr_codes q
+    JOIN scans s        ON s.qr_code_id = q.id
+    JOIN campaigns c    ON c.id = q.campaign_id
+    JOIN partnerships p ON p.id = c.partnership_id
+    WHERE q.code = ${code}
+      AND NOT q.voided
+      AND p.publisher_org_id = ${publisherId}::uuid
+      AND p.status = 'active'
+      AND s.scanned_at > now() - make_interval(days => ${REFERRER_WINDOW_DAYS})
+    ORDER BY s.scanned_at DESC
+    LIMIT 1
+    FOR UPDATE OF q`;
+  const row = rows[0];
+  // No row covers four different situations on purpose — an unknown code, a voided one, one
+  // belonging to another publisher, and one nobody has actually scanned yet. Telling them
+  // apart would let a publisher probe which codes exist across the whole platform.
+  if (!row) return { reason: 'no_match' };
+  // An acquisition campaign has no repeat-purchase price and never agreed to pay one. This is
+  // the refusal a publisher sees if it sends a `code` from the wrong kind of campaign.
+  if (row.mode !== 'engagement') return { reason: 'not_engagement' };
+  // Re-checked here and not only at scan time: ending or pausing a campaign has to stop
+  // spending now, and a code scanned while it was live otherwise stays payable for the whole
+  // window after the promoter thought they had stopped.
+  if (row.status !== 'active') return { reason: 'campaign_not_active' };
+  return row;
+}
+
 /**
  * Signup on the legacy single-call path: match and pay in one request, with no install row.
  *
@@ -512,6 +561,17 @@ export class PartnerController {
       screen?: string;
       language?: string;
       /**
+       * The engagement path: a transaction code the promoter minted and the user scanned. Bare
+       * (`Ab3x…`) or as the whole Play referrer it arrived in, whichever the SDK banked.
+       *
+       * Explicit, and never read out of `install_referrer` implicitly, even though the referrer
+       * on an engagement scan carries both. The two are different payouts on different terms,
+       * and one call quietly deciding which of them the publisher meant is exactly the kind of
+       * accounting surprise that has to be reconciled by hand later. Send the referrer to
+       * `first-open` for the signup, and the code here for the purchase.
+       */
+      code?: string;
+      /**
        * The publisher asserting this signup created a brand-new account. Only `false` acts —
        * an omitted field stays attributable, so publishers integrated before this existed are
        * unaffected. See the refusal note in the handler.
@@ -526,6 +586,16 @@ export class PartnerController {
     // entry, and the rest are attacker-shaped strings from another company's server.
     const publisher_user_ref = str(b.publisher_user_ref, 'publisher_user_ref', 200)!;
     const install_id = str(b.install_id, 'install_id', 36, false);
+
+    // Wrapped back into referrer shape rather than validated separately, the same way `claim_id`
+    // is in `readSignals`, so there is exactly one definition of what an issued code looks like.
+    // A malformed one is a 400 and never a silent fallthrough to the acquisition path: that
+    // would answer a question about a purchase with an answer about a signup.
+    const rawCode = str(b.code, 'code', 1000, false);
+    const code = rawCode ? codeFromReferrer(`qrm_code=${rawCode}`) ?? codeFromReferrer(rawCode) : null;
+    if (rawCode && !code)
+      throw new BadRequestException('code must be the transaction code issued to this purchase');
+    if (code) return this.claimPurchase(publisher, code, publisher_user_ref);
 
     const open = install_id ? null : readSignals(b as Record<string, unknown>);
     if (open && !open.claimId && !open.fingerprint)
@@ -682,6 +752,161 @@ export class PartnerController {
       confirm_deadline: prior.identified
         ? null
         : new Date(prior.created_at.getTime() + grace_days * 86_400_000).toISOString(),
+      bonus_label: publisher.bonus_label,
+      replay: true,
+    };
+  }
+
+  /**
+   * The engagement payout: a repeat purchase, paid on the code that proves it happened.
+   *
+   * Deliberately not routed through the acquisition machinery above, even though both end in a
+   * redemption row and a ledger pair. That machinery is entirely about *recognising a device*
+   * — an install stage, a scored fingerprint, two windows, a device-dedupe check — and none of
+   * it has a question to answer here. The code was minted against one named transaction and
+   * scanned once; there is nothing to infer. Threading a `code` through eight branches of a
+   * matcher that would never run is how a money path stops being readable.
+   *
+   * What it does share is the shape that matters: the same budget lock, the same double-entry
+   * ledger, the same rollback-on-refusal, and the same "a retry replays, it never re-pays".
+   *
+   * There is no guest tier. `identified` splits an acquisition fee because a brand-new account
+   * is worth less until somebody vouches for it — a repeat customer already transacted with the
+   * promoter, which is a harder fact than any verification bar the publisher could apply.
+   */
+  private async claimPurchase(
+    publisher: { id: string; bonus_label: string | null },
+    code: string,
+    publisher_user_ref: string,
+  ) {
+    const unattributed = (reason: string) => {
+      recordDecision('claim', { reason, match_method: 'code' }, { publisher_org_id: publisher.id });
+      return { attributed: false, reason, bonus_label: publisher.bonus_label };
+    };
+
+    // Set when the UNIQUE fires, so the replay can be answered after the transaction has rolled
+    // back — inside an aborted Postgres transaction no further query can run.
+    let replayQrCodeId: string | null = null;
+
+    const fresh = await prisma
+      .$transaction(async (tx) => {
+        const m = await claimCode(tx, publisher.id, code);
+        if ('reason' in m) return unattributed(m.reason);
+
+        const fee = m.engagement_rate;
+        // Fail closed, and thrown rather than returned so the whole transaction is undone —
+        // the code stays claimable once the promoter tops the budget back up. A traveller
+        // holding a boarding pass nobody funded should not have it burned on the way past.
+        if ((await lockedBalance(tx, `campaign:${m.campaign_id}`)) < fee)
+          throw new Rollback('budget_exhausted');
+
+        let red;
+        try {
+          red = await tx.redemption.create({
+            data: {
+              campaign_id: m.campaign_id,
+              scan_id: m.scan_id,
+              qr_code_id: m.qr_code_id,
+              publisher_user_ref,
+              coins: fee,
+              kind: 'engagement',
+              // Nothing is held back, so the row is settled the moment it is written and
+              // `/confirm` has nothing to release. See the refusal there.
+              identified: true,
+              match_method: 'code',
+              confidence: 100,
+            },
+            select: { id: true },
+          });
+        } catch (e: any) {
+          // UNIQUE (qr_code_id) WHERE kind = 'engagement': this code has already been rewarded.
+          if (e.code === 'P2002') {
+            replayQrCodeId = m.qr_code_id;
+            throw new ConflictException('already_claimed');
+          }
+          throw e;
+        }
+
+        const ref = `redemption:${red.id}`;
+        await ledger(tx, `campaign:${m.campaign_id}`, -fee, ref);
+        await ledger(tx, `publisher:${publisher.id}`, fee, ref);
+
+        recordDecision(
+          'claim',
+          { match_method: 'code', confidence: 100 },
+          {
+            publisher_org_id: publisher.id,
+            campaign_id: m.campaign_id,
+            attribution_id: red.id,
+            fee,
+            kind: 'engagement',
+          },
+        );
+
+        return {
+          attributed: true,
+          attribution_id: red.id,
+          campaign_id: m.campaign_id,
+          campaign_name: m.campaign_name,
+          /** `engagement` — a repeat purchase, not a signup. The two are priced separately. */
+          kind: 'engagement',
+          match_method: 'code',
+          confidence: 100,
+          identified: true,
+          /** marketing fee earned by the publisher, in platform credits. Not user currency. */
+          fee,
+          /** always 0 and always null: an engagement payout settles in one step. */
+          pending_fee: 0,
+          confirm_deadline: null,
+          /** the publisher's own declared bonus, echoed back. A label, never an instruction. */
+          bonus_label: publisher.bonus_label,
+          replay: false,
+        };
+      })
+      .catch((e) => {
+        if (e instanceof Rollback) return unattributed(e.reason);
+        if (replayQrCodeId) return null; // handled below, as a replay rather than an error
+        throw e;
+      });
+    if (fresh) return fresh;
+
+    const prior = await prisma.redemption.findFirst({
+      where: { qr_code_id: replayQrCodeId!, kind: 'engagement' },
+      include: { campaign: { select: { name: true } } },
+    });
+    if (!prior) throw new ConflictException('already_claimed');
+
+    /**
+     * Two very different situations reach this line, and they must not get the same answer.
+     *
+     * Same user  the publisher's first call succeeded and its response was lost — a timeout, a
+     *            pod restart, a queue redelivering. Replaying the original answer is what stops
+     *            a correctly-recorded reward looking like something to reconcile by hand.
+     *
+     * Different  somebody else's boarding pass. A forwarded screenshot, a shared code, a bug in
+     *   user     the publisher's own plumbing. Replaying here would hand the second user a
+     *            reward the first one earned and quietly tell the publisher it was attributed.
+     *            One reward per code was the guarantee; this is it being kept.
+     */
+    if (prior.publisher_user_ref !== publisher_user_ref) return unattributed('already_claimed');
+
+    recordDecision(
+      'claim',
+      { reason: 'replay', match_method: 'code', confidence: 100 },
+      { publisher_org_id: publisher.id, campaign_id: prior.campaign_id, attribution_id: prior.id },
+    );
+    return {
+      attributed: true,
+      attribution_id: prior.id,
+      campaign_id: prior.campaign_id,
+      campaign_name: prior.campaign.name,
+      kind: 'engagement',
+      match_method: prior.match_method,
+      confidence: prior.confidence,
+      identified: true,
+      fee: prior.coins,
+      pending_fee: 0,
+      confirm_deadline: null,
       bonus_label: publisher.bonus_label,
       replay: true,
     };

@@ -1,18 +1,19 @@
 import { BadRequestException } from '@nestjs/common';
 
 /**
- * The three numbers a partnership is priced on, validated in one place.
+ * The four numbers a partnership is priced on, validated in one place.
  *
  * They were checked twice — once where a promoter requests a partnership, once where an admin
  * patches one — and the two copies had already drifted (different bounds on `guest_rate`,
  * different messages for the same rule). A money rule with two implementations is a money rule
  * with two answers, and the next rate field added would have been added to only one of them.
+ * `engagement_rate` is that next field, and it went in here once.
  *
  * `guest_rate <= coin_rate` is also a CHECK constraint in the database. That is the real
  * guarantee; this exists so the caller gets a message it can act on instead of a driver error.
  */
 
-const DEFAULTS = { coin_rate: 50, grace_days: 7 };
+const DEFAULTS = { coin_rate: 50, grace_days: 7, engagement_rate: 20 };
 
 function int(v: unknown, name: string, min: number, max: number): number {
   if (!Number.isInteger(v) || (v as number) < min || (v as number) > max)
@@ -24,6 +25,8 @@ export interface Rates {
   coin_rate: number;
   guest_rate: number;
   grace_days: number;
+  /** what one repeat purchase pays in an `engagement` campaign */
+  engagement_rate: number;
 }
 
 /**
@@ -48,7 +51,15 @@ export function validateRates(patch: Partial<Rates>, current?: Rates): Rates {
     patch.grace_days === undefined
       ? (current?.grace_days ?? DEFAULTS.grace_days)
       : int(patch.grace_days, 'grace_days', 0, 365);
+  // Not bounded against `coin_rate`, on purpose. The guest rate is a *part* of the coin rate —
+  // the held-back delta is what makes the two-tier payout work, so it cannot exceed it. A
+  // repeat purchase is not part of an acquisition; it is a different thing being bought, and a
+  // partnership may honestly price it above a signup or at a tenth of one.
+  const engagement_rate =
+    patch.engagement_rate === undefined
+      ? (current?.engagement_rate ?? DEFAULTS.engagement_rate)
+      : int(patch.engagement_rate, 'engagement_rate', 0, 100_000);
   if (guest_rate > coin_rate)
     throw new BadRequestException('guest_rate cannot exceed coin_rate');
-  return { coin_rate, guest_rate, grace_days };
+  return { coin_rate, guest_rate, grace_days, engagement_rate };
 }
