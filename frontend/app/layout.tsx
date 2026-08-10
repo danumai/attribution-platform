@@ -24,24 +24,13 @@ export const metadata = {
     'Run QR reward campaigns with publishers — scans, redemptions and budgets in one place.',
 };
 
-export const viewport = {
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#E7E2DA' },
-    { media: '(prefers-color-scheme: dark)', color: '#2B2825' },
-  ],
-};
-
-/* Runs before first paint so a light-mode reader never sees a dark flash. It has to be
-   an inline string rather than a module: anything bundled arrives after the first
-   paint, which is the whole problem it exists to solve. */
-const BOOT = `try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}`;
+/* One scheme, so one colour — and no pre-paint boot script to restore a stored
+   choice, because there is no choice left to store. */
+export const viewport = { themeColor: '#ECE9E4' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: BOOT }} />
-      </head>
       <body className="min-h-dvh bg-canvas font-sans text-[15px] leading-[1.55] tracking-[-0.011em] text-ink antialiased">
         {children}
         <UI />

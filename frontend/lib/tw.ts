@@ -34,7 +34,7 @@ export const sectionHead =
 export const btnBase =
   'relative cursor-pointer rounded-lg border ' +
   'text-[13.5px] font-medium tracking-[-0.006em] whitespace-nowrap no-underline ' +
-  'transition-[background-color,border-color,box-shadow,opacity,color] duration-150 ease-press ' +
+  'transition-[background-color,border-color,box-shadow,opacity,color] duration-200 ease-press ' +
   'disabled:cursor-not-allowed disabled:opacity-45';
 
 /** the four inks a control can be printed in */
@@ -73,7 +73,7 @@ export const label = 'mt-5 mb-1.5 block text-[13px] font-medium tracking-[-0.006
 
 export const field =
   'w-full rounded-lg border border-line bg-card px-3 py-2.5 text-[14px] text-ink shadow-contact-sm ' +
-  'transition-[border-color,box-shadow] duration-150 ease-press ' +
+  'transition-[border-color,box-shadow] duration-200 ease-press ' +
   'placeholder:text-mut/70 hover:border-mut/40 focus:border-accent-text focus:outline-none focus:ring-4 focus:ring-accent/12';
 
 /** native arrow is unstyleable, so the chevron is drawn into the field */
@@ -81,7 +81,7 @@ export const select = `${field} cursor-pointer appearance-none pr-[34px] bg-no-r
 
 export const colorField =
   'h-[42px] w-full cursor-pointer rounded-lg border border-line bg-card p-[3px] shadow-contact-sm ' +
-  'transition-[border-color,box-shadow] duration-150 ease-press hover:border-mut/40 ' +
+  'transition-[border-color,box-shadow] duration-200 ease-press hover:border-mut/40 ' +
   'focus:border-accent-text focus:outline-none focus:ring-4 focus:ring-accent/12';
 
 export const rangeField = 'h-[22px] w-full cursor-pointer accent-accent';
@@ -120,7 +120,7 @@ export const th =
 export const td =
   'border-b border-line-soft px-3.5 py-3 text-left text-ink-soft tabular-nums';
 
-export const tr = 'transition-colors duration-100 ease-press hover:bg-card-alt last:[&>td]:border-b-0';
+export const tr = 'transition-colors duration-200 ease-press hover:bg-card-alt last:[&>td]:border-b-0';
 
 export const code =
   'rounded-md border border-line-soft bg-card-alt px-1.5 py-0.5 font-mono text-[12.5px] text-ink-soft';
@@ -183,7 +183,7 @@ export const figureCell = `relative px-5 py-4.5 text-left ${cellRules}`;
 /** the same cell when it is also the jump to the section the figure was counted from */
 export const figureCellLink = cx(
   'group relative cursor-pointer border-0 bg-transparent px-5 py-4.5 text-left',
-  'transition-colors duration-150 ease-press hover:bg-card-alt',
+  'transition-colors duration-200 ease-press hover:bg-card-alt',
   cellRules,
 );
 
@@ -278,7 +278,7 @@ export const tablebar = 'mt-4 flex flex-wrap items-center justify-between gap-3'
 
 export const search =
   'flex flex-[0_1_340px] items-center gap-2 rounded-lg border border-line bg-card px-3 shadow-contact-sm ' +
-  'transition-[border-color,box-shadow] duration-150 ease-press ' +
+  'transition-[border-color,box-shadow] duration-200 ease-press ' +
   'focus-within:border-accent-text focus-within:ring-4 focus-within:ring-accent/12 ' +
   '[&>svg]:size-[15px] [&>svg]:shrink-0 [&>svg]:text-mut';
 
@@ -295,14 +295,14 @@ export const filterChip =
 
 export const filterChipDrop =
   'grid size-5 shrink-0 cursor-pointer place-items-center rounded-full border-0 bg-transparent ' +
-  'text-accent-text transition-colors duration-150 ease-press hover:bg-accent-line [&_svg]:size-3';
+  'text-accent-text transition-colors duration-200 ease-press hover:bg-accent-line [&_svg]:size-3';
 
 /* row action menu — one control per row instead of a run of links */
 export const menu = 'group relative inline-block';
 
 export const menuSummary =
   'grid h-7 w-[30px] cursor-pointer list-none place-items-center rounded-md border border-transparent text-mut ' +
-  'transition-[background-color,border-color,color] duration-150 ease-press ' +
+  'transition-[background-color,border-color,color] duration-200 ease-press ' +
   'hover:border-line hover:bg-card-alt hover:text-ink ' +
   'group-open:border-line group-open:bg-card-alt group-open:text-ink ' +
   '[&::-webkit-details-marker]:hidden [&_svg]:size-4';
@@ -422,7 +422,7 @@ export function preset(pressed: boolean) {
 /** the plate is chip-scale, so it takes a 1px rule for its edge rather than a shadow */
 export const presetProof =
   'block h-auto w-full max-w-[68px] rounded-md shadow-[0_0_0_1px_var(--color-line)] ' +
-  'transition-shadow duration-150 ease-press group-aria-pressed:shadow-[0_0_0_1px_var(--color-ink-soft)]';
+  'transition-shadow duration-200 ease-press group-aria-pressed:shadow-[0_0_0_1px_var(--color-ink-soft)]';
 
 /** the code switcher: each code as its own tab */
 export function codeTab(on: boolean, voided: boolean) {
@@ -441,7 +441,7 @@ export const colorwell = 'min-w-[150px] flex-[1_1_160px]';
 /** logo drop target */
 export function logoWell(state: 'idle' | 'over' | 'filled') {
   return cx(
-    'mt-2 rounded-xl border-2 transition-[border-color,background-color] duration-150 ease-press',
+    'mt-2 rounded-xl border-2 transition-[border-color,background-color] duration-200 ease-press',
     state === 'filled'
       ? 'flex flex-row items-center gap-4 border-solid border-line bg-card-alt px-4 py-3.5 text-left'
       : 'flex cursor-pointer flex-col items-center justify-center gap-1.5 border-dashed px-5 py-7 text-center [&_svg]:size-6.5 [&_svg]:text-mut',

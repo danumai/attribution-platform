@@ -23,13 +23,13 @@
   }
   .lp .lp-board { animation-delay: 0.34s; }
   @keyframes lp-press-land {
-    from { opacity: 0; transform: translateY(20px) scale(0.992); filter: blur(7px); }
+    from { opacity: 0; transform: translateY(20px) scale(0.992); }
   }
 
   .lp .lp-routing .lp-field { animation: lp-strike 0.34s var(--ease-out) both; }
   .lp .lp-routing .lp-field:nth-child(1) { animation-delay: 0.3s; }
-  .lp .lp-routing .lp-field:nth-child(2) { animation-delay: 0.37s; }
-  .lp .lp-routing .lp-field:nth-child(3) { animation-delay: 0.44s; }
+  .lp .lp-routing .lp-field:nth-child(2) { animation-delay: 0.4s; }
+  .lp .lp-routing .lp-field:nth-child(3) { animation-delay: 0.5s; }
   @keyframes lp-strike {
     from { opacity: 0; transform: scale(1.06); }
   }
@@ -47,19 +47,19 @@
   .lp .lp-h1 em { animation: lp-second-plate 0.42s var(--ease-out) 1.02s both; }
   @keyframes lp-second-plate { from { color: var(--color-ink); } }
 
-  .lp .lp-lede { animation: lp-rise 0.6s var(--ease-out) 0.72s both; }
-  .lp .lp-cta { animation: lp-rise 0.6s var(--ease-out) 0.82s both; }
-  .lp .lp-cta-note { animation: lp-rise 0.6s var(--ease-out) 0.9s both; }
+  .lp .lp-lede { animation: lp-rise 0.65s var(--ease-out) 0.72s both; }
+  .lp .lp-cta { animation: lp-rise 0.65s var(--ease-out) 0.82s both; }
+  .lp .lp-cta-note { animation: lp-rise 0.65s var(--ease-out) 0.92s both; }
   @keyframes lp-rise { from { opacity: 0; transform: translateY(10px); } }
 
   /* the code resolves downward, the way a scanner reads one */
   .lp .lp-code { animation: lp-print 0.66s var(--ease-out) 0.62s both; }
   @keyframes lp-print { from { clip-path: inset(0 0 100% 0); } }
-  .lp .lp-stub-fields .lp-field { animation: lp-rise 0.5s var(--ease-out) both; }
+  .lp .lp-stub-fields .lp-field { animation: lp-rise 0.65s var(--ease-out) both; }
   .lp .lp-stub-fields .lp-field:nth-child(1) { animation-delay: 0.86s; }
-  .lp .lp-stub-fields .lp-field:nth-child(2) { animation-delay: 0.92s; }
-  .lp .lp-stub-fields .lp-field:nth-child(3) { animation-delay: 0.98s; }
-  .lp .lp-stub-fields .lp-field:nth-child(4) { animation-delay: 1.04s; }
+  .lp .lp-stub-fields .lp-field:nth-child(2) { animation-delay: 0.96s; }
+  .lp .lp-stub-fields .lp-field:nth-child(3) { animation-delay: 1.06s; }
+  .lp .lp-stub-fields .lp-field:nth-child(4) { animation-delay: 1.16s; }
 
   /* --- the recurring validation loop, only while the stub is on screen --- */
   .lp-stub[data-run] .lp-scan {
@@ -112,7 +112,7 @@
     /* The nav already carries its tint and blur as utilities. What scroll adds is the
        separation: it lifts off the page once the reader has left the top. */
     .lp .lp-nav {
-      animation: lp-nav-set linear both;
+      animation: lp-nav-set var(--ease-drift) both;
       animation-timeline: scroll(root block);
       animation-range: 0 130px;
     }
@@ -127,7 +127,7 @@
        animation-timeline: scroll(). List both animations here instead, so this
        rule is the single source of truth for the hero pass. */
     .lp .lp-hero .lp-pass {
-      animation: lp-press-land 0.78s var(--ease-out) both, lp-parallax-pass linear both;
+      animation: lp-press-land 0.78s var(--ease-out) both, lp-parallax-pass var(--ease-drift) both;
       animation-timeline: auto, scroll(root block);
       animation-range: normal, 0 640px;
     }
@@ -141,7 +141,7 @@
   @media (prefers-reduced-motion: no-preference) {
     /* the strip deals itself out, coupon by coupon, from the tear line */
     @keyframes lp-arrive {
-      from { opacity: 0; transform: translate(-14px, 26px); filter: blur(4px); }
+      from { opacity: 0; transform: translate(-14px, 26px); }
     }
     .lp .lp-leg {
       animation: lp-arrive linear both;
@@ -155,10 +155,10 @@
     /* the journey diagram's waypoints light up one by one, on the same stagger as
        the coupon strip below them so the two read as one motion. */
     @keyframes lp-journey-dot-active {
-      to { border-color: var(--color-accent); background: var(--color-accent); transform: scale(1.15); }
+      to { border-color: var(--color-accent-text); background: var(--color-accent-text); transform: scale(1.15); }
     }
     @keyframes lp-journey-label-active {
-      to { color: var(--color-accent); }
+      to { color: var(--color-accent-text); }
     }
     @keyframes lp-journey-token-active {
       0%, 40% { opacity: 0; transform: translate(-16px, -6px) scale(0.6); }
@@ -255,8 +255,11 @@
       animation-timeline: view();
       animation-range: entry 5% entry 55%;
     }
+    /* No blur on the way in. It read as depth on the old mid-grey canvas; over pastel
+       limestone the same three pixels just read as a smudge, and the source never
+       blurs anything. Opacity and offset carry the entrance on their own. */
     @keyframes lp-enter-rise {
-      from { opacity: 0; transform: translateY(18px); filter: blur(3px); }
+      from { opacity: 0; transform: translateY(18px); }
     }
   }
 }
@@ -291,7 +294,7 @@
   border-radius: 999px;
   background: linear-gradient(
     to right,
-    var(--color-accent) var(--pct, 0%),
+    var(--color-accent-text) var(--pct, 0%),
     var(--color-sunk) var(--pct, 0%)
   );
 }
@@ -300,7 +303,7 @@
   border-radius: 999px;
   background: linear-gradient(
     to right,
-    var(--color-accent) var(--pct, 0%),
+    var(--color-accent-text) var(--pct, 0%),
     var(--color-sunk) var(--pct, 0%)
   );
 }
@@ -311,24 +314,32 @@
   height: var(--thumb);
   margin-top: calc((var(--track) - var(--thumb)) / 2);
   border-radius: 999px;
-  border: 2px solid var(--color-accent);
+  border: 2px solid var(--color-accent-text);
   background: var(--color-card);
   box-shadow: var(--shadow-contact);
-  transition: transform 0.14s var(--ease-out), box-shadow 0.14s var(--ease-out);
+  transition: transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out);
 }
 .lp .lp-range::-moz-range-thumb {
   width: var(--thumb);
   height: var(--thumb);
   border-radius: 999px;
-  border: 2px solid var(--color-accent);
+  border: 2px solid var(--color-accent-text);
   background: var(--color-card);
   box-shadow: var(--shadow-contact);
-  transition: transform 0.14s var(--ease-out), box-shadow 0.14s var(--ease-out);
+  transition: transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out);
 }
 .lp .lp-range:active::-webkit-slider-thumb { transform: scale(1.18); box-shadow: var(--shadow-contact); }
 .lp .lp-range:active::-moz-range-thumb { transform: scale(1.18); box-shadow: var(--shadow-contact); }
-.lp .lp-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 24%, transparent); }
-.lp .lp-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 24%, transparent); }
+/* The track suppresses the native outline, so this box-shadow is the slider's ONLY
+   focus indicator — it cannot be a tinted halo. A 24% wash of the pastel accent
+   measured under 1.5:1 against the track. Ink, offset by a canvas-coloured gap, is
+   the same ring :focus-visible draws everywhere else in the system. */
+.lp .lp-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-ink);
+}
+.lp .lp-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-ink);
+}
 
 /* --- the questions ---
    <details> is the whole component. Where ::details-content exists the browser

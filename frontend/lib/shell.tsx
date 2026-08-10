@@ -10,7 +10,6 @@ import { ReactNode, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { TicketMark } from '@/lib/mark';
-import { ThemeToggle } from '@/lib/theme';
 import { btnBase, cx, h1, inkAccent, muted, riseStagger, stamp } from '@/lib/tw';
 
 export type NavItem = {
@@ -208,12 +207,7 @@ export function Shell({
             <h1 className={h1}>{title}</h1>
             {lede && <p className={`${muted} mt-0.5 max-w-[70ch]`}>{lede}</p>}
           </div>
-          {/* The toggle is shell chrome, not a page action, so it sits here on every
-              signed-in surface rather than being re-added per page. */}
-          <div className="flex shrink-0 items-center gap-2.5">
-            <ThemeToggle />
-            {actions}
-          </div>
+          <div className="flex shrink-0 items-center gap-2.5">{actions}</div>
         </header>
         <main
           className={cx(

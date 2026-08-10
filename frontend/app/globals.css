@@ -1,12 +1,14 @@
-/* Design system: Gallery.
-   A mid-tone warm grey canvas — roughly an 18% gallery wall — with a madder-red
-   pigment accent and bone type. Dark by default, with a warm-grey-paper light
-   counterpart; both live in one declaration per token via light-dark().
+/* Design system: Frankly.
+   A warm limestone canvas — the four beige primitives off franklyinsure.com — with a
+   pastel pink accent and near-black ink. Light only: the source has no dark scheme,
+   so neither do we, and every token is a single value rather than a light-dark() pair.
 
-   The mid-tone base is the point. Because the canvas sits in the middle of the
-   value range, surfaces are available both lighter AND darker than it, so depth is
-   expressed as value rather than as shadow. Near-black and near-white themes can
-   only go one way and have to fake the other with a drop shadow.
+   Surfaces still come in five levels and still express depth as value: `sunk` is
+   genuinely darker than the page and cards are genuinely lighter. What changed is that
+   the range now sits at the top of the value scale instead of the middle, so the
+   spread between levels is narrower and the 1px hairline border does more of the work.
+   That is how the source separates its own surfaces, and it is why the shadows below
+   are almost flat.
 
    Everything expressible as a utility lives in the TSX; this file holds only the
    theme tokens Tailwind generates those utilities from, plus the few things the
@@ -20,56 +22,66 @@
 
 @theme {
   /* ---- surfaces ----
-     Five levels, not three. `sunk` is genuinely darker than the page and cards are
-     genuinely lighter, in both schemes. */
-  --color-canvas:    light-dark(#E7E2DA, #2B2825);
-  --color-sunk:      light-dark(#DCD6CC, #211E1B);
-  --color-card:      light-dark(#F6F3ED, #35312C);
-  --color-card-alt:  light-dark(#EFEBE3, #3D3831);
-  --color-card-high: light-dark(#FFFFFF, #454039);
+     All four limestone primitives, ordered so cards read lighter than the page and
+     `sunk` reads darker — the same contract the previous theme had, at a new range. */
+  --color-canvas:    #ECE9E4;
+  --color-sunk:      #E3DDD5;
+  --color-card:      #F5F4F1;
+  --color-card-alt:  #F0EEE9;
+  --color-card-high: #FFFFFF;
 
-  /* ---- edges ---- */
-  --color-line:      light-dark(#D3CCC1, #4A443C);
-  --color-line-soft: light-dark(#E0DAD1, #3B3630);
+  /* ---- edges ----
+     The source draws these as 10% black over limestone; flattened to solid hex here so
+     the contrast test can parse them and so they do not darken twice when they overlap. */
+  --color-line:      #D8D4CD;
+  --color-line-soft: #E6E2DC;
 
   /* ---- text ----
-     Checked against canvas, sunk, card AND card-alt — in dark mode card-alt is the
-     lightest surface and therefore the worst case, in light mode sunk is. */
-  --color-ink:      light-dark(#2B2825, #F2EEE7);
-  --color-ink-soft: light-dark(#56504A, #C8C1B6);
-  --color-mut:      light-dark(#625B50, #ADA598);
+     Checked against every surface. With a light theme the worst case is always `sunk`,
+     the darkest one — `mut` is #635E56 rather than the more obvious #6E6960 because
+     that lighter grey measures 4.04:1 there and fails. */
+  --color-ink:      #111111;
+  --color-ink-soft: #55504A;
+  --color-mut:      #635E56;
 
-  /* ---- accent: madder, split in two ----
-     `accent` is a FILL. Against the dark canvas it measures 2.5:1 — fine under bone
-     type on a button, illegible as text or as a chart stroke. Anything drawn *on* a
-     surface uses `accent-text` instead. Collapsing these two back into one token is
-     the single easiest way to ship this theme inaccessible; the contrast test exists
-     to catch exactly that. */
-  --color-accent:       light-dark(#93332A, #B04034);
-  --color-accent-hover: light-dark(#7E2B23, #C24A3D);
-  --color-accent-on:    light-dark(#FBF8F2, #FBF8F2);
-  --color-accent-text:  light-dark(#93332A, #E68C80);
-  --color-accent-soft:  light-dark(#F0E4E0, #3A2A26);
-  --color-accent-line:  light-dark(#D9BDB6, #5C332C);
+  /* ---- accent: pink, split in two ----
+     `accent` is a FILL, and pastel pink is an extreme case of why this split exists —
+     it measures 1.44:1 against the canvas, so it cannot be text, a stroke, or a focus
+     ring. The source uses it exactly this way: a block colour with #111 set on top.
+     Anything drawn *on* a surface uses `accent-text`, a deep rose from the same family
+     that clears 4.5:1. Collapsing these two back into one token is the single easiest
+     way to ship this theme inaccessible; the contrast test exists to catch exactly that. */
+  --color-accent:       #FFACCA;
+  --color-accent-hover: #FF97BC;
+  --color-accent-on:    #111111;
+  --color-accent-text:  #9E1247;
+  --color-accent-soft:  #FFD3E3;
+  --color-accent-line:  #F3DEE4;
 
-  /* ---- semantic ---- */
-  --color-ok:      light-dark(#3F6230, #8FAE7C);
-  --color-ok-soft: light-dark(#E4EADD, #262E22);
-  --color-ok-line: light-dark(#BFCFB2, #3D4A35);
+  /* ---- semantic ----
+     Unchanged from the previous light scheme. These were already tuned against a warm
+     light canvas and already pass there; only the dark halves were dropped. */
+  --color-ok:      #3F6230;
+  --color-ok-soft: #E4EADD;
+  --color-ok-line: #BFCFB2;
 
-  --color-warn:      light-dark(#7E520F, #D9A441);
-  --color-warn-lit:  light-dark(#9A660F, #E8B65C);
-  --color-warn-soft: light-dark(#F2E9D6, #332A18);
-  --color-warn-line: light-dark(#DCC79A, #4E4126);
+  --color-warn:      #7E520F;
+  --color-warn-lit:  #9A660F;
+  --color-warn-soft: #F2E9D6;
+  --color-warn-line: #DCC79A;
 
-  --color-bad:      light-dark(#A83226, #EA887A);
-  --color-bad-soft: light-dark(#F3E1DE, #3A2523);
-  --color-bad-line: light-dark(#DCB6B0, #5A3730);
+  --color-bad:      #A83226;
+  --color-bad-soft: #F3E1DE;
+  --color-bad-line: #DCB6B0;
 
   /* the scrim behind the mobile rail and modal dialogs */
-  --color-scrim: light-dark(rgb(43 40 37 / .42), rgb(0 0 0 / .60));
+  --color-scrim: rgb(17 17 17 / .42);
 
-  /* ---- type ---- */
+  /* ---- type ----
+     Deliberately unchanged. The source pairs Switzer with Almarena Neue Display; the
+     first is Fontshare-only and the second is a paid licence, and Schibsted Grotesk is
+     already wired here and close enough in the body copy that the colour and the
+     corner radius carry the resemblance instead. */
   --font-sans: var(--font-schibsted), -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -87,9 +99,7 @@
   --text-stamp-caps--font-weight: 600;
 
   /* One scale, two ranges. The landing page reads from the top of it, the console from
-     the bottom, so a heading is spelled once instead of as a clamp() at every call site.
-     Tracking is a touch looser than it was under Inter — Schibsted Grotesk is narrower,
-     and the old -0.035em closed the hero up too far. */
+     the bottom, so a heading is spelled once instead of as a clamp() at every call site. */
   --text-hero: clamp(38px, 5.6vw, 68px);
   --text-hero--line-height: 1.03;
   --text-hero--letter-spacing: -0.03em;
@@ -109,22 +119,24 @@
   --text-lede--line-height: 1.6;
   --text-lede--letter-spacing: -0.008em;
 
-  /* ---- geometry: cut edges, not soft SaaS ---- */
-  --radius-sm: 2px;
-  --radius-md: 3px;
-  --radius-lg: 4px;
-  --radius-xl: 6px;
+  /* ---- geometry: soft corners ----
+     The source ships three radii — .5rem / 1rem / 1.5rem. The 12px step is interpolated
+     so the existing four-token scale keeps its shape. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
 
   /* ---- elevation ----
-     Ten tokens became three. Depth is carried by the five surface values; a shadow
-     now only marks something that genuinely floats above the page. The accent-tinted
-     glows are gone entirely — coloured glow under a button is the loudest generic
-     tell there is, and on a mid-grey canvas it also just muddies.
+     Nearly flat. On a light theme the five surface values sit close together, so a
+     heavy shadow is the one thing that would break the resemblance fastest; the source
+     separates panels with a hairline border and almost nothing else. These stay as
+     tokens rather than being deleted because a modal and a toast genuinely do float.
 
-     light-dark() returns a colour, so it cannot switch a whole box-shadow. The tint
-     is a variable the shadows compose from instead. */
-  --shadow-tint:      light-dark(rgb(43 40 37 / .13), rgb(0 0 0 / .40));
-  --shadow-tint-deep: light-dark(rgb(43 40 37 / .22), rgb(0 0 0 / .62));
+     The tint is a variable the shadows compose from, so the three composed shadows
+     below keep their geometry and only change weight. */
+  --shadow-tint:      rgb(17 17 17 / .05);
+  --shadow-tint-deep: rgb(17 17 17 / .10);
 
   --shadow-contact-sm: 0 1px 2px var(--shadow-tint);
   --shadow-contact:    0 4px 16px -4px var(--shadow-tint);
@@ -133,7 +145,14 @@
   --ease-press: cubic-bezier(.2, .7, .3, 1);
   --ease-out: cubic-bezier(.16, 1, .3, 1);
 
-  /* ---- motion ---- */
+  /* The source's one custom curve, used there for scroll-driven transforms. It is a
+     slow in-out — the opposite shape to --ease-out — so it is reserved for the
+     scroll-linked moves in landing.css and does not belong on an entrance. */
+  --ease-drift: cubic-bezier(.625, .05, 0, 1);
+
+  /* ---- motion ----
+     Curves unchanged: --ease-out is an expo-out, near-identical to the power3.out the
+     source runs its GSAP reveals on. Durations were nudged to its measured 0.65s. */
   --animate-rise: rise .4s var(--ease-out) both;
   --animate-rise-fast: rise .24s var(--ease-out) both;
   --animate-count: count .4s var(--ease-out) both;
@@ -158,15 +177,12 @@
   @keyframes lp-ink { from { opacity: .2; } }
 }
 
-/* The scheme is driven entirely by `color-scheme`, which is what every light-dark()
-   token above resolves against. The toggle stamps data-theme on <html> and layout.tsx
-   restores a stored choice before first paint, so nothing swaps classes at runtime and
-   there is no flash. Absent the attribute, the theme is dark. */
+/* One scheme. Declaring it explicitly still matters: it is what keeps form controls,
+   scrollbars and the caret rendering light regardless of the OS preference, which is
+   the job the old light-dark() wiring used to do from the other direction. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 }
-:root:not([data-theme="light"]) { color-scheme: dark; }
-:root[data-theme="light"]       { color-scheme: light; }
 
 @layer base {
   html { -webkit-text-size-adjust: 100%; }
@@ -174,11 +190,12 @@
   /* Preflight drops the native focus ring; this restores one system-wide rather
      than asking every interactive element to carry the same three utilities.
 
-     Ink, not accent: madder is 2.5:1 on the dark canvas, under the 3:1 a non-text
-     indicator needs. An achromatic ring also suits the restraint of the theme. */
+     Ink, not accent: the pink is 1.44:1 on the canvas, nowhere near the 3:1 a non-text
+     indicator needs. It is the clearest illustration in the theme of why `accent` is
+     a fill and nothing else. */
   :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
 
-  ::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+  ::selection { background: color-mix(in srgb, var(--color-accent) 55%, transparent); }
 
   /* A global opt-out has to outrank every utility, so it cannot be one. */
   @media (prefers-reduced-motion: reduce) {
