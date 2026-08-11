@@ -4,6 +4,9 @@ import ScanStub from './ScanStub';
 import JourneyFlow from './JourneyFlow';
 import JourneyTrigger from './JourneyTrigger';
 import BudgetPlanner from './BudgetPlanner';
+import Metrics from './Metrics';
+import Compare from './Compare';
+import Proof from './Proof';
 import Faq from './Faq';
 import * as lp from '@/lib/lp';
 import './landing.css';
@@ -189,6 +192,7 @@ export default function Landing() {
           </div>
 
           <ActivityBoard />
+          <Metrics />
         </header>
 
         <section className={`${lp.section} ${lp.wrap}`}>
@@ -277,6 +281,20 @@ export default function Landing() {
           <BudgetPlanner />
         </section>
 
+        {/* The planner leaves the reader holding a number. This is the section that tells them
+            what that number is worth against the two things they are actually choosing between. */}
+        <section className={`${lp.section} ${lp.wrap}`}>
+          <div className={lp.sectionHead}>
+            <span className={lp.eyebrow}>How this differs</span>
+            <h2 className={lp.h2}>Priced on the signup, not the click.</h2>
+            <p className={lp.sub}>
+              Every row below is about what a pricing model bills you for and what it can prove.
+              None of it is a claim about any particular network&rsquo;s conduct.
+            </p>
+          </div>
+          <Compare />
+        </section>
+
         {/* Both sides of the marketplace, given equal weight. The publisher used to appear only
             as a footnote in the closing panel, which is a strange way to treat half the market. */}
         <section className={`${lp.section} ${lp.wrap}`}>
@@ -312,6 +330,18 @@ export default function Landing() {
               </article>
             ))}
           </div>
+        </section>
+
+        <section className={`${lp.section} ${lp.wrap}`}>
+          <div className={lp.sectionHead}>
+            <span className={lp.eyebrow}>Who scans land in</span>
+            <h2 className={lp.h2}>The apps on the other side of the code.</h2>
+            <p className={lp.sub}>
+              A scan is only worth funding if it ends somewhere the person actually wanted to go.
+              Publishers bring the destination; you bring the print run.
+            </p>
+          </div>
+          <Proof />
         </section>
 
         <section className={`${lp.section} ${lp.wrap}`}>

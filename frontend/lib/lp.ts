@@ -274,8 +274,15 @@ export const plannerLabel =
 /** native range input; the track fill and thumb are drawn in landing.css off `--pct` */
 export const range = 'lp-range w-full cursor-grab appearance-none bg-transparent active:cursor-grabbing';
 
+/* Four figures, so 2×2 rather than a single row — at 1160px a four-across row of 34px
+   figures leaves each caption two words wide and they all wrap. */
 export const plannerOut =
-  'grid grid-cols-3 gap-x-6 gap-y-7 px-8 py-8 max-[1000px]:grid-cols-1 max-[720px]:px-6 max-[720px]:py-7';
+  'grid grid-cols-2 gap-x-6 gap-y-7 px-8 py-8 max-[1000px]:grid-cols-1 max-[720px]:px-6 max-[720px]:py-7';
+
+/** the ROI line: the same budget, priced the way the rest of the market prices it */
+export const plannerVs =
+  'col-span-full grid gap-1.5 border-t border-line-soft pt-6 ' +
+  '[&_b]:font-mono [&_b]:text-[15px] [&_b]:font-semibold [&_b]:text-ink [&_b]:tabular-nums';
 
 export const plannerFigure = 'grid content-start gap-1.5';
 export const plannerNum =
@@ -284,6 +291,78 @@ export const plannerCap = 'text-[13px] leading-[1.45] text-mut';
 
 export const plannerNote =
   'col-span-full border-t border-line-soft px-8 py-5 text-[12.5px] leading-[1.6] text-mut max-[720px]:px-6';
+
+/* ---- the scale band ----
+   Four figures under the hero. The numbers count up off `view()` using the same
+   `lp-num` machinery the fare cards already use — no second counter. */
+
+export const metrics =
+  'lp-metrics mt-16 grid grid-cols-4 overflow-hidden rounded-2xl border border-line bg-card shadow-contact ' +
+  'max-[860px]:grid-cols-2 max-[480px]:grid-cols-1';
+
+export const metric =
+  'lp-metric px-7 py-8 transition-colors duration-200 hover:bg-card-alt ' +
+  '[&+&]:border-l [&+&]:border-l-line ' +
+  'max-[860px]:[&:nth-child(n+3)]:border-t max-[860px]:[&:nth-child(n+3)]:border-t-line ' +
+  'max-[860px]:[&:nth-child(odd)]:border-l-0 ' +
+  'max-[480px]:[&+&]:border-l-0 max-[480px]:[&+&]:border-t max-[480px]:[&+&]:border-t-line';
+
+export const metricNum =
+  'flex items-baseline font-mono text-[40px] font-semibold leading-none tracking-[-0.045em] text-ink tabular-nums ' +
+  'max-[720px]:text-[32px] [&_small]:ml-0.5 [&_small]:text-[24px] [&_small]:tracking-[-0.03em] max-[720px]:[&_small]:text-[20px]';
+export const metricCap = 'mt-3 block text-[13.5px] leading-[1.45] text-mut';
+
+/* ---- the comparison ---- */
+
+export const compare = 'lp-compare overflow-hidden rounded-2xl border border-line bg-card shadow-contact';
+
+/** Four columns: the measure, then us, then the two things a promoter is weighing us against. */
+const compareGrid =
+  'grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-x-6 px-7 ' +
+  'max-[860px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] max-[860px]:gap-x-5 max-[860px]:px-5';
+
+export const compareHead = cx(
+  compareGrid,
+  'border-b border-line bg-card-alt py-3.5 text-stamp-caps uppercase text-mut',
+);
+/** our column is the only one that carries the accent, in the head and in every row */
+export const compareMine = 'font-semibold text-accent-text';
+
+export const compareRow = cx(
+  'lp-compare-row',
+  compareGrid,
+  'items-baseline py-5 transition-colors duration-200 hover:bg-card-alt [&+&]:border-t [&+&]:border-t-line-soft',
+);
+
+export const compareTerm = 'text-[14.5px] font-semibold tracking-[-0.015em] text-ink max-[860px]:col-span-full max-[860px]:mb-2';
+export const compareCell = 'text-[14px] leading-[1.5] text-ink-soft';
+export const compareCellMine = 'text-[14px] leading-[1.5] font-medium text-ink';
+/** the measure's own label, shown only once the grid collapses to two columns */
+export const compareWho = 'hidden text-stamp-caps uppercase text-mut max-[860px]:mb-1 max-[860px]:block';
+
+/* ---- social proof ---- */
+
+/** The rail masks at both edges so logos enter and leave rather than popping at a hard border. */
+export const marquee =
+  'lp-marquee relative flex overflow-hidden py-1 ' +
+  '[mask-image:linear-gradient(to_right,transparent,#000_9%,#000_91%,transparent)]';
+/** one of the two identical tracks; the pair is what makes the loop seamless */
+export const marqueeTrack = 'lp-marquee-track flex shrink-0 items-center gap-14 pr-14';
+export const marqueeItem =
+  'text-[17px] font-semibold whitespace-nowrap tracking-[-0.02em] text-mut/80';
+
+export const quotes = 'mt-12 grid grid-cols-3 gap-5 max-[1000px]:grid-cols-1';
+export const quote = cx(
+  'lp-enter flex flex-col rounded-2xl border border-line bg-card p-7',
+  'transition-[border-color,box-shadow] duration-200 hover:shadow-contact hover:border-mut/40',
+);
+export const quoteBody = 'm-0 text-[15.5px] leading-[1.6] text-ink [&_b]:font-semibold [&_b]:text-accent-text';
+export const quoteWho =
+  'mt-auto flex items-center gap-3 border-t border-line-soft pt-5 ' +
+  '[&_b]:block [&_b]:text-[13.5px] [&_b]:font-semibold [&_b]:text-ink ' +
+  '[&_span]:block [&_span]:text-[12.5px] [&_span]:text-mut';
+export const quoteMark =
+  'grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft font-mono text-[13px] font-semibold text-accent-text';
 
 /* ---- questions ---- */
 

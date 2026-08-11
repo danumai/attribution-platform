@@ -88,6 +88,26 @@
   @keyframes lp-flip-a { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
   @keyframes lp-flip-b { 0%, 45% { opacity: 0; } 46%, 100% { opacity: 1; } }
 
+  /* --- the sector rail ---
+     Two identical tracks laid end to end; translating both by exactly one track width
+     puts the second where the first started, so the loop has no seam. The trailing gap
+     lives in the track's own padding rather than on the flex parent — a parent `gap`
+     would sit outside the translated distance and show up as a jump every cycle.
+
+     Infinite, so it is gated on `[data-run]` (Proof.tsx sets it from an
+     IntersectionObserver) rather than burning frames while off screen. `linear` because
+     the reader's eye tracks it continuously: any easing reads as the rail stalling. */
+  .lp-marquee[data-run] .lp-marquee-track {
+    animation: lp-marquee 42s linear infinite;
+  }
+  @keyframes lp-marquee { to { transform: translateX(-100%); } }
+
+  /* Pause under the cursor so a name can actually be read. Gated on a real pointer —
+     on touch this would latch paused after the tap that scrolled past it. */
+  @media (hover: hover) and (pointer: fine) {
+    .lp-marquee:hover .lp-marquee-track { animation-play-state: paused; }
+  }
+
   /* the ambient wash drifts while the hero is on screen */
   .lp-hero-glow[data-run] {
     animation: lp-glow-drift 22s ease-in-out infinite alternate;
@@ -235,6 +255,36 @@
     @keyframes lp-count { from { --n: 0; } }
     .lp .lp-class-guest { --fig: var(--color-warn-lit); }
     .lp .lp-class-verified { --fig: var(--color-ok); }
+
+    /* the scale band deals out left to right, same stagger idiom as the coupon strip */
+    .lp .lp-metric {
+      animation: lp-enter-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 5% entry 55%;
+    }
+    .lp .lp-metric:nth-child(2) { animation-range: entry 9% entry 59%; }
+    .lp .lp-metric:nth-child(3) { animation-range: entry 13% entry 63%; }
+    .lp .lp-metric:nth-child(4) { animation-range: entry 17% entry 67%; }
+
+    /* `--fig` is what the counter's ::after paints itself with, and it is inherited —
+       so the default belongs on this container, not on `.lp-num`. Declaring it there
+       would sit closer than the fare cards' own `--fig` and silently repaint their two
+       figures ink. */
+    .lp .lp-metrics { --fig: var(--color-ink); }
+
+    /* the comparison lands row by row: seven rows at once is a wall, seven rows on a
+       stagger is seven comparisons */
+    .lp-compare .lp-compare-row {
+      animation: lp-enter-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 2% entry 42%;
+    }
+    .lp-compare .lp-compare-row:nth-child(3) { animation-range: entry 4% entry 44%; }
+    .lp-compare .lp-compare-row:nth-child(4) { animation-range: entry 6% entry 46%; }
+    .lp-compare .lp-compare-row:nth-child(5) { animation-range: entry 8% entry 48%; }
+    .lp-compare .lp-compare-row:nth-child(6) { animation-range: entry 10% entry 50%; }
+    .lp-compare .lp-compare-row:nth-child(7) { animation-range: entry 12% entry 52%; }
+    .lp-compare .lp-compare-row:nth-child(8) { animation-range: entry 14% entry 54%; }
 
     /* the questions land one after another, same stagger idiom as the coupon strip */
     .lp-faq .lp-faq-item {
