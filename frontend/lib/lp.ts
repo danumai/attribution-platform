@@ -160,7 +160,7 @@ export const sectionHead = 'lp-enter mb-10 max-w-[62ch]';
 
 /** a small labelled rule leading into the heading — structure, not decoration */
 export const eyebrow =
-  "mb-4 flex items-center gap-2.5 text-[12.5px] font-semibold tracking-[0.01em] text-accent-text " +
+  "lp-eyebrow mb-4 flex items-center gap-2.5 text-[12.5px] font-semibold tracking-[0.01em] text-accent-text " +
   "before:h-px before:w-7 before:bg-accent before:content-['']";
 
 export const h2 = 'm-0 block text-display text-balance text-ink';
@@ -195,6 +195,10 @@ export const journeyTrigger = 'mt-5 [&>span]:text-[11px]';
  */
 export const modalDialog =
   'm-auto w-[min(720px,calc(100vw-48px))] bg-transparent p-0 text-ink ' +
+  /* The same entrance the console's dialogs use — a dialog that appears with no motion
+     reads as a page swap rather than something opening on top of what you were reading.
+     `open:` is what scopes it to the shown state; the browser owns everything else. */
+  'open:animate-modal-in backdrop:animate-fade ' +
   'backdrop:bg-[color-mix(in_srgb,var(--color-ink)_45%,transparent)]';
 export const modal = 'relative w-full px-7 pt-8.5 pb-7';
 export const modalClose =
@@ -249,7 +253,13 @@ export const fareAmount =
   '[&_small]:ml-2 [&_small]:font-sans [&_small]:text-[13px] [&_small]:font-medium [&_small]:tracking-normal [&_small]:text-mut';
 
 export const fareMeter =
-  'lp-meter mt-4 mb-5 h-1.5 overflow-hidden rounded-full bg-sunk [&_i]:block [&_i]:h-full [&_i]:origin-left [&_i]:rounded-full';
+  'lp-meter mt-4 mb-5 flex h-1.5 overflow-hidden rounded-full bg-sunk [&_i]:h-full [&_i]:shrink-0 [&_i]:origin-left [&_i]:rounded-full';
+
+/** The 40 coins the guest rate holds back. Hatched rather than filled, and drawn after the
+ *  paid fifth (see landing.css) — "held, not lost" is the section's argument, and this is the
+ *  only place on the page it is shown rather than asserted. */
+export const meterHeld =
+  'lp-meter-held w-4/5 bg-[repeating-linear-gradient(-45deg,var(--color-warn-line)_0_3px,transparent_3px_6px)]';
 
 export const fareBody = 'text-[15px] leading-[1.62] text-ink-soft [&+p]:mt-3';
 
@@ -360,7 +370,9 @@ export const quoteBody = 'm-0 text-[15.5px] leading-[1.6] text-ink [&_b]:font-se
 export const quoteWho =
   'mt-auto flex items-center gap-3 border-t border-line-soft pt-5 ' +
   '[&_b]:block [&_b]:text-[13.5px] [&_b]:font-semibold [&_b]:text-ink ' +
-  '[&_span]:block [&_span]:text-[12.5px] [&_span]:text-mut';
+  /* scoped to the name/org span — an unscoped `[&_span]` also hit `.quoteMark`, whose
+     `display:grid` it outranked, so the number fell out of the circle's centre */
+  '[&>span>span]:block [&>span>span]:text-[12.5px] [&>span>span]:text-mut';
 export const quoteMark =
   'grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft font-mono text-[13px] font-semibold text-accent-text';
 

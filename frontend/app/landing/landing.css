@@ -88,6 +88,28 @@
   @keyframes lp-flip-a { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
   @keyframes lp-flip-b { 0%, 45% { opacity: 0; } 46%, 100% { opacity: 1; } }
 
+  /* --- the posting board ---
+     A row does not appear in a slot that was already there; it opens one, and the rows
+     below are pushed down. That push is the whole difference between a feed that is
+     posting and a screenshot whose top line keeps changing.
+
+     `height` rather than a transform because there is no transform that opens space, and
+     `interpolate-size` is what makes the `auto` end value interpolable — the same
+     mechanism the questions at the bottom of this file already rely on. Where it is
+     unsupported the row simply fades in at full height, which is the pre-existing
+     behaviour plus a fade. `overflow: hidden` keeps the content from spilling while the
+     row is shorter than its text; the fade is held back to the second half so the space
+     opens before anything is legible in it. */
+  .lp .lp-board-post {
+    interpolate-size: allow-keywords;
+    overflow: hidden;
+    animation: lp-post-in 0.44s var(--ease-out) both;
+  }
+  @keyframes lp-post-in {
+    from { height: 0; padding-block: 0; opacity: 0; }
+    52% { opacity: 0; }
+  }
+
   /* --- the sector rail ---
      Two identical tracks laid end to end; translating both by exactly one track width
      puts the second where the first started, so the loop has no seam. The trailing gap
@@ -234,6 +256,12 @@
     }
     @keyframes lp-fill { from { transform: scaleX(0); } }
 
+    /* The guest meter has two segments, and the order they draw in IS the argument: the
+       paid fifth first, then the hatched remainder that is held rather than spent. Drawing
+       them together would read as one bar reaching 50 coins, which is the opposite of what
+       the card says. Specificity has to beat `.lp .lp-meter i` above, hence the element. */
+    .lp .lp-meter i.lp-meter-held { animation-range: entry 44% entry 88%; }
+
     /* and their figures count up to meet the meters */
     @property --n {
       syntax: "<integer>";
@@ -311,6 +339,23 @@
     @keyframes lp-enter-rise {
       from { opacity: 0; transform: translateY(18px); }
     }
+
+    /* The eyebrow's leading rule is the one ornament that repeats at every section, so it
+       is the cheapest place on the page to spend motion: it is struck out from the label
+       rather than being there already. `scaleX` from a left origin, so the label beside it
+       does not reflow.
+
+       `cover`, not `entry`: an `entry` range is measured against the element's own height,
+       and this element is one pixel tall — the whole range would elapse in a single pixel
+       of scroll and the rule would simply be drawn. `cover` is measured against the
+       viewport, so a thin element still gets a real span to draw over. */
+    .lp .lp-eyebrow::before {
+      transform-origin: left;
+      animation: lp-rule-draw linear both;
+      animation-timeline: view();
+      animation-range: cover 6% cover 26%;
+    }
+    @keyframes lp-rule-draw { from { transform: scaleX(0); } }
   }
 }
 

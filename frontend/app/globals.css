@@ -161,7 +161,7 @@
   --animate-toast-out: toast-out .18s var(--ease-press) forwards;
   --animate-modal-in: modal-in .22s var(--ease-out) both;
   --animate-fade: fade .18s var(--ease-press) both;
-  --animate-post: lp-post .45s var(--ease-out) both;
+  /* the posting board's running total re-inking when it changes */
   --animate-ink: lp-ink .5s var(--ease-out) both;
 
   @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
@@ -171,7 +171,6 @@
   @keyframes toast-out { to { opacity: 0; transform: translateY(4px); } }
   @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
   @keyframes fade { from { opacity: 0; } }
-  @keyframes lp-post { from { opacity: 0; transform: translateY(-10px); } }
   @keyframes lp-ink { from { opacity: .2; } }
 }
 

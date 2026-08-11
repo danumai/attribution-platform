@@ -44,6 +44,8 @@ export default function ActivityBoard() {
     return () => clearInterval(id);
   }, []);
 
+  const total = events.reduce((n, e) => n + e.coins, 0);
+
   return (
     <div className={lp.board}>
       <div className={lp.boardHead}>
@@ -57,7 +59,11 @@ export default function ActivityBoard() {
       </p>
       <ul className={lp.boardRows} aria-hidden="true">
         {events.map((e) => (
-          <li className={lp.boardRow} key={e.id}>
+          /* Only rows that actually posted animate. The first VISIBLE are the board's
+             initial state and arrive with the board itself; ids beyond that are the ones
+             the interval prepended, and each is a fresh element, so the keyframe runs
+             once on mount rather than replaying down the list. */
+          <li className={lp.cx(lp.boardRow, e.id >= VISIBLE && 'lp-board-post')} key={e.id}>
             <span className={lp.tier(e.tier)}>{e.tier}</span>
             <span className={lp.boardMeta}>
               <b>{e.campaign}</b>
@@ -71,7 +77,12 @@ export default function ActivityBoard() {
       </ul>
       <div className={lp.boardFoot}>
         <span>Debited from campaign budgets · this view</span>
-        <b>{events.reduce((n, e) => n + e.coins, 0)} coins</b>
+        {/* Keyed on the total so a changed figure is a new element and re-inks. A running
+            total that silently swaps digits is the one number on the board a reader would
+            otherwise never notice moving. */}
+        <b className="animate-ink" key={total}>
+          {total} coins
+        </b>
       </div>
     </div>
   );

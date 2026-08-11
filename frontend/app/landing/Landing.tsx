@@ -242,6 +242,8 @@ export default function Landing() {
               </p>
               <div className={lp.fareMeter}>
                 <i className="w-1/5 bg-warn-lit" />
+                {/* the 40 held coins, hatched — still on the meter, just not spent */}
+                <i className={lp.meterHeld} />
               </div>
               <p className={lp.fareBody}>
                 Somebody scanned and signed up, but the publisher has not vouched for who they are.
