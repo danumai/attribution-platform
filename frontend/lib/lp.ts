@@ -94,11 +94,38 @@ export const ctaNote = 'lp-cta-note mt-4 text-[13px] text-mut';
 
 /* ---- the proof panel: one code, and what happens to it ---- */
 
-export const stub = cx(
-  'lp-stub flex flex-col gap-5 p-7',
-  passShell,
-  'max-[1000px]:mx-auto max-[1000px]:w-full max-[1000px]:max-w-[420px]',
+/** The pass is a printed card, so it is given a card's geometry: a perspective parent it
+ *  tilts inside, and room around it for the scanner to be dragged. `data-run` and
+ *  `data-scanned` both live here rather than on the card, because the phone is a sibling of
+ *  the card and has to see the scanned state too. */
+export const stubStage =
+  'lp-stage relative [perspective:1400px] ' +
+  'max-[1000px]:mx-auto max-[1000px]:w-full max-[1000px]:max-w-[420px]';
+
+export const stub = cx('lp-stub flex flex-col gap-5 p-7', passShell);
+
+/* ---- the scanner ----
+   The one control on this page that operates the product instead of describing it: drag it
+   onto the code and a scan actually resolves — the plate sweeps, the status flips, and a
+   redemption posts to the board below. It is a <button>, so the same thing happens on Enter
+   for anyone who is not dragging anything. */
+
+export const phone = cx(
+  'lp-phone absolute -top-7 -right-4 z-2 w-[104px] cursor-grab touch-none select-none',
+  'rounded-[20px] border border-line bg-card p-1.5 shadow-pass',
+  'active:cursor-grabbing max-[480px]:w-[88px]',
 );
+
+/** two faces on one plate — the camera, and where the scan actually sends you */
+export const phoneScreen =
+  'lp-phone-screen relative block aspect-9/17 overflow-hidden rounded-[14px] border border-line-soft bg-sunk';
+export const phoneFace =
+  'lp-phone-face absolute inset-0 grid content-center justify-items-center gap-1 px-1.5 text-center';
+export const phoneFaceBack = cx(phoneFace, 'lp-phone-face-back bg-card');
+export const phoneCap = 'text-[8.5px] leading-[1.25] font-semibold tracking-[0.04em] uppercase text-mut';
+export const phoneHint =
+  'lp-phone-hint pointer-events-none absolute top-full left-1/2 mt-2 -translate-x-1/2 ' +
+  'whitespace-nowrap text-[10.5px] font-medium text-mut';
 
 export const codePlate =
   'lp-code relative overflow-hidden rounded-xl border border-line bg-sunk p-5 ' +
@@ -264,6 +291,51 @@ export const meterHeld =
 export const fareBody = 'text-[15px] leading-[1.62] text-ink-soft [&+p]:mt-3';
 
 export const fareFoot = 'mt-auto border-t border-line-soft pt-5 text-[12.5px] text-mut';
+
+/* ---- the settlement ----
+   The two fare cards state what a guest rate is; this shows it happening. Five coins are one
+   50-coin signup: the first leaves at the guest rate straight away, the other four hang back
+   hatched until the publisher verifies, then follow. Scroll-driven, so the reader advances
+   the settlement themselves. */
+
+export const settle =
+  'lp-settle mt-5 grid grid-cols-[minmax(0,150px)_minmax(0,1fr)_minmax(0,150px)] items-center gap-6 ' +
+  'rounded-2xl border border-line bg-card px-8 py-7 shadow-contact ' +
+  'max-[720px]:grid-cols-2 max-[720px]:gap-x-5 max-[720px]:gap-y-4 max-[720px]:px-6';
+
+export const settleEnd =
+  'grid gap-1.5 [&_b]:font-mono [&_b]:text-[22px] [&_b]:font-semibold [&_b]:tracking-[-0.03em] [&_b]:text-ink [&_b]:tabular-nums';
+/* Below 720px the three cells become two columns with the track under them, and that needs
+   placing explicitly: a `col-span-full` track cannot fit beside the left figure, so sparse
+   auto-placement pushes it to its own row and then strands the right figure on a third. */
+export const settleEndRight = cx(
+  settleEnd,
+  'text-right max-[720px]:col-start-2 max-[720px]:row-start-1 max-[720px]:text-left',
+);
+
+/** the lane the coins cross. The flip's perspective is on the disc's own transform, not
+ *  here — see landing.css for why it cannot live on this element. */
+export const settleTrack =
+  'lp-settle-track relative h-5 ' +
+  'before:absolute before:inset-x-0 before:top-1/2 before:h-px before:-translate-y-px before:bg-line ' +
+  "before:content-[''] max-[720px]:col-span-full max-[720px]:row-start-2 max-[720px]:my-1";
+
+/** one coin = one full-width lane that slides; the disc inside it is what spins */
+export const settleCoin = 'lp-settle-coin absolute inset-y-0 left-0 w-full';
+/* The five discs are fanned 19px apart at rest and stay fanned across the track, which is
+   why the crossing keyframe can be a single constant rather than one per coin. The fan
+   offset itself is in landing.css — it reads `--i`, and an arbitrary utility carrying a
+   calc() over a custom property is worse to read than the one line of CSS it replaces. */
+export const settleDisc = (paid: boolean) =>
+  cx(
+    'lp-settle-disc absolute top-1/2 block size-4 -translate-y-2 rounded-full border',
+    paid
+      ? 'border-warn-line bg-warn-lit'
+      : 'border-warn-line bg-[repeating-linear-gradient(-45deg,var(--color-warn-line)_0_3px,var(--color-card)_3px_6px)]',
+  );
+
+export const settleNote =
+  'col-span-full mt-1 text-center text-[12.5px] text-mut max-[720px]:text-left';
 
 /* ---- the budget planner ---- */
 

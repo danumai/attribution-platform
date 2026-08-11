@@ -61,17 +61,22 @@
   .lp .lp-stub-fields .lp-field:nth-child(3) { animation-delay: 1.06s; }
   .lp .lp-stub-fields .lp-field:nth-child(4) { animation-delay: 1.16s; }
 
-  /* --- the recurring validation loop, only while the stub is on screen --- */
-  .lp-stub[data-run] .lp-scan {
+  /* --- the recurring validation loop ---
+     On while the pass is on screen AND the reader has not taken the controls: once someone
+     has dragged the scanner onto the code themselves, ScanStub drops `data-run` for good.
+     A demo that keeps playing over you after you have started operating the thing is noise.
+     The attribute sits on the stage rather than the card because the phone is the card's
+     sibling and has to see the same state. */
+  .lp-stage[data-run] .lp-scan {
     animation: lp-sweep 5.2s cubic-bezier(0.45, 0, 0.2, 1) 1.6s infinite;
   }
-  .lp-stub[data-run] .lp-code-ring {
+  .lp-stage[data-run] .lp-code-ring {
     animation: lp-ring 5.2s linear 1.6s infinite;
   }
-  .lp-stub[data-run] .lp-status-idle {
+  .lp-stage[data-run] .lp-status-idle {
     animation: lp-flip-a 5.2s steps(1, end) 1.6s infinite;
   }
-  .lp-stub[data-run] .lp-status-done {
+  .lp-stage[data-run] .lp-status-done {
     animation: lp-flip-b 5.2s steps(1, end) 1.6s infinite;
   }
   @keyframes lp-sweep {
@@ -108,6 +113,40 @@
   @keyframes lp-post-in {
     from { height: 0; padding-block: 0; opacity: 0; }
     52% { opacity: 0; }
+  }
+
+  /* --- the settlement ---
+     One 50-coin signup as five discs. The first crosses at 0.55s — the guest rate, paid the
+     moment the signup is confirmed. The other four sit hatched until 2.65s, then follow on a
+     150ms stagger. That 2.1s of nothing happening is the grace window, and it is the only
+     thing on this page whose content IS a duration; see Settlement.tsx for why it is on a
+     timer rather than on `view()` like the rest of the page.
+
+     Both the crossing and the spin run on the same duration and the same curve, so the coin
+     slows its rotation as it lands rather than spinning at a constant rate into a stop. Two
+     turns, not three: it arrives face-on, and 2.4 revolutions a second reads as a coin
+     turning where a faster spin reads as a strobing line.
+
+     `perspective()` as a transform function rather than the `perspective` property, because
+     the property only applies to an element's DIRECT children — the disc is a grandchild of
+     the track, so a perspective set there never reaches it and the flip renders as a flat
+     horizontal squash that collapses to nothing twice a turn. As a transform function it
+     applies to the disc itself, with the vanishing point on its own centre. */
+  .lp-settle[data-run] .lp-settle-coin {
+    animation: lp-coin-cross 0.85s var(--ease-out) var(--d) both;
+  }
+  .lp-settle[data-run] .lp-settle-disc {
+    animation: lp-coin-spin 0.85s var(--ease-out) var(--d) both;
+  }
+
+  /* The lane is the full width of the track, so `100%` here is the crossing distance. The
+     five discs are fanned 19px apart and stay fanned, so the offset each gives up at the
+     start (i × 19) is exactly the offset it needs at the end — which is why this is one
+     constant for all five rather than a keyframe each. 92px = the 16px disc + 4 × 19px. */
+  @keyframes lp-coin-cross { to { transform: translateX(calc(100% - 92px)); } }
+  @keyframes lp-coin-spin {
+    from { transform: perspective(320px) rotateY(0deg); }
+    to { transform: perspective(320px) rotateY(720deg); }
   }
 
   /* --- the sector rail ---
@@ -370,6 +409,96 @@
 
    The structural motion below and above this comment stays: it earns its place by
    showing how the product works rather than by making surfaces glisten. */
+
+/* The coins' resting fan. Static geometry, so it sits outside every motion gate: with no
+   `view()` support and no animation at all, five coins still read as five coins on a track
+   rather than as one disc with four hidden behind it. */
+.lp .lp-settle-disc { left: calc(var(--i) * 19px); }
+
+/* --- the pass, and the thing that scans it ---
+   Deliberately outside the reduced-motion gate. The two phone faces have to sit back to back
+   whether or not anything moves, or they stack and both render at once; and a drag has to
+   keep working for someone who has asked for less motion, because it is a control, not an
+   effect. The global opt-out in globals.css neuters the durations below on its own, which
+   leaves the interaction intact and the animation gone — which is the point of the setting.
+
+   The tilt itself is not here: ScanStub writes a transform straight onto the card from its
+   pointermove handler, and gates it on a fine pointer in JS. A custom property would have
+   been tidier to read, but every field, code cell and status line inside the card inherits
+   it and gets a style recalc on each frame of the move. */
+
+.lp .lp-stub {
+  /* 140ms is short enough that the card tracks the cursor instead of trailing it, long
+     enough to smooth the jitter between two frames. A longer curve here reads as lag. */
+  transition: transform 0.14s var(--ease-out);
+}
+
+/* the plate takes the reader's ring while the scanner is over it, before the drop — the
+   affordance that says this drag has a target */
+.lp .lp-code[data-armed] { border-color: var(--color-accent-text); }
+.lp .lp-code[data-armed] .lp-code-ring { opacity: 1; }
+
+.lp .lp-phone {
+  perspective: 600px;
+  /* Springs home from wherever it was dropped. A drag release is the one place bounce
+     belongs: it is the overshoot a real object has when you let go of it. */
+  transition: transform 0.52s cubic-bezier(0.34, 1.4, 0.64, 1), box-shadow 0.24s var(--ease-out);
+}
+
+/* Held: the frame loop in ScanStub owns `transform` outright, so it must not be transitioned
+   here — two curves on one property is what makes a drag feel like it is swimming. The
+   shadow is still transitioned, and it is doing real work: a lifted object throws a longer,
+   softer shadow, and that is most of what tells you it has left the surface. */
+.lp .lp-phone[data-held] {
+  transition: box-shadow 0.24s var(--ease-out);
+  box-shadow: 0 30px 54px -20px rgb(17 17 17 / 0.38);
+}
+
+/* Dropped on the code: it settles rather than springs. Bounce is right for a thing let go of
+   in mid-air and wrong for a thing being placed against something. */
+.lp .lp-phone[data-pinned] {
+  transition: transform 0.3s var(--ease-out), box-shadow 0.24s var(--ease-out);
+  box-shadow: 0 18px 34px -14px rgb(17 17 17 / 0.3);
+}
+
+.lp .lp-phone-screen {
+  transform-style: preserve-3d;
+  transition: transform 0.55s var(--ease-out);
+}
+.lp .lp-phone-face { backface-visibility: hidden; }
+.lp .lp-phone-face-back { transform: rotateY(180deg); }
+
+/* --- a scan the reader performed ---
+   One shot, not the loop: the sweep runs down the code once and the ring stays, because
+   this code is now actually redeemed rather than being demonstrated. The status and the
+   phone are held back until the sweep has cleared the plate — the result should land after
+   the read, the way it does on a real scanner. */
+
+.lp-stage[data-scanned] .lp-scan {
+  animation: lp-sweep-once 0.95s cubic-bezier(0.45, 0, 0.2, 1) both;
+}
+.lp-stage[data-scanned] .lp-code-ring {
+  animation: lp-ring-once 0.95s linear both;
+}
+@keyframes lp-sweep-once {
+  0% { transform: translateY(-100%); opacity: 0; }
+  12% { opacity: 1; }
+  62% { transform: translateY(227%); opacity: 1; }
+  76%, 100% { transform: translateY(227%); opacity: 0; }
+}
+@keyframes lp-ring-once {
+  0%, 58% { opacity: 0; }
+  66%, 100% { opacity: 1; }
+}
+
+.lp .lp-status-idle,
+.lp .lp-status-done { transition: opacity 0.2s var(--ease-out) 0.6s; }
+.lp-stage[data-scanned] .lp-status-idle { opacity: 0; }
+.lp-stage[data-scanned] .lp-status-done { opacity: 1; }
+.lp-stage[data-scanned] .lp-phone-screen {
+  transform: rotateY(180deg);
+  transition-delay: 0.52s;
+}
 
 /* --- the budget planner's sliders ---
    Native <input type="range">; only the track and thumb need drawing, and both are

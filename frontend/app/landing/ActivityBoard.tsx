@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { SCAN_EVENT } from './ScanStub';
 import * as lp from '@/lib/lp';
 
 type Tier = 'guest' | 'verified';
@@ -25,6 +26,17 @@ const POOL: Omit<Event, 'id'>[] = [
   { promoter: 'Northline Airways', campaign: 'Boarding Pass Bonus', publisher: 'BanglaReels', ref: 'reader_9903', tier: 'verified', coins: 40 },
 ];
 
+/* The row a reader's own scan posts. Guest tier at the guest rate, because that is exactly
+   what a fresh scan settles at before anyone has verified who they are. */
+const OWN_SCAN: Omit<Event, 'id'> = {
+  promoter: 'Your campaign',
+  campaign: 'Your first printed code',
+  publisher: 'BanglaReels',
+  ref: 'reader_0001',
+  tier: 'guest',
+  coins: 10,
+};
+
 const VISIBLE = 5;
 const INTERVAL_MS = 2800;
 
@@ -32,6 +44,17 @@ export default function ActivityBoard() {
   const [events, setEvents] = useState<Event[]>(() =>
     POOL.slice(0, VISIBLE).map((e, i) => ({ ...e, id: i })),
   );
+
+  /* The scan the reader just performed on the pass above. This is the payoff for dragging
+     the phone onto the code — the row that posts is theirs, by name. Unlike the ambient
+     ticker it runs under reduced motion too: it is a result the reader asked for, not
+     decoration. */
+  useEffect(() => {
+    const post = () =>
+      setEvents((prev) => [{ ...OWN_SCAN, id: Date.now() }, ...prev].slice(0, VISIBLE));
+    addEventListener(SCAN_EVENT, post);
+    return () => removeEventListener(SCAN_EVENT, post);
+  }, []);
 
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;

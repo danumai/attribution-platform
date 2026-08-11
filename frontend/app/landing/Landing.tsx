@@ -4,6 +4,7 @@ import ScanStub from './ScanStub';
 import JourneyFlow from './JourneyFlow';
 import JourneyTrigger from './JourneyTrigger';
 import BudgetPlanner from './BudgetPlanner';
+import Settlement from './Settlement';
 import Metrics from './Metrics';
 import Compare from './Compare';
 import Proof from './Proof';
@@ -277,6 +278,10 @@ export default function Landing() {
               </p>
             </article>
           </div>
+
+          {/* The cards state the split; this is the split happening. The held 40 coins are
+              a duration, and a duration is the one thing the two cards cannot show. */}
+          <Settlement />
 
           {/* The two rates argue in the abstract. This is the same argument with the reader's
               own numbers in it — the only place on the page they can steer anything. */}
