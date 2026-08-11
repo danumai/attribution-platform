@@ -93,6 +93,57 @@
   @keyframes lp-flip-a { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
   @keyframes lp-flip-b { 0%, 45% { opacity: 0; } 46%, 100% { opacity: 1; } }
 
+  /* The camera is switched on, and stays on: a viewfinder with nothing moving in it is a
+     picture of a phone. The line is the element's own top border, so the whole sweep is one
+     transform on one compositor layer. It speeds up when the code is under it. */
+  .lp .lp-phone-scan { animation: lp-viewfinder 2.8s var(--ease-drift) infinite; }
+  .lp .lp-phone[data-over] .lp-phone-scan { animation-duration: 0.8s; animation-timing-function: linear; }
+  @keyframes lp-viewfinder {
+    0% { transform: translateY(0); opacity: 0; }
+    14%, 86% { opacity: 0.8; }
+    100% { transform: translateY(100%); opacity: 0; }
+  }
+
+  /* --- the reward landing on the screen ---
+     The flip is held back 0.52s and takes 0.55s, so the back face is not actually facing the
+     reader until ~0.9s. Everything here starts after that: a check that pops with a ring
+     going off behind it, then the caption, the amount and the button arriving in reading
+     order. Animating any of it earlier would play the whole reveal into the back of a phone.
+
+     `both` on a keyframe that only defines `from` means these sit at their natural, resolved
+     state whenever the animation is not running — which is what reduced motion, and the
+     whole block this lives in, falls back to. */
+  .lp-stage[data-scanned] .lp-phone-face-back > * {
+    animation: lp-reward 0.46s cubic-bezier(0.34, 1.5, 0.64, 1) both;
+  }
+  .lp-stage[data-scanned] .lp-phone-face-back > :nth-child(2) { animation-delay: 0.92s; }
+  .lp-stage[data-scanned] .lp-phone-face-back > :nth-child(3) { animation-delay: 1.02s; }
+  .lp-stage[data-scanned] .lp-phone-face-back > :nth-child(4) { animation-delay: 1.1s; }
+  .lp-stage[data-scanned] .lp-phone-face-back > :nth-child(5) { animation-delay: 1.2s; }
+  @keyframes lp-reward {
+    from { opacity: 0; transform: translateY(5px) scale(0.8); }
+  }
+
+  /* The ring is the sound the check makes. Last rule wins over the stagger above, which is
+     why it sits here rather than with the others. */
+  .lp-stage[data-scanned] .lp-phone-burst {
+    animation: lp-burst 0.75s var(--ease-out) 0.92s both;
+  }
+  @keyframes lp-burst {
+    0% { opacity: 0.9; transform: scale(0.35); }
+    100% { opacity: 0; transform: scale(2.4); }
+  }
+
+  /* And it breathes, until someone picks it up. Gated on the same `data-run` as the rest of
+     the ambient loop, which ScanStub drops for good on the first grab — an idle animation is
+     higher in the cascade than the inline transform the drag writes, so it has to be gone
+     before the drag starts, not merely paused. */
+  .lp-stage[data-run] .lp-phone-body { animation: lp-phone-idle 7s ease-in-out infinite; }
+  @keyframes lp-phone-idle {
+    0%, 100% { transform: translateZ(4px) rotateY(-11deg) rotateX(4deg); }
+    50% { transform: translateZ(14px) rotateY(-2deg) rotateX(-1deg); }
+  }
+
   /* --- the posting board ---
      A row does not appear in a slot that was already there; it opens one, and the rows
      below are pushed down. That push is the whole difference between a feed that is
@@ -116,37 +167,16 @@
   }
 
   /* --- the settlement ---
-     One 50-coin signup as five discs. The first crosses at 0.55s — the guest rate, paid the
-     moment the signup is confirmed. The other four sit hatched until 2.65s, then follow on a
-     150ms stagger. That 2.1s of nothing happening is the grace window, and it is the only
-     thing on this page whose content IS a duration; see Settlement.tsx for why it is on a
-     timer rather than on `view()` like the rest of the page.
+     The ledger figure ticks over the instant a payment lands on it. Keyed on its own value
+     in Settlement.tsx, so React remounts it and the animation replays — the movement is
+     there to make sure the reader's eye is on the number that just changed, since that
+     change IS the point of the whole panel.
 
-     Both the crossing and the spin run on the same duration and the same curve, so the coin
-     slows its rotation as it lands rather than spinning at a constant rate into a stop. Two
-     turns, not three: it arrives face-on, and 2.4 revolutions a second reads as a coin
-     turning where a faster spin reads as a strobing line.
-
-     `perspective()` as a transform function rather than the `perspective` property, because
-     the property only applies to an element's DIRECT children — the disc is a grandchild of
-     the track, so a perspective set there never reaches it and the flip renders as a flat
-     horizontal squash that collapses to nothing twice a turn. As a transform function it
-     applies to the disc itself, with the vanishing point on its own centre. */
-  .lp-settle[data-run] .lp-settle-coin {
-    animation: lp-coin-cross 0.85s var(--ease-out) var(--d) both;
-  }
-  .lp-settle[data-run] .lp-settle-disc {
-    animation: lp-coin-spin 0.85s var(--ease-out) var(--d) both;
-  }
-
-  /* The lane is the full width of the track, so `100%` here is the crossing distance. The
-     five discs are fanned 19px apart and stay fanned, so the offset each gives up at the
-     start (i × 19) is exactly the offset it needs at the end — which is why this is one
-     constant for all five rather than a keyframe each. 92px = the 16px disc + 4 × 19px. */
-  @keyframes lp-coin-cross { to { transform: translateX(calc(100% - 92px)); } }
-  @keyframes lp-coin-spin {
-    from { transform: perspective(320px) rotateY(0deg); }
-    to { transform: perspective(320px) rotateY(720deg); }
+     The crossings and the grace bar are transitions rather than keyframes and live further
+     down this file: they are driven by React phase state, not by a timeline. */
+  .lp .lp-settle-fig { animation: lp-fig-tick 0.4s var(--ease-out) both; }
+  @keyframes lp-fig-tick {
+    from { opacity: 0; transform: translateY(-5px); }
   }
 
   /* --- the sector rail ---
@@ -438,28 +468,50 @@
 .lp .lp-code[data-armed] { border-color: var(--color-accent-text); }
 .lp .lp-code[data-armed] .lp-code-ring { opacity: 1; }
 
-.lp .lp-phone {
-  perspective: 600px;
-  /* Springs home from wherever it was dropped. A drag release is the one place bounce
-     belongs: it is the overshoot a real object has when you let go of it. */
+/* The scanner is split in two: the button positions, the chassis inside it tips. That is
+   what buys the 3D — perspective on the button, preserve-3d on the chassis, the screen
+   flipping inside that — and it keeps the button's box unrotated, so the drop test stays a
+   plain rect comparison. 700px over a 116px object is a short lens: enough foreshortening
+   that a tip reads as a tip, not enough to caricature it. */
+.lp .lp-phone { perspective: 700px; }
+
+.lp .lp-phone-body {
+  transform-style: preserve-3d;
+  /* Not square to the page. A phone left on a card sits at an angle, and the resting tilt is
+     also where the chassis returns to on a miss — the stylesheet holds the home pose so JS
+     only has to clear the inline transform. */
+  transform: rotateY(-8deg) rotateX(3deg);
+}
+
+/* Springs home from wherever it was dropped. A drag release is the one place bounce
+   belongs: it is the overshoot a real object has when you let go of it. */
+.lp .lp-phone,
+.lp .lp-phone-body {
   transition: transform 0.52s cubic-bezier(0.34, 1.4, 0.64, 1), box-shadow 0.24s var(--ease-out);
 }
 
-/* Held: the frame loop in ScanStub owns `transform` outright, so it must not be transitioned
-   here — two curves on one property is what makes a drag feel like it is swimming. The
-   shadow is still transitioned, and it is doing real work: a lifted object throws a longer,
-   softer shadow, and that is most of what tells you it has left the surface. */
+/* A hair proud of the glass, so tipping the chassis drifts the highlight across the screen
+   instead of carrying it rigidly along. That parallax is most of what sells the slab. */
+.lp .lp-phone-gloss { transform: translateZ(2px); }
+
+/* Held: the frame loop in ScanStub owns `transform` on both elements outright, so neither
+   may be transitioned here — two curves on one property is what makes a drag feel like it is
+   swimming. The shadow is still transitioned, and it is doing real work: a lifted object
+   throws a longer, softer shadow, and that is most of what tells you it has left the
+   surface. */
 .lp .lp-phone[data-held] {
   transition: box-shadow 0.24s var(--ease-out);
-  box-shadow: 0 30px 54px -20px rgb(17 17 17 / 0.38);
+  box-shadow: 0 34px 58px -22px rgb(17 17 17 / 0.5);
 }
+.lp .lp-phone[data-held] .lp-phone-body { transition: none; }
 
 /* Dropped on the code: it settles rather than springs. Bounce is right for a thing let go of
    in mid-air and wrong for a thing being placed against something. */
-.lp .lp-phone[data-pinned] {
+.lp .lp-phone[data-pinned],
+.lp .lp-phone[data-pinned] .lp-phone-body {
   transition: transform 0.3s var(--ease-out), box-shadow 0.24s var(--ease-out);
-  box-shadow: 0 18px 34px -14px rgb(17 17 17 / 0.3);
 }
+.lp .lp-phone[data-pinned] { box-shadow: 0 12px 24px -12px rgb(17 17 17 / 0.42); }
 
 .lp .lp-phone-screen {
   transform-style: preserve-3d;
@@ -467,6 +519,39 @@
 }
 .lp .lp-phone-face { backface-visibility: hidden; }
 .lp .lp-phone-face-back { transform: rotateY(180deg); }
+
+/* --- the viewfinder finding something ---
+   The reticle closes down onto the code the way a camera racks focus, the code resolves
+   inside it, and the sweep goes from an idle white line to a fast accent one. All four are
+   the same state — the phone is over the plate — read from the one attribute. */
+.lp .lp-phone-reticle,
+.lp .lp-phone-peek,
+.lp .lp-phone-cap { transition: opacity 0.22s var(--ease-out), color 0.22s var(--ease-out), transform 0.3s var(--ease-out); }
+/* The frame opens out and hands the viewfinder to the code itself, full width and crisp.
+   Both at once was a pink halo around a 40px thumbnail: at this size the brackets and the
+   code are competing for the same 50 pixels, and neither wins. */
+.lp .lp-phone[data-over] .lp-phone-reticle { color: var(--color-accent); opacity: 0; transform: scale(1.3); }
+.lp .lp-phone[data-over] .lp-phone-peek { opacity: 1; }
+.lp .lp-phone[data-over] .lp-phone-cap { color: var(--color-accent); }
+.lp .lp-phone[data-over] .lp-phone-scan { border-color: var(--color-accent); }
+
+/* --- the hint carries the state ---
+   The reader is watching the phone, not the status line down in the card, so the chip under
+   it is where "you can drop this now" and "that worked" have to be said. */
+.lp .lp-phone-hint {
+  transition: background-color 0.18s var(--ease-out), border-color 0.18s var(--ease-out),
+    color 0.18s var(--ease-out);
+}
+.lp .lp-phone[data-over] .lp-phone-hint {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-accent-on);
+}
+.lp-stage[data-scanned] .lp-phone-hint {
+  border-color: var(--color-ok-line);
+  background: var(--color-ok-soft);
+  color: var(--color-ok);
+}
 
 /* --- a scan the reader performed ---
    One shot, not the loop: the sweep runs down the code once and the ring stays, because
@@ -499,6 +584,46 @@
   transform: rotateY(180deg);
   transition-delay: 0.52s;
 }
+
+/* The empty state of the two bars that draw across this page — the reading progress in the
+   nav and the grace window below. It has to be `transform`, and it has to be here: the
+   `scale-x-0` utility these used to carry compiles to the `scale` property in Tailwind v4,
+   and `scale` composes WITH `transform` rather than being overridden by it, so an animation
+   setting `transform: scaleX(1)` was landing on `scale: 0 1` and multiplying out to nothing.
+   Both bars were permanently invisible. */
+.lp .lp-nav-progress { transform: scaleX(0); }
+
+/* --- the settlement's two payments ---
+   Driven by React phase state rather than a timeline, so these are transitions: each one
+   fires when Settlement.tsx flips the attribute, and the phase clock in that file is the
+   single place the timing is written down.
+
+   The lane is the full width of the rail and is what travels; the token rides at its left
+   edge, so `100% - 2.75rem` (the token's own width) is the crossing distance, one constant
+   for both payments. */
+.lp .lp-settle-lane { transition: transform 0.8s var(--ease-out); }
+.lp .lp-settle-lane[data-sent] { transform: translateX(calc(100% - 2.75rem)); }
+
+/* The grace window, drawn as the thing it is: a bar crossing the rail under the held
+   payment, at exactly the rate the wait is actually running. Linear, because a wait does not
+   ease — and any curve here would read as the release being imminent long before it is. */
+.lp .lp-settle-grace {
+  transform: scaleX(0);
+  transition: transform 1.95s linear, opacity 0.4s var(--ease-out);
+}
+.lp .lp-settle-grace[data-run] { transform: scaleX(1); }
+/* The window closed. Fading it out rather than winding it back: a bar that empties reads as
+   the wait restarting, which is the opposite of what just happened. */
+.lp .lp-settle-grace[data-done] { opacity: 0; }
+
+/* held → released is a colour change on both the token and its caption, so they turn over
+   together the moment verification lands */
+.lp .lp-settle-token,
+.lp .lp-settle-tag {
+  transition: background-color 0.3s var(--ease-out), border-color 0.3s var(--ease-out),
+    color 0.3s var(--ease-out);
+}
+.lp .lp-settle-tag[data-on] { color: var(--color-ok); }
 
 /* --- the budget planner's sliders ---
    Native <input type="range">; only the track and thumb need drawing, and both are

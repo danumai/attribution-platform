@@ -47,11 +47,22 @@ const RESET_MS = 4600;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** How high the chassis is carried, in px of translateZ: high while it is being flown
+ *  around, low once it is over the code and coming in to land. Under the button's 700px of
+ *  perspective these read as ~5% and ~1.5% of growth, which is the whole trick — the phone
+ *  gets bigger as it comes toward you and settles as it touches down. */
+const LIFT = 38;
+const LAND = 10;
+
+const rest = () => ({ x: 0, y: 0, tx: 0, ty: 0, rx: 0, ry: 0, rz: 0, z: 0 });
+
 export default function ScanStub() {
   const { ref: stageRef, inView } = useInView<HTMLDivElement>();
   const card = useRef<HTMLElement>(null);
   const phone = useRef<HTMLButtonElement>(null);
   const plate = useRef<HTMLDivElement>(null);
+
+  const chassis = useRef<HTMLSpanElement>(null);
 
   const [scanned, setScanned] = useState(false);
   const [held, setHeld] = useState(false);
@@ -60,10 +71,11 @@ export default function ScanStub() {
   /* the reader has driven it at least once, so the ambient loop steps aside */
   const [driven, setDriven] = useState(false);
 
-  /* x/y are what is currently applied; tx/ty are what the pointer is asking for; r and s are
-     the lean and the lift. Kept in a ref because they change every frame and none of them is
-     something React should be re-rendering over. */
-  const st = useRef({ x: 0, y: 0, tx: 0, ty: 0, r: 0, s: 1 });
+  /* x/y are what is currently applied; tx/ty are what the pointer is asking for; rx/ry/rz are
+     how the chassis is tipped and z is how far off the card it is being carried. Kept in a
+     ref because they change every frame and none of them is something React should be
+     re-rendering over. */
+  const st = useRef(rest());
   const grab = useRef({ x: 0, y: 0, moved: false });
   const overNow = useRef(false);
   const raf = useRef(0);
@@ -82,9 +94,9 @@ export default function ScanStub() {
     };
   }, []);
 
-  /** Where the phone would sit with no transform on it. Rotation and scale are both about
-   *  the element's own centre, so the centre of the measured box is unaffected by either and
-   *  subtracting the applied translation is enough. */
+  /** Where the phone would sit with no transform on it. The button is only ever translated —
+   *  the tipping all happens on the chassis inside it, and a child's transform does not touch
+   *  its parent's box — so subtracting the applied translation is enough. */
   const homeCentre = (el: HTMLElement) => {
     const c = el.getBoundingClientRect();
     return { x: c.left + c.width / 2 - st.current.x, y: c.top + c.height / 2 - st.current.y };
@@ -100,9 +112,10 @@ export default function ScanStub() {
          away from a card that is still showing `redeemed`, rather than both at once */
       window.setTimeout(() => {
         setPinned(false);
-        st.current = { x: 0, y: 0, tx: 0, ty: 0, r: 0, s: 1 };
+        st.current = rest();
         requestAnimationFrame(() => {
           if (phone.current) phone.current.style.transform = '';
+          if (chassis.current) chassis.current.style.transform = '';
         });
       }, UNPIN_MS),
       window.setTimeout(() => setScanned(false), RESET_MS),
@@ -129,8 +142,9 @@ export default function ScanStub() {
   const tick = () => {
     raf.current = requestAnimationFrame(tick);
     const el = phone.current;
+    const ch = chassis.current;
     const pl = plate.current;
-    if (!el || !pl) return;
+    if (!el || !ch || !pl) return;
     const s = st.current;
 
     const h = homeCentre(el);
@@ -145,12 +159,25 @@ export default function ScanStub() {
 
     s.x += (gx - s.x) * 0.42;
     s.y += (gy - s.y) * 0.42;
-    /* the residual gap IS the lean: large while being flicked, zero once it has caught up */
-    s.r += (clamp((gx - s.x) * 0.5, -14, 14) - s.r) * 0.16;
-    /* held high off the card, then settling as it finds the target */
-    s.s += ((hit ? 1.02 : 1.08) - s.s) * 0.2;
 
-    el.style.transform = `translate3d(${s.x}px, ${s.y}px, 0) rotate(${s.r}deg) scale(${s.s})`;
+    /* The residual gap IS the lean, and it is now spent in three axes rather than one flat
+       spin, because that is the difference between a card being slid around and a slab being
+       carried. Dragged right, the leading edge banks away from you (rotateY); dragged down,
+       the bottom edge does (rotateX); and a little roll on top of both is the wrist. All
+       three unwind to zero the moment the phone catches up with the pointer, which is why
+       this has to run on a frame clock and not out of pointermove — when the finger stops,
+       no more events arrive and the tip would freeze at whatever angle it was flicked to. */
+    const lx = gx - s.x;
+    const ly = gy - s.y;
+    s.ry += (clamp(lx * 0.7, -22, 22) - s.ry) * 0.16;
+    s.rx += (clamp(-ly * 0.7, -18, 18) - s.rx) * 0.16;
+    s.rz += (clamp(lx * 0.14, -5, 5) - s.rz) * 0.16;
+    /* carried high off the card, then coming down as it finds the code */
+    s.z += ((hit ? LAND : LIFT) - s.z) * 0.18;
+
+    el.style.transform = `translate3d(${s.x}px, ${s.y}px, 0)`;
+    ch.style.transform =
+      `translateZ(${s.z}px) rotateX(${s.rx}deg) rotateY(${s.ry}deg) rotate(${s.rz}deg)`;
 
     if (hit !== overNow.current) {
       overNow.current = hit;
@@ -161,7 +188,7 @@ export default function ScanStub() {
   const down = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     grab.current = { x: e.clientX, y: e.clientY, moved: false };
-    st.current = { x: 0, y: 0, tx: 0, ty: 0, r: 0, s: 1 };
+    st.current = rest();
     setHeld(true);
     setPinned(false);
     /* The loop stops at the grab, not at the drop: once a hand is on the scanner, a demo
@@ -189,6 +216,10 @@ export default function ScanStub() {
     const hit = overNow.current && !!plate.current;
 
     let to = '';
+    /* Levels off and comes to rest just above the card — a slab set down on paper, not one
+       dropped flush into it. Empty on a miss, which hands the chassis back to the resting
+       tilt in the stylesheet. */
+    let toChassis = '';
     if (hit) {
       /* Land square on the code and stay there. The phone is narrower than the plate, so the
          sweep still runs either side of it — the scanner is on the code while the code reacts
@@ -198,11 +229,12 @@ export default function ScanStub() {
       const s = st.current;
       s.x = p.left + p.width / 2 - h.x;
       s.y = p.top + p.height / 2 - h.y;
-      s.r = 0;
-      s.s = 1;
+      s.rx = s.ry = s.rz = 0;
+      s.z = 6;
       to = `translate3d(${s.x}px, ${s.y}px, 0)`;
+      toChassis = 'translateZ(6px)';
     } else {
-      st.current = { x: 0, y: 0, tx: 0, ty: 0, r: 0, s: 1 };
+      st.current = rest();
     }
 
     setHeld(false);
@@ -217,6 +249,7 @@ export default function ScanStub() {
        teleport instead of travelling. */
     requestAnimationFrame(() => {
       el.style.transform = to;
+      if (chassis.current) chassis.current.style.transform = toChassis;
     });
     if (hit) fire();
   };
@@ -266,6 +299,7 @@ export default function ScanStub() {
         className={lp.phone}
         data-held={held ? '' : undefined}
         data-pinned={pinned ? '' : undefined}
+        data-over={over ? '' : undefined}
         aria-label="Scan the code with this phone"
         onPointerDown={down}
         onPointerMove={move}
@@ -275,19 +309,45 @@ export default function ScanStub() {
           if (!grab.current.moved) fire();
         }}
       >
-        <span className={lp.phoneScreen}>
-          <span className={lp.phoneFace}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
-                 strokeLinecap="round" className="size-4 text-mut" aria-hidden="true">
-              <path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" />
-            </svg>
-            <span className={lp.phoneCap}>{over ? 'Reading' : 'Camera'}</span>
+        <span className={lp.phoneBody} ref={chassis}>
+          <span className={lp.phoneKey} style={{ left: -2, top: '26%', height: '9%' }} aria-hidden="true" />
+          <span className={lp.phoneKey} style={{ left: -2, top: '38%', height: '9%' }} aria-hidden="true" />
+          <span className={lp.phoneKey} style={{ right: -2, top: '30%', height: '14%' }} aria-hidden="true" />
+
+          <span className={lp.phoneScreen}>
+            <span className={lp.phoneFace}>
+              <span className={lp.phoneIsland} aria-hidden="true">
+                <span className={lp.phoneLens} />
+              </span>
+              {/* the frame closes on the code as it comes over it, and the code resolves
+                  inside it — a camera that has found something, rather than a camera icon */}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
+                   strokeLinecap="round" className={lp.phoneReticle} aria-hidden="true">
+                <path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" />
+              </svg>
+              <span className={lp.phonePeek} aria-hidden="true">
+                <CodeMark />
+              </span>
+              <span className={lp.phoneVfScan} />
+              <span className={lp.phoneCap}>{over ? 'Locked' : 'Camera'}</span>
+            </span>
+            {/* the payoff: the same 10 coins the guest-tier row posts to the board below */}
+            <span className={lp.phoneFaceBack} aria-hidden="true">
+              <span className={lp.phoneBurst} />
+              <span className={lp.phoneAppIcon}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6"
+                     strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m5 13 4.5 4.5L19 7" />
+                </svg>
+              </span>
+              <span className={lp.phoneWon}>Reward unlocked</span>
+              <span className={lp.phoneCoins}>+10 coins</span>
+              <span className={lp.phoneGet}>Get the app</span>
+            </span>
           </span>
-          <span className={lp.phoneFaceBack} aria-hidden="true">
-            <span className="size-4 rounded-md bg-accent" />
-            <span className={lp.phoneCap}>Get the app</span>
-          </span>
+          <span className={lp.phoneGloss} aria-hidden="true" />
         </span>
+
         <span className={lp.phoneHint}>
           {scanned ? 'redeemed' : over ? 'release to scan' : held ? 'drop on the code' : 'drag onto the code'}
         </span>

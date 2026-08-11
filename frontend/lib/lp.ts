@@ -35,8 +35,12 @@ export const fieldValue = 'm-0 font-mono text-[13px] tracking-[-0.01em] text-ink
 export const nav = 'lp-nav sticky top-0 z-30 border-b border-line bg-canvas/85 py-3.5 backdrop-blur-xl';
 export const navInner = cx(wrap, 'flex items-center justify-between gap-4.5');
 /** reading progress, in the accent */
+/* The empty state is `transform: scaleX(0)` in landing.css, NOT a `scale-x-0` utility: in
+   Tailwind v4 that utility compiles to the `scale` property, which multiplies with whatever
+   `transform` an animation is setting rather than being replaced by it — the bar then sits at
+   zero for the whole scroll no matter what the timeline does. */
 export const navProgress =
-  'lp-nav-progress absolute inset-x-0 -bottom-px h-0.5 origin-left scale-x-0 bg-accent';
+  'lp-nav-progress absolute inset-x-0 -bottom-px h-0.5 origin-left bg-accent';
 
 export const mark =
   'group flex items-center gap-2.5 text-sm font-semibold tracking-[-0.015em] whitespace-nowrap text-ink no-underline ' +
@@ -110,22 +114,99 @@ export const stub = cx('lp-stub flex flex-col gap-5 p-7', passShell);
    redemption posts to the board below. It is a <button>, so the same thing happens on Enter
    for anyone who is not dragging anything. */
 
+/** The button is the hitbox and nothing else: it only ever translates, so its box stays a
+ *  clean measurement for the drop test. Everything that tips in 3D hangs off the chassis
+ *  inside it. */
 export const phone = cx(
-  'lp-phone absolute -top-7 -right-4 z-2 w-[104px] cursor-grab touch-none select-none',
-  'rounded-[20px] border border-line bg-card p-1.5 shadow-pass',
-  'active:cursor-grabbing max-[480px]:w-[88px]',
+  'lp-phone absolute -top-9 -right-8 z-2 w-[116px] rounded-[22px]',
+  'cursor-grab touch-none select-none active:cursor-grabbing',
+  'shadow-[0_14px_28px_-14px_rgb(17_17_17/0.42)]',
+  /* the negative offset is what puts it half off the card; on a phone-width screen that same
+     offset puts it half off the page, so it comes back in */
+  'max-[480px]:-top-6 max-[480px]:-right-2 max-[480px]:w-[92px]',
 );
 
-/** two faces on one plate — the camera, and where the scan actually sends you */
+/** The chassis. The only dark object on a paper-coloured page, which is most of what makes
+ *  it read as a device sitting on the card rather than a shape printed into it. */
+export const phoneBody =
+  'lp-phone-body relative block rounded-[22px] bg-[#17181a] p-[3.5px] ' +
+  'shadow-[0_0_0_1px_rgb(0_0_0/0.55),0_1px_0_rgb(255_255_255/0.2)_inset]';
+
+/** Power and volume. Two slivers on the edges — at this size the eye reads "there are keys
+ *  on the side of that", not their shape. */
+export const phoneKey = 'absolute w-[2px] rounded-full bg-[#34363a]';
+
+/** Two faces on one plate — the camera, and where the scan actually sends you.
+ *
+ *  No `overflow: hidden` here, deliberately, and it is not an oversight to tidy up: a
+ *  non-visible overflow forces `transform-style: flat`, which collapses the 3D context the
+ *  flip lives in and takes `backface-visibility` with it — the symptom is the front face
+ *  showing through the back, mirrored, instead of the store listing. Nothing needs the clip:
+ *  each face rounds its own corners, and the viewfinder sweep stops inside the screen. */
 export const phoneScreen =
-  'lp-phone-screen relative block aspect-9/17 overflow-hidden rounded-[14px] border border-line-soft bg-sunk';
-export const phoneFace =
-  'lp-phone-face absolute inset-0 grid content-center justify-items-center gap-1 px-1.5 text-center';
-export const phoneFaceBack = cx(phoneFace, 'lp-phone-face-back bg-card');
-export const phoneCap = 'text-[8.5px] leading-[1.25] font-semibold tracking-[0.04em] uppercase text-mut';
+  'lp-phone-screen relative block aspect-9/19 rounded-[18.5px] bg-[#0a0b0d]';
+export const phoneFace = 'lp-phone-face absolute inset-0 grid place-items-center rounded-[18.5px]';
+export const phoneFaceBack = cx(
+  phoneFace,
+  'lp-phone-face-back content-center gap-1.5 bg-card px-2 text-center',
+);
+
+/* ---- the viewfinder ----
+   A camera that is switched on: an island with a lens in it, a reticle that closes when the
+   code is under it, the code itself resolving in the frame, and a sweep that never stops. A
+   still rectangle would be a picture of a phone. */
+
+export const phoneIsland =
+  'absolute top-[5px] left-1/2 z-1 flex h-[8px] w-[27px] -translate-x-1/2 items-center ' +
+  'justify-end gap-[3px] rounded-full bg-black pr-[4px]';
+export const phoneLens =
+  'size-[3.5px] rounded-full bg-[#1c2b36] shadow-[0_0_0_0.5px_rgb(255_255_255/0.14)]';
+export const phoneReticle = 'lp-phone-reticle w-[54%] text-white/40';
+/** what the camera is actually looking at, once it is over the plate. The wrapper carries
+ *  aria-hidden: the same code is already announced once, on the card. */
+export const phonePeek =
+  'lp-phone-peek absolute top-1/2 left-1/2 w-[70%] -translate-x-1/2 -translate-y-1/2 opacity-0 ' +
+  '[&_svg]:block [&_svg]:w-full [&_svg]:fill-white/80';
+/** The line is this box's own top border, so the sweep is one transform on one element — and
+ *  translating it by its own height lands the line at 70%, inside the screen, which is why
+ *  the screen needs no clip. */
+export const phoneVfScan =
+  'lp-phone-scan pointer-events-none absolute inset-x-[7px] top-[14%] h-[56%] border-t border-white/45 opacity-0';
+/** The one line of text inside the device, so it is set to be read rather than to suggest
+ *  that a phone has writing on it: bigger, heavier, and near-white on black. */
+export const phoneCap =
+  'lp-phone-cap absolute inset-x-0 bottom-[9px] font-mono text-[9px] font-semibold uppercase ' +
+  'tracking-[0.1em] text-white/85';
+/** glass, a hair proud of the screen, so tipping the chassis drifts the highlight across it */
+export const phoneGloss =
+  'lp-phone-gloss pointer-events-none absolute inset-0 rounded-[22px] ' +
+  'bg-[linear-gradient(118deg,rgb(255_255_255/0.20),transparent_26%,transparent_66%,rgb(255_255_255/0.09))]';
+
+/* ---- the payoff screen ----
+   What the scan was for. The phone turns over onto the reward the reader just earned, and it
+   is the same 10 coins the guest-tier row posts to the board below a beat later — the two
+   halves of the demo are reporting one event, not two. Everything here is drawn statically
+   and animated in by landing.css; with motion off it is simply the screen, already resolved. */
+
+export const phoneBurst =
+  'lp-phone-burst pointer-events-none absolute top-[27%] size-7 rounded-full border-2 border-accent opacity-0';
+export const phoneAppIcon =
+  'grid size-7 place-items-center rounded-[8px] bg-accent text-accent-on shadow-contact-sm ' +
+  '[&_svg]:size-4';
+export const phoneWon =
+  'font-mono text-[7.5px] font-semibold uppercase tracking-[0.1em] text-accent-text';
+export const phoneCoins = 'font-mono text-[14px] font-semibold tracking-[-0.02em] text-ink tabular-nums';
+export const phoneGet =
+  'mt-0.5 rounded-full bg-ink px-2.5 py-[3px] text-[7px] font-semibold uppercase tracking-[0.1em] text-card';
+
+/** A chip, not bare text, and an opaque one: this is dragged over a field of black squares,
+ *  where grey-on-translucent is unreadable. It also carries the state — neutral, accent the
+ *  moment the code is under the phone, settled green once it has been redeemed — because the
+ *  reader is looking at the phone, not at the status line down in the card. */
 export const phoneHint =
-  'lp-phone-hint pointer-events-none absolute top-full left-1/2 mt-2 -translate-x-1/2 ' +
-  'whitespace-nowrap text-[10.5px] font-medium text-mut';
+  'lp-phone-hint pointer-events-none absolute top-full left-1/2 mt-2.5 -translate-x-1/2 ' +
+  'whitespace-nowrap rounded-full border border-line bg-card px-3 py-1.5 ' +
+  'text-[11.5px] font-semibold text-ink shadow-contact';
 
 export const codePlate =
   'lp-code relative overflow-hidden rounded-xl border border-line bg-sunk p-5 ' +
@@ -293,10 +374,11 @@ export const fareBody = 'text-[15px] leading-[1.62] text-ink-soft [&+p]:mt-3';
 export const fareFoot = 'mt-auto border-t border-line-soft pt-5 text-[12.5px] text-mut';
 
 /* ---- the settlement ----
-   The two fare cards state what a guest rate is; this shows it happening. Five coins are one
-   50-coin signup: the first leaves at the guest rate straight away, the other four hang back
-   hatched until the publisher verifies, then follow. Scroll-driven, so the reader advances
-   the settlement themselves. */
+   The two fare cards state what a guest rate is; this shows it happening. One 50-coin signup
+   as the two payments it actually is, a lane each: the 10 crosses on confirmation, the 40
+   waits out a grace window drawn as a filling bar and follows on verification. Both ledger
+   figures move when a payment lands, because a transfer where nothing changes is not a
+   transfer. Timer-driven from Settlement.tsx — see there for why not `view()`. */
 
 export const settle =
   'lp-settle mt-5 grid grid-cols-[minmax(0,150px)_minmax(0,1fr)_minmax(0,150px)] items-center gap-6 ' +
@@ -313,26 +395,37 @@ export const settleEndRight = cx(
   'text-right max-[720px]:col-start-2 max-[720px]:row-start-1 max-[720px]:text-left',
 );
 
-/** the lane the coins cross. The flip's perspective is on the disc's own transform, not
- *  here — see landing.css for why it cannot live on this element. */
-export const settleTrack =
-  'lp-settle-track relative h-5 ' +
-  'before:absolute before:inset-x-0 before:top-1/2 before:h-px before:-translate-y-px before:bg-line ' +
-  "before:content-[''] max-[720px]:col-span-full max-[720px]:row-start-2 max-[720px]:my-1";
+/** the figure each end of the ledger reads. Keyed on its own value in the TSX, so it
+ *  remounts and replays the tick whenever a payment lands on it. */
+export const settleFig = 'lp-settle-fig';
 
-/** one coin = one full-width lane that slides; the disc inside it is what spins */
-export const settleCoin = 'lp-settle-coin absolute inset-y-0 left-0 w-full';
-/* The five discs are fanned 19px apart at rest and stay fanned across the track, which is
-   why the crossing keyframe can be a single constant rather than one per coin. The fan
-   offset itself is in landing.css — it reads `--i`, and an arbitrary utility carrying a
-   calc() over a custom property is worse to read than the one line of CSS it replaces. */
-export const settleDisc = (paid: boolean) =>
+export const settleLanes =
+  'grid gap-4 max-[720px]:col-span-full max-[720px]:row-start-2 max-[720px]:my-1';
+export const settleRow = 'grid gap-1.5';
+
+/** The rail is a filled track rather than a hairline, because the grace window has to be
+ *  drawn running *inside* it. That wait was previously 2.1 seconds of nothing happening,
+ *  which is indistinguishable from a broken animation. */
+export const settleRail = 'lp-settle-rail relative h-6 rounded-full bg-sunk';
+export const settleGrace =
+  'lp-settle-grace absolute inset-0 origin-left rounded-full bg-warn-line';
+
+/** The lane is the full width of the rail and is the thing that travels; the token rides
+ *  inside it at the left, so the crossing distance is `100% - token` — one constant, both
+ *  payments. */
+export const settleLane = 'lp-settle-lane absolute inset-0';
+export const settleToken = (paid: boolean) =>
   cx(
-    'lp-settle-disc absolute top-1/2 block size-4 -translate-y-2 rounded-full border',
+    'lp-settle-token absolute inset-y-0 left-0 grid w-11 place-items-center rounded-full border',
+    'font-mono text-[11px] font-semibold tabular-nums',
     paid
-      ? 'border-warn-line bg-warn-lit'
-      : 'border-warn-line bg-[repeating-linear-gradient(-45deg,var(--color-warn-line)_0_3px,var(--color-card)_3px_6px)]',
+      ? 'border-ok-line bg-ok-soft text-ok'
+      : 'border-warn-line bg-[repeating-linear-gradient(-45deg,var(--color-warn-line)_0_3px,var(--color-warn-soft)_3px_6px)] text-warn',
   );
+
+/** what the payment above is waiting on — two or three words, because the lane is doing the
+ *  explaining and this is only the caption on it */
+export const settleTag = 'lp-settle-tag text-stamp-caps uppercase text-mut';
 
 export const settleNote =
   'col-span-full mt-1 text-center text-[12.5px] text-mut max-[720px]:text-left';
