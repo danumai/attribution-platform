@@ -40,10 +40,11 @@ async function seedOrg(
 ) {
   // Raw upsert rather than prisma.upsert: read-then-write would let two replicas booting at
   // once collide on the unique email, and `xmax = 0` is how Postgres reports insert-vs-update.
+  // `approved: true`: seeded accounts are the operator's own demo tenants, not signups to vet.
   const rows = await prisma.$queryRaw<{ created: boolean }[]>`
-    INSERT INTO orgs (name, type, email, password_hash, api_key_hash, landing_url)
+    INSERT INTO orgs (name, type, email, password_hash, api_key_hash, landing_url, approved)
     VALUES (${name}, ${type}, ${email.toLowerCase()}, ${await bcrypt.hash(password, 10)},
-            ${apiKey ? sha256(apiKey) : null}, ${landingUrl ?? null})
+            ${apiKey ? sha256(apiKey) : null}, ${landingUrl ?? null}, true)
     ON CONFLICT (email) DO UPDATE SET
       name          = CASE WHEN ${overwrite} THEN EXCLUDED.name          ELSE orgs.name          END,
       type          = CASE WHEN ${overwrite} THEN EXCLUDED.type          ELSE orgs.type          END,

@@ -19,12 +19,13 @@ import {
 } from '../../common/attribution';
 import { capped } from '../../common/paging';
 import { validateRates } from '../../common/rates';
-import { sha256, str, validateLandingUrl } from '../../common/security';
+import { sha256, str, validateDeeplinkUrl, validateLandingUrl } from '../../common/security';
 import { scanAnalytics } from '../../database/analytics';
 import { audit, balance, balances, ledger, lockedBalance } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
 import { AdminGuard, Session } from '../auth/auth.guard';
 import { SessionClaims, newApiKey } from '../auth/tokens';
+import { randomBytes } from 'node:crypto';
 
 // Super admin: reads everything across all orgs, and can act on anything.
 // No org scoping here — that is the whole point of the role.
@@ -60,6 +61,13 @@ export class AdminController {
         (SELECT count(*)::int FROM qr_codes WHERE voided)                 AS voided_codes,
         (SELECT coalesce(sum(coins),0)::int FROM redemptions)             AS coins_granted,
         (SELECT coalesce(-sum(amount),0)::int FROM ledger_entries WHERE account='external:funding') AS total_funded,
+        -- The platform's own revenue: every payout's retained cut, accumulated. This is the
+        -- number the business runs on.
+        (SELECT coalesce(sum(amount),0)::int FROM ledger_entries WHERE account='platform:fees') AS platform_revenue,
+        (SELECT coalesce(sum(amount),0)::int FROM ledger_entries WHERE account='external:payouts') AS total_paid_out,
+        (SELECT count(*)::int FROM withdrawals WHERE status='requested')  AS open_withdrawals,
+        (SELECT count(*)::int FROM orgs WHERE type='publisher' AND NOT approved AND NOT suspended) AS unapproved_publishers,
+        (SELECT count(*)::int FROM payments WHERE status='pending')       AS pending_payments,
         (SELECT coalesce(sum(amount),0)::int FROM ledger_entries)         AS ledger_sum,
         -- The check ledger_sum cannot make. A global zero says the *book* is double-entry;
         -- it says nothing about whether the cached account_balances row every money path
@@ -110,6 +118,7 @@ export class AdminController {
         email: true,
         landing_url: true,
         suspended: true,
+        approved: true,
         created_at: true,
         api_key_hash: true,
       },
@@ -143,10 +152,13 @@ export class AdminController {
     @Body()
     b: {
       suspended?: boolean;
+      /** the publisher-vetting gate: false hides the org from the directory and blocks new partnerships */
+      approved?: boolean;
       name?: string;
       landing_url?: string;
       android_package?: string;
       ios_app_id?: string;
+      deeplink_url?: string;
       bonus_label?: string;
       reason?: string;
     },
@@ -155,14 +167,18 @@ export class AdminController {
       landing_url: validateLandingUrl(b.landing_url),
       android_package: validateAndroidPackage(b.android_package),
       ios_app_id: validateIosAppId(b.ios_app_id),
+      deeplink_url: validateDeeplinkUrl(b.deeplink_url),
       bonus_label: validateBonusLabel(b.bonus_label),
     };
     if (b.suspended !== undefined && typeof b.suspended !== 'boolean')
       throw new BadRequestException('suspended must be a boolean');
+    if (b.approved !== undefined && typeof b.approved !== 'boolean')
+      throw new BadRequestException('approved must be a boolean');
     const updated = await prisma.org.updateMany({
       where: { id, type: { not: 'admin' } },
       data: {
         ...(b.suspended === undefined ? {} : { suspended: b.suspended }),
+        ...(b.approved === undefined ? {} : { approved: b.approved }),
         // Bounded like every other free-text field crossing the boundary — unbounded, one
         // PATCH bloats the row and every listing that renders it.
         ...(b.name === undefined ? {} : { name: str(b.name, 'name', 120)! }),
@@ -182,23 +198,46 @@ export class AdminController {
         landing_url: true,
         android_package: true,
         ios_app_id: true,
+        deeplink_url: true,
         bonus_label: true,
         suspended: true,
+        approved: true,
       },
     });
   }
 
-  // support path: publisher lost its key, or the key leaked
+  // Support path: tenant lost its key, or the key leaked. Both tenant types hold one now —
+  // the publisher's earns fees on /v1/attribution/*, the promoter's mints codes on /v1/issue —
+  // so restricting this to publishers left a promoter with a leaked key unrecoverable.
   @Post('orgs/:id/rotate-key')
   async rotateKey(@Session() s: SessionClaims, @Param('id') id: string) {
     const api_key = newApiKey();
     const updated = await prisma.org.updateMany({
-      where: { id, type: 'publisher' },
+      where: { id, type: { not: 'admin' } },
       data: { api_key_hash: sha256(api_key) },
     });
-    if (!updated.count) throw new NotFoundException('publisher not found');
+    if (!updated.count) throw new NotFoundException('org not found');
     await audit(s.org_id, 'org.rotate_key', `org:${id}`);
     return { api_key }; // shown once
+  }
+
+  /**
+   * Issue a single-use password-reset token for a locked-out tenant. Shown once, expires in an
+   * hour, stored hashed. The admin relays it over a channel they trust; when an email sender
+   * exists it calls this and delivers the link itself. Audited — a reset token is an account
+   * takeover in the wrong hands, and "who issued it, for whom, when" is the whole defence.
+   */
+  @Post('orgs/:id/reset-token')
+  async resetToken(@Session() s: SessionClaims, @Param('id') id: string) {
+    const token = randomBytes(24).toString('base64url');
+    const expires = new Date(Date.now() + 3_600_000);
+    const updated = await prisma.org.updateMany({
+      where: { id, type: { not: 'admin' } },
+      data: { reset_token_hash: sha256(token), reset_token_expires: expires },
+    });
+    if (!updated.count) throw new NotFoundException('org not found');
+    await audit(s.org_id, 'org.reset_token', `org:${id}`, { expires_at: expires.toISOString() });
+    return { reset_token: token, expires_at: expires.toISOString() }; // shown once
   }
 
   // Offboarding: suspend, kill the API key, and stop every campaign in one action, so a
@@ -259,13 +298,20 @@ export class AdminController {
     @Session() s: SessionClaims,
     @Param('id') id: string,
     @Body()
-    b: { coin_rate?: number; guest_rate?: number; grace_days?: number; status?: string },
+    b: { coin_rate?: number; guest_rate?: number; grace_days?: number; platform_fee_bps?: number; status?: string },
   ) {
     // `suspended` rather than `pending` is the pause lever: `pending` is the publisher's own
     // inbox state and the publisher can accept its way out of it, which is exactly what made
     // an admin suspension revertible by the org it was aimed at.
     if (b.status !== undefined && !['pending', 'active', 'suspended'].includes(b.status))
       throw new BadRequestException('status must be pending|active|suspended');
+    // Admin-only, unlike the four negotiated rates: the take rate is the platform's own side
+    // of the deal, and neither counterparty may set it.
+    if (
+      b.platform_fee_bps !== undefined &&
+      (!Number.isInteger(b.platform_fee_bps) || b.platform_fee_bps < 0 || b.platform_fee_bps > 10_000)
+    )
+      throw new BadRequestException('platform_fee_bps must be an integer 0–10000');
 
     const current = await prisma.partnership.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('partnership not found');
@@ -275,7 +321,7 @@ export class AdminController {
 
     const updated = await prisma.partnership.update({
       where: { id },
-      data: { ...rates, status: b.status ?? undefined },
+      data: { ...rates, platform_fee_bps: b.platform_fee_bps ?? undefined, status: b.status ?? undefined },
     });
     await audit(s.org_id, 'partnership.patch', `partnership:${id}`, b);
     return updated;
@@ -613,6 +659,76 @@ export class AdminController {
       scans: _count.scans,
       scan_url: `${BASE_URL}/r/${q.code}`,
     }));
+  }
+
+  // ---------- withdrawals (publisher money-out, reviewed here) ----------
+
+  @Get('withdrawals')
+  async withdrawals(@Query('status') status?: string, @Query('limit') limit?: string) {
+    const rows = await prisma.withdrawal.findMany({
+      where: status ? { status } : {},
+      include: { publisher: { select: { name: true, email: true } } },
+      orderBy: { requested_at: 'desc' },
+      take: capped(limit),
+    });
+    return rows.map(({ publisher, ...w }) => ({
+      ...w,
+      publisher_name: publisher.name,
+      publisher_email: publisher.email,
+    }));
+  }
+
+  /**
+   * Pay a withdrawal: the review happened, real money is leaving. The ledger debits the
+   * publisher and credits `external:payouts` under `withdrawal:{id}` — one ref, replay-safe,
+   * and the account-balance floor guarantees a publisher can never be paid below zero even if
+   * a clawback landed between request and approval.
+   */
+  @Post('withdrawals/:id/pay')
+  async payWithdrawal(
+    @Session() s: SessionClaims,
+    @Param('id') id: string,
+    @Body() b: { note?: string },
+  ) {
+    const note = str(b.note, 'note', 300, false);
+    const paid = await prisma.$transaction(async (tx) => {
+      // Status is flipped by the same UPDATE that tests it — two admins clicking pay at once
+      // move the money once.
+      const taken = await tx.withdrawal.updateMany({
+        where: { id, status: 'requested' },
+        data: { status: 'paid', note, decided_at: new Date() },
+      });
+      if (!taken.count) throw new NotFoundException('no requested withdrawal with that id');
+      const w = await tx.withdrawal.findUniqueOrThrow({ where: { id } });
+      if ((await lockedBalance(tx, `publisher:${w.publisher_org_id}`)) < w.coins)
+        throw new BadRequestException('publisher balance no longer covers this withdrawal');
+      const ref = `withdrawal:${id}`;
+      await ledger(tx, `publisher:${w.publisher_org_id}`, -w.coins, ref);
+      await ledger(tx, 'external:payouts', w.coins, ref);
+      return w;
+    });
+    await audit(s.org_id, 'withdrawal.pay', `withdrawal:${id}`, {
+      publisher_org_id: paid.publisher_org_id,
+      coins: paid.coins,
+      note,
+    });
+    return { ...paid, status: 'paid', note };
+  }
+
+  @Post('withdrawals/:id/reject')
+  async rejectWithdrawal(
+    @Session() s: SessionClaims,
+    @Param('id') id: string,
+    @Body() b: { note?: string },
+  ) {
+    const note = str(b.note, 'note', 300, false);
+    const updated = await prisma.withdrawal.updateMany({
+      where: { id, status: 'requested' },
+      data: { status: 'rejected', note, decided_at: new Date() },
+    });
+    if (!updated.count) throw new NotFoundException('no requested withdrawal with that id');
+    await audit(s.org_id, 'withdrawal.reject', `withdrawal:${id}`, { note });
+    return prisma.withdrawal.findUnique({ where: { id } });
   }
 
   @Get('ledger')

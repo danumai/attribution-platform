@@ -54,7 +54,7 @@ import {
   qrbox,
   sectionHead,
   select as selectField,
-  stamp,
+  stampCaps,
   studio,
   studioPreview,
   swatches,
@@ -598,7 +598,7 @@ export default function CampaignPage() {
       <div className="mt-3 grid grid-cols-2 gap-3 max-[760px]:grid-cols-1">
         <div className={card}>
           <div className="flex items-baseline justify-between gap-3">
-            <b className={stamp}>Budget</b>
+            <b className={stampCaps}>Budget</b>
             <span className={muted}>
               {num(stats.coins_granted)} of {num(stats.coins_granted + stats.budget_remaining)} spent
             </span>
@@ -616,7 +616,7 @@ export default function CampaignPage() {
 
         <div className={card}>
           <div className="flex items-baseline justify-between gap-3">
-            <b className={stamp}>Scan → signup</b>
+            <b className={stampCaps}>Scan → signup</b>
             <span className={muted}>
               {num(stats.redemptions)} of {num(stats.scans)} scans
             </span>
@@ -984,7 +984,7 @@ export default function CampaignPage() {
                   <div className={cx(card, 'mt-3')}>
                     <div className={previewHead}>
                       <b className="text-sm font-[650] tracking-[-0.015em]">Live preview</b>
-                      <span className={cx(stamp, 'text-[10.5px] tracking-[.12em]')}>{rendering ? 'rendering…' : dirty ? 'unsaved changes' : 'saved'}</span>
+                      <span className={stampCaps}>{rendering ? 'rendering…' : dirty ? 'unsaved changes' : 'saved'}</span>
                     </div>
 
                     <div className={qrbox} style={{ background: backdrop.css }}>

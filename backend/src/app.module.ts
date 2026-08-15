@@ -3,6 +3,7 @@ import { AdminController } from './modules/admin/admin.controller';
 import { AuthController } from './modules/auth/auth.controller';
 import { IssueController } from './modules/partner/issue.controller';
 import { PartnerController } from './modules/partner/partner.controller';
+import { PaymentsController } from './modules/payments/payments.controller';
 import { PortalController } from './modules/portal/portal.controller';
 import { PublicController } from './modules/public/public.controller';
 
@@ -15,6 +16,7 @@ import { PublicController } from './modules/public/public.controller';
     PublicController,
     PartnerController,
     IssueController,
+    PaymentsController,
     AdminController,
   ],
 })

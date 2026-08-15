@@ -23,7 +23,7 @@
  */
 import { useEffect, useId, useRef, useState } from 'react';
 import { compact, num } from './fmt';
-import { cx, muted, stamp, table, tableWrap, td, tdNum, th, thNum, tr } from './tw';
+import { cx, muted, stampCaps, table, tableWrap, td, tdNum, th, thNum, tr } from './tw';
 
 export type Series = {
   label: string;
@@ -167,29 +167,78 @@ export function Chart({
             onKeyDown={key}
             onBlur={() => setAt(null)}
           >
-            {/* the grid is solid hairline, one step off the surface: a reference, never a mark */}
+            <defs>
+              {/* A wash per series, so the fill fades out towards the baseline instead of
+                  ending in a hard edge halfway down the plot. A flat fill at one opacity is
+                  read as a second, paler mark sitting under the line — a gradient is read as
+                  the line's own shadow, which is the only thing an area under a trend line
+                  is entitled to mean. */}
+              {series.map((s, i) => (
+                <linearGradient key={s.label} id={`${id}-wash-${i}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={s.color} stopOpacity="0.20" />
+                  <stop offset="100%" stopColor={s.color} stopOpacity="0.01" />
+                </linearGradient>
+              ))}
+            </defs>
+
+            {/* The grid is dashed and the zero line is not. They were the same hairline
+                before, which left the baseline as one gridline among four rather than as the
+                floor the marks stand on — and a dashed reference is easier to read a mark
+                across, because the eye stops mistaking the grid for data. */}
             {lines.map((v) => (
               <g key={v}>
-                <line
-                  x1={PAD.l}
-                  x2={w - PAD.r}
-                  y1={y(v)}
-                  y2={y(v)}
-                  stroke="var(--color-line)"
-                  strokeWidth="1"
-                  shapeRendering="crispEdges"
-                />
+                {v > 0 && (
+                  <line
+                    x1={PAD.l}
+                    x2={w - PAD.r}
+                    y1={y(v)}
+                    y2={y(v)}
+                    stroke="var(--color-line)"
+                    strokeWidth="1"
+                    strokeDasharray="2 4"
+                    shapeRendering="crispEdges"
+                  />
+                )}
+                {/* Ticks in the mono, not the sans. A column of proportional figures does not
+                    line up on its decimal, and an axis is the one place in the console where
+                    numbers genuinely stack vertically. */}
                 <text
                   x={PAD.l - 8}
                   y={y(v)}
                   textAnchor="end"
                   dominantBaseline="middle"
-                  className="fill-mut text-[11px] tabular-nums"
+                  className="fill-mut font-mono text-[10.5px]"
                 >
                   {compact(v)}
                 </text>
               </g>
             ))}
+
+            {/* The hover layer, drawn before the marks so a crosshair never crosses a dot.
+                The band is what the pointer is actually aiming at — a 1px line asks for a
+                precision the reader does not have, and gives no feedback until it is hit. */}
+            {readout && kind === 'line' && (
+              <g>
+                <rect
+                  x={Math.max(x(at) - Math.max(plotW / Math.max(n - 1, 1), 12) / 2, PAD.l)}
+                  y={PAD.t}
+                  width={Math.max(plotW / Math.max(n - 1, 1), 12)}
+                  height={plotH}
+                  fill="var(--color-line-soft)"
+                  opacity="0.7"
+                />
+                <line
+                  x1={x(at)}
+                  x2={x(at)}
+                  y1={PAD.t}
+                  y2={y(0)}
+                  stroke="var(--color-mut)"
+                  strokeWidth="1"
+                  strokeDasharray="2 3"
+                  opacity="0.5"
+                />
+              </g>
+            )}
 
             {kind === 'bar'
               ? series[0].values.map((v, i) => {
@@ -211,7 +260,7 @@ export function Chart({
                     />
                   );
                 })
-              : series.map((s) => {
+              : series.map((s, si) => {
                   const path = s.values.map((v, i) => `${i ? 'L' : 'M'}${x(i)} ${y(v)}`).join(' ');
                   return (
                     <g key={s.label}>
@@ -219,13 +268,20 @@ export function Chart({
                           muddy each other and neither reads as a quantity any more */}
                       {series.length === 1 && (
                         <path
+                          className="animate-wash"
                           d={`${path} L${x(n - 1)} ${y(0)} L${x(0)} ${y(0)} Z`}
-                          fill={s.color}
-                          fillOpacity="0.1"
+                          fill={`url(#${id}-wash-${si})`}
                         />
                       )}
+                      {/* `pathLength="1"` is what makes the draw-in take the same time on a
+                          7-point series and a 90-point one: the dash is measured in units of
+                          the whole path rather than in pixels, so the animation describes the
+                          series instead of its length. */}
                       <path
+                        className="animate-draw"
                         d={path}
+                        pathLength={1}
+                        strokeDasharray={1}
                         fill="none"
                         stroke={s.color}
                         strokeWidth="2"
@@ -245,14 +301,17 @@ export function Chart({
                   );
                 })}
 
-            {/* the baseline sits over the marks so a bar reads as standing on it */}
+            {/* The baseline sits over the marks so a bar reads as standing on it, and it is
+                inked a step darker than the dashed grid above it — it is the floor, not
+                another reference. */}
             <line
               x1={PAD.l}
               x2={w - PAD.r}
               y1={y(0)}
               y2={y(0)}
-              stroke="var(--color-line)"
+              stroke="var(--color-mut)"
               strokeWidth="1"
+              opacity="0.45"
               shapeRendering="crispEdges"
             />
 
@@ -269,26 +328,18 @@ export function Chart({
                   textAnchor={
                     kind === 'bar' ? 'middle' : i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'
                   }
-                  className="fill-mut text-[11px] tabular-nums"
+                  className="fill-mut font-mono text-[10.5px]"
                 >
                   {l}
                 </text>
               ) : null,
             )}
 
-            {/* The crosshair finds the x, so the reader aims at a date rather than at a 2px
-                line. On bars the column itself is already the target, so it stays off. */}
+            {/* The read dots go last, over everything: on a dense series they land on top of
+                the line they belong to, and anything drawn after them would cut through. The
+                band and crosshair that find the x are behind the marks, above. */}
             {readout && kind === 'line' && (
               <>
-                <line
-                  x1={x(at)}
-                  x2={x(at)}
-                  y1={PAD.t}
-                  y2={y(0)}
-                  stroke="var(--color-mut)"
-                  strokeWidth="1"
-                  opacity="0.4"
-                />
                 {series.map((s) => (
                   <circle
                     key={s.label}
@@ -309,26 +360,39 @@ export function Chart({
             value. Values lead and labels follow: the reader already has the series. */}
         {readout && w > 0 && (
           <div
-            className="pointer-events-none absolute top-0 z-2 min-w-33 rounded-lg border border-line bg-card px-2.5 py-2 shadow-contact"
+            className="pointer-events-none absolute top-0 z-2 min-w-35 rounded-lg border border-line bg-card-high px-3 py-2.5 shadow-pass"
             style={{
               left: Math.min(Math.max(x(at), PAD.l + 60), w - 72),
               transform: 'translateX(-50%)',
             }}
             role="status"
           >
-            <div className={cx(stamp, 'mb-1')}>{labels[at]}</div>
+            {/* The position this reads at, stamped — the one label in the console that is a
+                heading over figures rather than over a control, so it takes the caps. */}
+            <div className={cx(stampCaps, 'mb-1.5 border-b border-line-soft pb-1.5')}>
+              {labels[at]}
+            </div>
             {series.map((s) => (
-              <div key={s.label} className="flex items-center gap-2 text-[12.5px] whitespace-nowrap">
+              <div
+                key={s.label}
+                className="flex items-baseline gap-2 text-[12.5px] whitespace-nowrap [&+&]:mt-0.5"
+              >
                 <i
-                  className="block h-0.5 w-2.5 shrink-0 rounded-full"
+                  className="block size-1.5 shrink-0 -translate-y-0.5 rounded-full"
                   style={{ background: s.color }}
                   aria-hidden="true"
                 />
-                <b className="font-semibold text-ink tabular-nums">{num(s.values[at])}</b>
+                {/* Mono, so two series stacked in one card put their digits on the same
+                    column and the reader compares magnitudes instead of string lengths. */}
+                <b className="font-mono text-[13px] font-medium text-ink">{num(s.values[at])}</b>
                 <span className="text-mut">{s.label}</span>
               </div>
             ))}
-            {note?.(at) && <div className="mt-1 text-[12px] text-mut">{note(at)}</div>}
+            {note?.(at) && (
+              <div className="mt-1.5 border-t border-line-soft pt-1.5 text-[12px] text-mut">
+                {note(at)}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -386,17 +450,29 @@ export function Spark({
   color?: string;
   className?: string;
 }) {
+  const id = useId();
   const v = values.slice(-12);
   if (v.length < 2) return null;
-  const [W, H] = [64, 18];
+  // Wider and shorter than it was. A trace is read for its slope, and slope is a ratio of
+  // the two dimensions — at 64×18 a flat week and a doubling week looked nearly alike.
+  const [W, H] = [72, 20];
   const top = Math.max(...v, 1);
   const px = (i: number) => (W * i) / (v.length - 1);
-  const py = (n: number) => H - 1.5 - (n / top) * (H - 3);
+  const py = (n: number) => H - 2.5 - (n / top) * (H - 5);
   const path = v.map((n, i) => `${i ? 'L' : 'M'}${px(i)} ${py(n)}`).join(' ');
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className={className} aria-hidden="true">
-      <path d={`${path} L${W} ${H} L0 ${H} Z`} fill={color} fillOpacity="0.1" />
+      <defs>
+        <linearGradient id={`${id}-s`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`${path} L${W} ${H} L0 ${H} Z`} fill={`url(#${id}-s)`} />
       <path d={path} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      {/* The terminal dot is the only thing that says which end is now. Without it a trace is
+          a shape; with it, it is a position — and the figure beside it is that position's value. */}
+      <circle cx={px(v.length - 1)} cy={py(v[v.length - 1])} r="2" fill={color} />
     </svg>
   );
 }

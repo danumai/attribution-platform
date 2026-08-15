@@ -12,7 +12,7 @@ import { ReactNode, useMemo, useState } from 'react';
 import { change, num } from './fmt';
 import { Chart } from './chart';
 import { Figures } from './ui';
-import { card, cx, muted, sectionHead, select as selectField, stamp } from './tw';
+import { card, cx, muted, sectionHead, select as selectField, stampCaps } from './tw';
 
 /** The two inks every plot in the console is drawn in. Validated as a pair: ΔE 23.9 under
  *  deuteranopia, 28.6 in normal vision, both clear of the surface at better than 3:1. */
@@ -240,7 +240,7 @@ export function ScanTrend({ data, className }: { data: Analytics | null; classNa
   return (
     <div className={cx(card, className)}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <b className={cx(stamp, 'shrink-0')}>Scans and signups per day</b>
+        <b className={cx(stampCaps, 'shrink-0')}>Scans and signups per day</b>
         <span className={cx(muted, 'text-[12px]')}>last {days} days</span>
       </div>
       <Series
@@ -261,7 +261,7 @@ function Panel({ title, note, children }: { title: string; note?: string; childr
       {/* the panel's name never wraps: it is the thing being scanned for, and a two-line
           "QR / CODE" reads as two panels. The note gives way instead. */}
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <b className={cx(stamp, 'shrink-0')}>{title}</b>
+        <b className={cx(stampCaps, 'shrink-0')}>{title}</b>
         {note && <span className={cx(muted, 'min-w-0 flex-1 text-right text-[12px]')}>{note}</span>}
       </div>
       {children}

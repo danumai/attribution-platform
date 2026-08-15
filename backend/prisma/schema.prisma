@@ -43,11 +43,19 @@ model Org {
   /// and QR artwork — never an instruction this platform issues or fulfils.
   bonus_label     String?
   suspended     Boolean  @default(false)
+  /// publishers only; an unapproved publisher is hidden from the directory and cannot enter a
+  /// partnership. Auto-true in dev (AUTO_APPROVE_PUBLISHERS); an admin decision in production.
+  approved      Boolean  @default(false)
+  /// single-use password-reset token, admin-issued, stored hashed like the API key
+  reset_token_hash    String?
+  reset_token_expires DateTime? @db.Timestamptz(6)
   created_at    DateTime @default(now()) @db.Timestamptz(6)
 
   promoter_partnerships  Partnership[] @relation("promoter")
   publisher_partnerships Partnership[] @relation("publisher")
   audit_entries          AuditLog[]
+  payments               Payment[]
+  withdrawals            Withdrawal[]
 
   @@index([api_key_hash])
   @@map("orgs")
@@ -74,6 +82,10 @@ model Partnership {
   proposed_coin_rate       Int?
   proposed_guest_rate      Int?
   proposed_engagement_rate Int?
+  /// Basis points of every payout the platform retains — the platform's revenue. Snapshotted
+  /// from PLATFORM_FEE_BPS at creation so a config change never reprices an agreed deal;
+  /// admin-patchable per partnership. Enforced 0–10000 by CHECK.
+  platform_fee_bps  Int      @default(1000)
   /// pending | active | suspended — enforced by CHECK. `pending` is only ever "waiting on the
   /// publisher"; an admin pausing the relationship uses `suspended`, which `accept` cannot lift.
   status            String   @default("pending")
@@ -321,6 +333,47 @@ model AccountBalance {
   balance Int    @default(0)
 
   @@map("account_balances")
+}
+
+/// One row per intended funding. Created at checkout, completed by the PSP webhook; the
+/// ledger ref `fund:{payment_id}` is what makes a redelivered webhook credit once.
+model Payment {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign_id  String    @db.Uuid
+  org_id       String    @db.Uuid
+  coins        Int
+  /// pending | completed | failed — enforced by CHECK
+  status       String    @default("pending")
+  /// the PSP's own charge id — unique when set, so one charge completes at most one payment
+  provider_ref String?
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  completed_at DateTime? @db.Timestamptz(6)
+
+  org Org @relation(fields: [org_id], references: [id])
+
+  @@index([campaign_id])
+  @@index([org_id, created_at(sort: Desc)])
+  @@map("payments")
+}
+
+/// A publisher asking for its earnings. Holds no money until an admin pays it — the ledger
+/// moves (publisher debit, external:payouts credit) only on `paid`.
+model Withdrawal {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publisher_org_id String    @db.Uuid
+  coins            Int
+  /// requested | paid | rejected — enforced by CHECK
+  status           String    @default("requested")
+  /// admin's note on a rejection, or the payout reference on a payment
+  note             String?
+  requested_at     DateTime  @default(now()) @db.Timestamptz(6)
+  decided_at       DateTime? @db.Timestamptz(6)
+
+  publisher Org @relation(fields: [publisher_org_id], references: [id])
+
+  @@index([publisher_org_id, requested_at(sort: Desc)])
+  @@index([status])
+  @@map("withdrawals")
 }
 
 /// Every privileged override lands here, so rule changes are explainable after the fact.

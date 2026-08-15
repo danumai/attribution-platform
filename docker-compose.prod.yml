@@ -49,6 +49,15 @@ services:
       REDIS_URL: ${REDIS_URL:-}
       # Set to serve GET /metrics; absent, the endpoint 404s.
       METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # HMAC secret shared with the payment provider's webhook adapter. Absent, money-in is
+      # off: POST /v1/payments/webhook answers 404.
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
+      # Slack-compatible URL for operational alerts (ledger drift, budgets running dry).
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      # The platform's take rate in basis points (1000 = 10%), snapshotted per partnership.
+      PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-1000}
+      # Days earned fees stay unwithdrawable — the fraud-review clawback window.
+      SETTLEMENT_DELAY_DAYS: ${SETTLEMENT_DELAY_DAYS:-14}
     ports:
       - '4000:4000'
     healthcheck:
@@ -57,6 +66,28 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # Nightly logical backup of the one thing that cannot be re-derived: the ledger. Keeps 14
+  # days locally; ship the volume off-host (object storage, rsync) for real durability.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - dbbackups:/backups
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          pg_dump -h db -U qrreward qrreward | gzip > "/backups/qrreward-$$(date +%Y%m%d-%H%M%S).sql.gz" \
+            && echo "backup written" || echo "BACKUP FAILED" >&2
+          ls -1t /backups/qrreward-*.sql.gz 2>/dev/null | tail -n +15 | xargs -r rm --
+          sleep 86400
+        done
 
   web:
     build:
@@ -74,3 +105,4 @@ services:
 
 volumes:
   dbdata:
+  dbbackups:

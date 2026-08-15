@@ -19,11 +19,25 @@ export const card = 'relative rounded-xl border border-line bg-card p-6 shadow-c
 /** the small field label — sentence case, muted, sits above its value */
 export const stamp = 'text-stamp text-mut';
 
+/**
+ * The same label in the landing page's wide-tracked caps.
+ *
+ * The split between this and `stamp` is by what the label is doing, not by which surface
+ * it is on. `stamp` names a control a reader is about to operate — a form label is read
+ * once per interaction and sentence case is faster to read. This one names a *column*: the
+ * heading over a figure, a table head, a section rule. Those are read as identity, glanced
+ * at repeatedly and never read as prose, and caps at 10.5px is what makes a label stop
+ * competing with the number underneath it for the same rank in the type hierarchy.
+ *
+ * It is also what stops the console and the landing page from looking like two products.
+ */
+export const stampCaps = 'text-stamp-caps uppercase text-mut';
+
 export const muted = 'text-[14px] text-mut';
 
-/** section head: a real heading, with a hairline rule running out from it */
+/** section head: a stamped rule across the page, in the landing page's own register */
 export const sectionHead =
-  'mt-10 mb-4 flex items-center gap-4 text-[13px] font-semibold tracking-[-0.006em] text-ink ' +
+  'mt-10 mb-4 flex items-center gap-3.5 text-stamp-caps uppercase font-semibold text-ink-soft ' +
   "after:content-[''] after:h-px after:flex-1 after:bg-line";
 
 /* ---- buttons ---- */
@@ -31,10 +45,14 @@ export const sectionHead =
 /* Shape and behaviour only — no padding and no colour, so an odd-shaped control
    (an icon square, a tab, a preset plate) composes from the same base without two
    utilities fighting over the same property. */
+/* The press is deliberately on the base rather than on each ink: a control that lights up
+   under the cursor but does not move under the finger reads as a picture of a button. One
+   pixel is the whole effect — enough to feel, too little to reflow anything around it. */
 export const btnBase =
   'relative cursor-pointer rounded-lg border ' +
   'text-[13.5px] font-medium tracking-[-0.006em] whitespace-nowrap no-underline ' +
-  'transition-[background-color,border-color,box-shadow,opacity,color] duration-200 ease-press ' +
+  'transition-[background-color,border-color,box-shadow,opacity,color,translate] duration-200 ease-press ' +
+  'active:translate-y-px disabled:active:translate-y-0 ' +
   'disabled:cursor-not-allowed disabled:opacity-45';
 
 /** the four inks a control can be printed in */
@@ -114,8 +132,11 @@ export function tab(selected: boolean) {
 
 export const table = 'w-full border-collapse text-[13.5px]';
 
+/* A column heading is the archetypal label-as-identity, so it takes the caps stamp. It also
+   stops the head row needing a heavier weight or a darker ink to separate itself from the
+   first row of data — the case change does that on its own, at a lower volume. */
 export const th =
-  'border-b border-line bg-card-alt px-3.5 py-3 text-left text-[12px] font-medium text-mut';
+  `border-b border-line bg-card-alt px-3.5 py-3.5 text-left ${stampCaps}`;
 
 export const td =
   'border-b border-line-soft px-3.5 py-3 text-left text-ink-soft tabular-nums';
@@ -170,13 +191,27 @@ export function figureColumns(n: number) {
   );
 }
 
-/* The subdivision is a hairline: down the left of every cell and across the top of every
+/* The subdivision is a perforation: down the left of every cell and across the top of every
    wrapped row. Both are laid 1px outside the cell so the strip's own `overflow-hidden` clips
    the ones that would otherwise draw over the card's edge — which is what lets the rules
-   survive a grid that reflows its column count. */
+   survive a grid that reflows its column count.
+
+   This is the one place the console spends a signature. The product prints spending
+   instruments on ticket stock — the landing page is built out of a pass and a tear-off stub —
+   and a strip of figures divided by a perforation is that same object, so the console reads
+   as the same product rather than as a dashboard bolted to the side of one. At 2px on, 4px
+   off it is quieter than the solid hairline it replaces, which is what keeps it a device
+   rather than a costume: from reading distance it is a dashed rule, and it only resolves
+   into a perforation once someone looks at it.
+
+   Both gradients are spelled out in full rather than built by a helper: Tailwind extracts
+   candidates from the source text, so a class name assembled from a variable is a class name
+   that never gets generated. */
 const cellRules =
-  "before:absolute before:inset-y-0 before:-left-px before:w-px before:content-[''] before:bg-line " +
-  "after:absolute after:inset-x-0 after:-top-px after:h-px after:content-[''] after:bg-line";
+  "before:absolute before:inset-y-0 before:-left-px before:w-px before:content-[''] " +
+  'before:bg-[repeating-linear-gradient(to_bottom,var(--color-line)_0_2px,transparent_2px_6px)] ' +
+  "after:absolute after:inset-x-0 after:-top-px after:h-px after:content-[''] " +
+  'after:bg-[repeating-linear-gradient(to_right,var(--color-line)_0_2px,transparent_2px_6px)]';
 
 export const figureCell = `relative px-5 py-4.5 text-left ${cellRules}`;
 
@@ -250,7 +285,8 @@ export function pill(status?: string | null) {
  *
  *  No entrance of its own either: the section it sits in already rises once, and seven
  *  numbers each counting themselves in is decoration. */
-export const figure = 'block text-[clamp(21px,1.9vw,28px)] font-semibold tracking-[-0.03em]';
+export const figure =
+  'block text-[clamp(22px,1.95vw,29px)] font-[660] tracking-[-0.035em] text-ink';
 
 /**
  * The signed change under a figure.
@@ -259,11 +295,17 @@ export const figure = 'block text-[clamp(21px,1.9vw,28px)] font-semibold trackin
  * `goodUp` rather than the chip assuming green-is-up: scans rising is good, and a budget
  * burning down faster is not. The arrow carries the direction on its own, so the chip
  * still reads correctly with the colour taken away.
+ *
+ * Tinted, not bare. Coloured text floating under a figure has no edge, so at 12px it reads
+ * as part of the number's own descender line rather than as a separate fact about it; a
+ * soft plate gives it a boundary and lets it sit at the same rank as a status pill, which
+ * is what it is. It borrows the pill's own tints so the console has one vocabulary for
+ * "a small piece of tinted state" instead of two.
  */
 export function delta(good: boolean) {
   return cx(
-    'inline-flex items-center gap-0.75 text-[12px] font-medium tabular-nums',
-    good ? 'text-ok' : 'text-bad',
+    'inline-flex items-center gap-0.5 rounded-md border px-1.5 py-px text-[11.5px] font-semibold tabular-nums',
+    good ? 'border-ok-line bg-ok-soft text-ok' : 'border-bad-line bg-bad-soft text-bad',
   );
 }
 

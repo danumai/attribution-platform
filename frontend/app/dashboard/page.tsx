@@ -40,7 +40,7 @@ import {
   queueCount,
   queueRow,
   sectionHead,
-  stamp,
+  stampCaps,
   table,
   tableWrap,
   td,
@@ -584,7 +584,7 @@ export default function Dashboard() {
           {loaded && daily && daily.labels.length > 1 && (
             <div className={cx(card, 'mt-3')}>
               <div className="mb-3 flex items-baseline justify-between gap-3">
-                <b className={cx(stamp, 'shrink-0')}>Redemptions per day</b>
+                <b className={cx(stampCaps, 'shrink-0')}>Redemptions per day</b>
                 <span className={cx(muted, 'text-[12px]')}>
                   {capped ? 'as far back as the newest 100 reach' : `last ${daily.labels.length} days`}
                 </span>
@@ -605,7 +605,7 @@ export default function Dashboard() {
           {loaded && redemptions.length > 0 && (
             <div className={cx(card, 'mt-3')}>
               <div className="flex items-baseline justify-between gap-3">
-                <b className={stamp}>Verified vs guest</b>
+                <b className={stampCaps}>Verified vs guest</b>
                 <span className={muted}>
                   {capped ? 'newest 100 redemptions' : `${num(redemptions.length)} redemptions`}
                 </span>
@@ -869,7 +869,7 @@ export default function Dashboard() {
                     ['Covers', num(covers), 'more signups', meterInk(covers)],
                   ] as const).map(([k, v, unit, ink]) => (
                     <div className="min-w-24" key={k}>
-                      <dt className={stamp}>{k}</dt>
+                      <dt className={stampCaps}>{k}</dt>
                       <dd className={cx(fact, ink)}>
                         {v}{' '}
                         <small className="font-sans text-xs font-normal tracking-normal text-mut">

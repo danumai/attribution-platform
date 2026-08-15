@@ -5,6 +5,7 @@ import { NextFunction, Request, Response, json } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { AppModule } from './app.module';
 import { PrismaExceptionFilter } from './common/prisma-filter';
+import { startReconciliation } from './common/alerts';
 import { log, renderMetrics, requestContext } from './common/obs';
 import { globalRateLimit, securityHeaders } from './common/security';
 import { ENABLE_DOCS, FRONTEND_URLS, METRICS_TOKEN, REDIS_URL, TRUST_PROXY } from './config';
@@ -86,7 +87,16 @@ async function bootstrap() {
   // Before the body parser: a flood should be turned away without first buying it 1mb of
   // JSON parsing per request.
   app.use(globalRateLimit);
-  app.use(json({ limit: '1mb' })); // room for logo data URLs
+  // `verify` stashes the raw bytes for the payment webhook's HMAC check — a signature is over
+  // what was sent, and re-serialising the parsed body is not that.
+  app.use(
+    json({
+      limit: '1mb', // room for logo data URLs
+      verify: (req, _res, buf) => {
+        (req as Request & { rawBody?: Buffer }).rawBody = buf;
+      },
+    }),
+  );
   app.enableCors({ origin: FRONTEND_URLS });
 
   const port = Number(process.env.PORT ?? 4000);
@@ -103,6 +113,10 @@ async function bootstrap() {
     log.warn('ratelimit.process_local', {
       detail: 'REDIS_URL unset — per-IP limits are per-instance. Safe for exactly one replica.',
     });
+
+  // The ledger's integrity checks on a clock instead of a dashboard load — drift means
+  // something is spending against a wrong number, and it must not wait to be noticed.
+  startReconciliation();
 
   // Drain in-flight requests before the process dies: a redeploy mid-transaction would
   // otherwise leave a scan use claimed with no redemption written against it.

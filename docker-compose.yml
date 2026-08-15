@@ -16,5 +16,15 @@ services:
       timeout: 3s
       retries: 10
 
+  # Shared rate-limit counter store — .env sets REDIS_URL to this. Without it every
+  # rate-limit check on the scan hot path warns and falls back to the in-process window.
+  redis:
+    image: redis:7-alpine
+    container_name: qrreward-redis
+    ports:
+      # 6380 on the host, like the db's 5436: this machine runs several stacks and the
+      # default port is routinely already taken. REDIS_URL in .env must agree.
+      - '6380:6379'
+
 volumes:
   dbdata:

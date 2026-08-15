@@ -153,6 +153,45 @@ export const ENABLE_DOCS = flag('ENABLE_DOCS', false);
  */
 export const ALLOW_SELF_FUNDING = flag('ALLOW_SELF_FUNDING', false);
 
+/**
+ * Whether a publisher signup is usable immediately. In production a publisher must be
+ * approved by an admin before it appears in the directory or can enter a partnership —
+ * "sign up, look legitimate, receive money" must not be one unauthenticated flow. On locally
+ * (and in the e2e suite) so the demo stack works without an approval step.
+ */
+export const AUTO_APPROVE_PUBLISHERS = flag('AUTO_APPROVE_PUBLISHERS', false);
+
+/**
+ * Basis points of every payout the platform keeps — the take rate, i.e. the business model.
+ * Snapshotted onto each partnership at creation (never read live at payout time), so changing
+ * it here only reprices future partnerships; admins reprice existing ones explicitly.
+ * 1000 = 10%. 0 is legal for a launch promotion.
+ */
+export const PLATFORM_FEE_BPS = int('PLATFORM_FEE_BPS', 1000, 0, 10_000);
+
+/**
+ * How long earned fees stay unwithdrawable. This is the platform's clawback window: every
+ * fraud shape the threat model accepts (self-scan, collusion, a disputed attribution) is
+ * bounded by "review runs before real money leaves", and this is the number that makes that
+ * true. 0 disables the holdback — demo stacks only.
+ */
+export const SETTLEMENT_DELAY_DAYS = int('SETTLEMENT_DELAY_DAYS', 14, 0, 365);
+
+/**
+ * HMAC secret shared with the payment provider's webhook. Unset, `POST /v1/payments/webhook`
+ * answers 404 and money-in is impossible — which is the correct failure mode: an unsigned
+ * funding webhook is an endpoint that mints budgets for whoever finds it.
+ */
+export const PAYMENT_WEBHOOK_SECRET = process.env.PAYMENT_WEBHOOK_SECRET ?? '';
+if (PROD && PAYMENT_WEBHOOK_SECRET && PAYMENT_WEBHOOK_SECRET.length < 16)
+  throw new Error('PAYMENT_WEBHOOK_SECRET must be at least 16 characters in production');
+
+/**
+ * Where operational alerts (ledger drift, budget exhaustion, webhook failures) are POSTed as
+ * `{ text }` — Slack-compatible. Unset, alerts still land in the structured log as `error`.
+ */
+export const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL ?? '';
+
 /** Super admin, seeded on first boot. Validated here so a bad value fails before the DB is touched. */
 export const ADMIN_EMAIL = required('ADMIN_EMAIL', 'admin@qrreward.local');
 export const ADMIN_PASSWORD = required('ADMIN_PASSWORD', 'admin12345');

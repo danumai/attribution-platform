@@ -12,7 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ALLOW_SELF_FUNDING, BASE_URL } from '../../config';
+import { ALLOW_SELF_FUNDING, BASE_URL, PLATFORM_FEE_BPS } from '../../config';
 import {
   validateAndroidPackage,
   validateBonusLabel,
@@ -23,7 +23,7 @@ import { capped } from '../../common/paging';
 import { validateRates } from '../../common/rates';
 import { sha256, str, validateDeeplinkUrl, validateLandingUrl } from '../../common/security';
 import { scanAnalytics } from '../../database/analytics';
-import { audit, balance, balances, ledger } from '../../database/ledger';
+import { audit, balance, balances, ledger, withdrawable } from '../../database/ledger';
 import { prisma } from '../../database/prisma';
 import { AuthGuard, Session } from '../auth/auth.guard';
 import { SessionClaims, newApiKey, newShortCode } from '../auth/tokens';
@@ -38,10 +38,12 @@ export class PortalController {
   // `ready` is what a promoter actually needs before committing a print run: a publisher with
   // no destination registered redirects nobody, so every scan of that campaign dies at
   // `no_destination`. Suspended publishers are hidden — partnering with one can never pay out.
+  // Unapproved ones too: an account nobody has vetted must not be one partnership away from
+  // receiving money.
   @Get('publishers')
   async publishers() {
     const rows = await prisma.org.findMany({
-      where: { type: 'publisher', suspended: false },
+      where: { type: 'publisher', suspended: false, approved: true },
       select: {
         id: true,
         name: true,
@@ -76,7 +78,7 @@ export class PortalController {
     // hides — none of which can ever pay out, so every campaign built on it dies at the
     // redirect with `no_destination` and the promoter has already printed the codes.
     const publisher = await prisma.org.findFirst({
-      where: { id: b.publisher_org_id, type: 'publisher', suspended: false },
+      where: { id: b.publisher_org_id, type: 'publisher', suspended: false, approved: true },
       select: { id: true },
     });
     if (!publisher) throw new BadRequestException('no such publisher');
@@ -89,6 +91,9 @@ export class PortalController {
           promoter_org_id: s.org_id,
           publisher_org_id: b.publisher_org_id,
           ...rates,
+          // Snapshotted, not read live at payout time: changing the platform default must
+          // never silently reprice a deal both parties already agreed to.
+          platform_fee_bps: PLATFORM_FEE_BPS,
         },
       });
       await audit(s.org_id, 'partnership.create', `partnership:${created.id}`, {
@@ -548,12 +553,18 @@ export class PortalController {
         deeplink_url: true,
         bonus_label: true,
         suspended: true,
+        approved: true,
       },
     });
     // Every fee a publisher has earned lands in `publisher:{org_id}`; the admin portal could
-    // read it and the publisher could not. Same number, own tenant.
+    // read it and the publisher could not. Same number, own tenant. `withdrawable` is the
+    // slice of it that has cleared the settlement window and is not already queued.
     return org.type === 'publisher'
-      ? { ...org, earnings: await balance(`publisher:${org.id}`) }
+      ? {
+          ...org,
+          earnings: await balance(`publisher:${org.id}`),
+          withdrawable: await prisma.$transaction((tx) => withdrawable(tx, org.id)),
+        }
       : org;
   }
 
@@ -609,6 +620,44 @@ export class PortalController {
     // rejected is an inbox item about something that never happened.
     await audit(s.org_id, 'org.patch', `org:${s.org_id}`, data);
     return updated;
+  }
+
+  // ---------- withdrawals (publisher money-out) ----------
+
+  /**
+   * Ask for earned fees to be paid out. A request, not a transfer: the ledger only moves when
+   * an admin pays it, and the amount is capped at what has cleared the settlement window —
+   * which is the platform's fraud-review clawback period, not a cashflow convenience.
+   */
+  @Post('withdrawals')
+  async requestWithdrawal(@Session() s: SessionClaims, @Body() b: { coins: number }) {
+    if (s.type !== 'publisher') throw new ForbiddenException('publishers only');
+    if (!Number.isInteger(b.coins) || b.coins < 1 || b.coins > 10_000_000)
+      throw new BadRequestException('coins must be 1–10000000');
+    const created = await prisma.$transaction(async (tx) => {
+      // `withdrawable` locks the balance row, so two concurrent requests serialise here and
+      // the second is judged against a pool the first has already claimed from.
+      const available = await withdrawable(tx, s.org_id);
+      if (b.coins > available)
+        throw new BadRequestException(
+          `only ${available} coins are withdrawable — the rest is still inside the settlement window`,
+        );
+      return tx.withdrawal.create({ data: { publisher_org_id: s.org_id, coins: b.coins } });
+    });
+    // Tenant actor, so it lands in the admin inbox — a payout request is exactly the kind of
+    // thing an operator must see before it goes stale.
+    await audit(s.org_id, 'withdrawal.request', `withdrawal:${created.id}`, { coins: b.coins });
+    return created;
+  }
+
+  @Get('withdrawals')
+  async listWithdrawals(@Session() s: SessionClaims, @Query('limit') limit?: string) {
+    if (s.type !== 'publisher') throw new ForbiddenException('publishers only');
+    return prisma.withdrawal.findMany({
+      where: { publisher_org_id: s.org_id },
+      orderBy: { requested_at: 'desc' },
+      take: capped(limit),
+    });
   }
 
   @Get('redemptions')

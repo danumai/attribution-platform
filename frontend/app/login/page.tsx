@@ -25,7 +25,7 @@ import {
   field,
   hint,
   label,
-  stamp,
+  stampCaps,
   tab,
   tabs,
 } from '@/lib/tw';
@@ -277,7 +277,7 @@ function Login() {
           {mode === 'signup' ? (
             <>
               <div>
-                <span className={stamp}>{role.title}</span>
+                <span className={stampCaps}>{role.title}</span>
                 <p className="mt-1.5 text-[13.5px] font-medium tracking-[-0.008em] text-ink">
                   {role.body}
                 </p>
@@ -294,7 +294,7 @@ function Login() {
           ) : (
             <>
               <div>
-                <span className={stamp}>QR Reward Platform</span>
+                <span className={stampCaps}>QR Reward Platform</span>
                 <p className="mt-1.5 text-[13.5px] font-medium tracking-[-0.008em] text-ink">
                   Pay for signups, not for scans.
                 </p>

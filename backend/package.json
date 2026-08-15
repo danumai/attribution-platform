@@ -5,7 +5,7 @@
     "start": "node --env-file-if-exists=../.env -r ts-node/register src/main.ts",
     "build": "rm -rf dist && prisma generate && tsc",
     "start:prod": "node dist/main.js",
-    "test:unit": "node -r ts-node/register test/security.test.ts && node -r ts-node/register test/qr.test.ts && node -r ts-node/register test/attribution.test.ts && node -r ts-node/register test/signals.test.ts && node -r ts-node/register test/obs.test.ts",
+    "test:unit": "node -r ts-node/register test/security.test.ts && node -r ts-node/register test/qr.test.ts && node -r ts-node/register test/attribution.test.ts && node -r ts-node/register test/signals.test.ts && node -r ts-node/register test/obs.test.ts && node -r ts-node/register test/money.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

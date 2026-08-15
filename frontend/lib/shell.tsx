@@ -10,7 +10,7 @@ import { ReactNode, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { TicketMark } from '@/lib/mark';
-import { btnBase, cx, h1, inkAccent, muted, riseStagger, stamp } from '@/lib/tw';
+import { btnBase, cx, h1, inkAccent, muted, riseStagger, stampCaps } from '@/lib/tw';
 
 export type NavItem = {
   id: string;
@@ -91,7 +91,7 @@ export function Shell({
     const head = it.group && it.group !== items[i - 1]?.group && (
       <span
         key={`${it.group}-h`}
-        className={`${stamp} block px-3 pt-4 pb-1.5 text-[11.5px] font-semibold`}
+        className={`${stampCaps} block px-3 pt-5 pb-2 font-semibold`}
       >
         {it.group}
       </span>
@@ -163,7 +163,7 @@ export function Shell({
           </span>
           <div className="min-w-0 leading-[1.3]">
             <b className="block truncate text-[13.5px] font-semibold tracking-[-0.012em]">{org.name}</b>
-            <span className={`${stamp} block capitalize`}>
+            <span className={`${stampCaps} block`}>
               {org.type === 'admin' ? 'Super admin' : org.type}
             </span>
           </div>

@@ -22,6 +22,7 @@ import {
   validateDeeplinkUrl,
   validateLandingUrl,
 } from '../../common/security';
+import { AUTO_APPROVE_PUBLISHERS } from '../../config';
 import { prisma } from '../../database/prisma';
 import { asOrgType, newApiKey, signSession } from './tokens';
 
@@ -82,6 +83,9 @@ export class AuthController {
     // is also what keeps the two paths symmetric — a promoter that later runs an engagement
     // campaign does not have to discover that its account was created without a credential.
     const apiKey = newApiKey();
+    // Approval gates the *publisher* side only — publishers receive money, so in production a
+    // human looks first. Promoters pay in and gate themselves with their own budget.
+    const approved = b.type === 'promoter' || AUTO_APPROVE_PUBLISHERS;
     let org;
     try {
       org = await prisma.org.create({
@@ -96,8 +100,9 @@ export class AuthController {
           ios_app_id,
           deeplink_url,
           bonus_label,
+          approved,
         },
-        select: { id: true, name: true, type: true },
+        select: { id: true, name: true, type: true, approved: true },
       });
     } catch (e: any) {
       if (e.code === 'P2002') throw new BadRequestException('email already registered');
@@ -108,7 +113,38 @@ export class AuthController {
       org,
       // shown once — store it now; only a rotation can ever issue another
       api_key: apiKey,
+      /** publishers only: until an admin approves, the org is hidden from the directory */
+      approval_pending: !org.approved,
     };
+  }
+
+  /**
+   * Complete an admin-issued password reset. The token arrives out of band (an admin generated
+   * it via `POST /v1/admin/orgs/:id/reset-token` and relayed it over a channel they trust);
+   * this endpoint is deliberately mailer-free — when an email sender exists, it calls the same
+   * admin issuance and delivers the link itself.
+   */
+  @Post('reset')
+  async reset(@Req() req: Request, @Body() b: { token: string; password: string }) {
+    if (await rateLimited(`reset:${clientIp(req)}`, 10))
+      throw new UnauthorizedException('too many attempts, try again shortly');
+    const token = str(b.token, 'token', 128)!;
+    const password = str(b.password, 'password', 200)!;
+    if (password.length < 8) throw new BadRequestException('password min 8 chars');
+    if (Buffer.byteLength(password) > MAX_PASSWORD)
+      throw new BadRequestException(`password must be ${MAX_PASSWORD} bytes or fewer`);
+    // Single-use: the same UPDATE that matches the token clears it, so a race between two
+    // submissions of one token changes the password once.
+    const updated = await prisma.org.updateMany({
+      where: { reset_token_hash: sha256(token), reset_token_expires: { gt: new Date() } },
+      data: {
+        password_hash: await bcrypt.hash(password, 10),
+        reset_token_hash: null,
+        reset_token_expires: null,
+      },
+    });
+    if (!updated.count) throw new UnauthorizedException('invalid or expired reset token');
+    return { reset: true };
   }
 
   @Post('login')

@@ -32,7 +32,7 @@ import {
   select,
   skeleton,
   split,
-  stamp,
+  stampCaps,
 } from '@/lib/tw';
 
 type Kind = 'success' | 'error' | 'info';
@@ -208,26 +208,32 @@ export function Figures({
                 cell that jumps somewhere, it takes the validation ink on hover — that plus
                 the cell filling is the affordance, so the strip needs no arrow per cell.
                 There is no `group` on a static cell, so the variant never fires there. */}
-            <span className={cx(stamp, 'block transition-colors duration-150 ease-press group-hover:text-accent-text')}>
+            <span className={cx(stampCaps, 'block transition-colors duration-150 ease-press group-hover:text-accent-text')}>
               {k}
             </span>
             {/* the trace sits beside the figure, not under it: a stat cell is one line of
                 information, and stacking the shape below the number doubles the strip's height
                 to say the same thing */}
-            <span className="mt-1 flex items-end justify-between gap-3">
+            <span className="mt-2 flex items-end justify-between gap-3">
               <b className={figure}>{v}</b>
+              {/* The trace yields, the number never does. A six-figure strip on a console that
+                  already spends 248px on the rail gives a cell about 145px of content, and a
+                  seven-digit total plus a fixed-width trace does not fit in it — so the trace
+                  is the flex item that shrinks. The SVG carries a viewBox, so it scales down
+                  uniformly rather than distorting, and it stops at 40px, below which it stops
+                  being a shape and becomes a smudge. */}
               {spark && spark.length > 1 && (
-                <Spark className="mb-1 shrink-0 opacity-80" values={spark} />
+                <Spark className="mb-1.5 h-5 w-18 min-w-10 shrink" values={spark} />
               )}
             </span>
             {delta && (
-              <span className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5">
+              <span className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1">
                 <span className={deltaChip(good)}>
                   <span aria-hidden="true">{up ? '↑' : '↓'}</span>
                   {Math.abs(delta.pct * 100).toFixed(0)}%
                   <span className="sr-only">{up ? 'up' : 'down'}</span>
                 </span>
-                <span className="text-[12px] text-mut">{delta.since}</span>
+                <span className="text-[11.5px] text-mut">{delta.since}</span>
               </span>
             )}
           </>
@@ -306,10 +312,13 @@ export function SkeletonStrip({ cells = 4, className }: { cells?: number; classN
       aria-busy="true"
       aria-label="Loading"
     >
+      {/* Sized to the cell it stands in, not to a generic bar: the label rail is short and
+          the figure under it is tall, so the swap to real data lands as a fill rather than
+          as the strip changing height. */}
       {Array.from({ length: cells }, (_, i) => (
         <div key={i} className={figureCell}>
-          <div className={cx(skeleton, 'w-16')} />
-          <div className={cx(skeleton, 'mt-2.5 h-5 w-12')} />
+          <div className={cx(skeleton, 'h-2 w-14')} />
+          <div className={cx(skeleton, 'mt-3 h-6 w-16')} />
         </div>
       ))}
     </div>

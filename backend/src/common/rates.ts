@@ -63,3 +63,16 @@ export function validateRates(patch: Partial<Rates>, current?: Rates): Rates {
     throw new BadRequestException('guest_rate cannot exceed coin_rate');
   return { coin_rate, guest_rate, grace_days, engagement_rate };
 }
+
+/**
+ * Split a gross payout into the publisher's net and the platform's cut, in basis points.
+ *
+ * Pure and in one place for the same reason `validateRates` is: this is the platform's
+ * revenue, and two call sites rounding differently is a ledger that fails to sum to zero.
+ * `floor` on the cut so rounding always favours the publisher — the party being paid for
+ * work, and the one who would notice a missing coin.
+ */
+export function splitFee(gross: number, bps: number): { net: number; cut: number } {
+  const cut = Math.floor((gross * bps) / 10_000);
+  return { net: gross - cut, cut };
+}

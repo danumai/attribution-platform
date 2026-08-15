@@ -562,6 +562,121 @@ HELDCLAIM=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $
 [ "$HELDCLAIM" = "false" ] && pass "...and stops claims paying out against it" || fail "suspended partnership still pays: $HELDCLAIM"
 A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"status":"active"}' >/dev/null
 
+echo "11b. The business layer: revenue, money in, money out"
+# Runs here on purpose: after section 11 has finished counting the admin inbox (these flows
+# add audit entries of their own) and before section 12 offboards the publisher.
+
+# ---------- the platform's cut ----------
+# Every payout writes three rows under one ref: the campaign is debited the gross, the
+# publisher credited its net, and the platform credited the difference. The invariant worth
+# asserting is not any single number but that those three still reconcile — a cut that rounds
+# independently of the net is a book that silently stops balancing.
+PLATFORM_REV=$(q "SELECT coalesce(sum(amount),0) FROM ledger_entries WHERE account='platform:fees'")
+[ "$PLATFORM_REV" -gt 0 ] && pass "the platform earns a fee on every payout ($PLATFORM_REV credits)" \
+  || fail "platform:fees is empty — the business model is not wired to the ledger"
+# Gross spent by campaigns on payouts == publisher net + platform cut, exactly.
+SPENT=$(q "SELECT coalesce(-sum(amount),0) FROM ledger_entries WHERE account LIKE 'campaign:%' AND amount<0 AND (ref LIKE 'redemption:%' OR ref LIKE 'upgrade:%')")
+CREDITED=$(q "SELECT coalesce(sum(amount),0) FROM ledger_entries WHERE amount>0 AND (ref LIKE 'redemption:%' OR ref LIKE 'upgrade:%')")
+[ "$SPENT" = "$CREDITED" ] && pass "every payout splits without losing a credit ($SPENT out = $CREDITED in)" \
+  || fail "payout split leaks: campaigns spent $SPENT, accounts received $CREDITED"
+# ...and no single payout ref is unbalanced, which a global sum could hide.
+BADREF=$(q "SELECT count(*) FROM (SELECT ref FROM ledger_entries GROUP BY ref HAVING sum(amount)<>0) x")
+[ "$BADREF" = "0" ] && pass "every ledger ref sums to zero individually" || fail "$BADREF unbalanced refs"
+
+# ---------- money in: PSP checkout + signed webhook ----------
+BUDGET_BEFORE=$(q "SELECT coalesce(balance,0) FROM account_balances WHERE account='campaign:$CAMP_ID'")
+CHECKOUT=$(curl -s -XPOST $API/v1/payments/checkout -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"campaign_id\":\"$CAMP_ID\",\"coins\":500}")
+PAY_ID=$(echo "$CHECKOUT" | j .payment_id)
+[ -n "$PAY_ID" ] && [ "$(echo "$CHECKOUT" | j .status)" = "pending" ] \
+  && pass "checkout records an intended funding before any money moves" || fail "checkout: $CHECKOUT"
+# Nothing is credited until the provider confirms — a pending row must not spend.
+MID=$(q "SELECT coalesce(balance,0) FROM account_balances WHERE account='campaign:$CAMP_ID'")
+[ "$MID" = "$BUDGET_BEFORE" ] && pass "a pending payment credits nothing" || fail "budget moved on checkout: $MID"
+
+HOOK_BODY="{\"payment_id\":\"$PAY_ID\",\"provider_ref\":\"pi_test_$S\",\"status\":\"succeeded\"}"
+SECRET=$(sed -n 's/^PAYMENT_WEBHOOK_SECRET=//p' .env | head -1)
+SIG=$(node -e "console.log(require('crypto').createHmac('sha256',process.argv[1]).update(process.argv[2]).digest('hex'))" "$SECRET" "$HOOK_BODY")
+# An unsigned or wrongly-signed callback is the whole attack surface of money-in: it mints
+# budget for whoever finds the URL.
+BADSIG=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/payments/webhook -H 'Content-Type: application/json' \
+  -H 'x-payment-signature: 0000000000000000000000000000000000000000000000000000000000000000' --data-binary "$HOOK_BODY")
+[ "$BADSIG" = "401" ] && pass "a wrongly-signed payment webhook is refused (401)" || fail "bad signature accepted: $BADSIG"
+UNSIGNED=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/payments/webhook -H 'Content-Type: application/json' --data-binary "$HOOK_BODY")
+[ "$UNSIGNED" = "401" ] && pass "an unsigned payment webhook is refused (401)" || fail "unsigned accepted: $UNSIGNED"
+
+PAID=$(curl -s -XPOST $API/v1/payments/webhook -H 'Content-Type: application/json' \
+  -H "x-payment-signature: $SIG" --data-binary "$HOOK_BODY")
+[ "$(echo "$PAID" | j .status)" = "completed" ] && pass "a signed webhook completes the payment" || fail "webhook: $PAID"
+BUDGET_AFTER=$(q "SELECT balance FROM account_balances WHERE account='campaign:$CAMP_ID'")
+[ "$BUDGET_AFTER" = "$((BUDGET_BEFORE + 500))" ] && pass "confirmed payment credits the campaign budget (+500)" \
+  || fail "budget $BUDGET_BEFORE -> $BUDGET_AFTER, expected +500"
+# A PSP redelivers. At-least-once is the normal contract, so crediting twice is the default bug.
+REPLAY=$(curl -s -XPOST $API/v1/payments/webhook -H 'Content-Type: application/json' \
+  -H "x-payment-signature: $SIG" --data-binary "$HOOK_BODY")
+[ "$(echo "$REPLAY" | j .replay)" = "true" ] && pass "a redelivered webhook replays instead of re-crediting" || fail "replay: $REPLAY"
+BUDGET_REPLAY=$(q "SELECT balance FROM account_balances WHERE account='campaign:$CAMP_ID'")
+[ "$BUDGET_REPLAY" = "$BUDGET_AFTER" ] && pass "...and the budget is unchanged by the redelivery" \
+  || fail "double credit: $BUDGET_AFTER -> $BUDGET_REPLAY"
+
+# ---------- money out: settlement-gated withdrawals ----------
+ME=$(curl -s "$API/v1/orgs/me" -H "Authorization: Bearer $PUB_TOKEN")
+EARN=$(echo "$ME" | j .earnings); AVAIL=$(echo "$ME" | j .withdrawable)
+[ -n "$AVAIL" ] && [ "$AVAIL" -le "$EARN" ] && pass "publisher sees what has cleared settlement ($AVAIL of $EARN)" \
+  || fail "withdrawable=$AVAIL earnings=$EARN"
+OVERDRAW=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/withdrawals -H "Authorization: Bearer $PUB_TOKEN" \
+  -H 'Content-Type: application/json' -d "{\"coins\":$((EARN + 1000))}")
+[ "$OVERDRAW" = "400" ] && pass "a publisher cannot withdraw more than it has earned" || fail "overdraw allowed: $OVERDRAW"
+WD=$(curl -s -XPOST $API/v1/withdrawals -H "Authorization: Bearer $PUB_TOKEN" -H 'Content-Type: application/json' -d '{"coins":40}')
+WD_ID=$(echo "$WD" | j .id)
+[ "$(echo "$WD" | j .status)" = "requested" ] && pass "publisher requests a payout (40 credits)" || fail "withdrawal: $WD"
+# The request holds no money yet — the ledger must not move until an admin decides.
+BAL_REQ=$(q "SELECT balance FROM account_balances WHERE account='publisher:$PUB_ID'")
+[ "$BAL_REQ" = "$EARN" ] && pass "a requested payout moves no money" || fail "balance moved on request: $BAL_REQ"
+# ...but it is reserved, so a second request cannot promise the same credits twice.
+AVAIL2=$(curl -s "$API/v1/orgs/me" -H "Authorization: Bearer $PUB_TOKEN" | j .withdrawable)
+[ "$AVAIL2" = "$((AVAIL - 40))" ] && pass "a queued request is reserved against further withdrawals" \
+  || fail "withdrawable $AVAIL -> $AVAIL2, expected $((AVAIL - 40))"
+PAYOUT=$(A -XPOST $API/v1/admin/withdrawals/$WD_ID/pay -H 'Content-Type: application/json' -d '{"note":"bank ref 99"}')
+[ "$(echo "$PAYOUT" | j .status)" = "paid" ] && pass "admin approves it and the money leaves" || fail "pay: $PAYOUT"
+BAL_PAID=$(q "SELECT balance FROM account_balances WHERE account='publisher:$PUB_ID'")
+[ "$BAL_PAID" = "$((EARN - 40))" ] && pass "publisher balance debited exactly once (-40)" || fail "balance=$BAL_PAID expected $((EARN - 40))"
+PAYOUTS=$(q "SELECT coalesce(sum(amount),0) FROM ledger_entries WHERE account='external:payouts'")
+[ "$PAYOUTS" -ge 40 ] && pass "the payout is recorded as money leaving the platform" || fail "external:payouts=$PAYOUTS"
+TWICE=$(A -o /dev/null -w '%{http_code}' -XPOST $API/v1/admin/withdrawals/$WD_ID/pay -H 'Content-Type: application/json' -d '{}')
+[ "$TWICE" = "404" ] && pass "paying the same withdrawal twice is refused" || fail "double payout: $TWICE"
+SUM3=$(q "SELECT sum(amount) FROM ledger_entries")
+[ "$SUM3" = "0" ] && pass "ledger still balances after real money moved in and out" || fail "ledger sum=$SUM3"
+
+# ---------- publisher vetting ----------
+# The dev stack auto-approves so the demo works; production does not. Flip this one publisher
+# to the production behaviour to prove the gate is real rather than merely configured.
+NEWPUB=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Unvetted $S\",\"email\":\"unvetted$S@t.com\",\"password\":\"password123\",\"type\":\"publisher\",\"landing_url\":\"https://unvetted.example/get\"}")
+NEWPUB_ID=$(echo "$NEWPUB" | j .org.id)
+q "UPDATE orgs SET approved=false WHERE id='$NEWPUB_ID'" >/dev/null
+HIDDEN=$(curl -s "$API/v1/publishers" -H "Authorization: Bearer $PRO_TOKEN" | grep -c "Unvetted $S" || true)
+[ "$HIDDEN" = "0" ] && pass "an unapproved publisher is hidden from the directory" || fail "unvetted publisher listed"
+BLOCKED=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships -H "Authorization: Bearer $PRO_TOKEN" \
+  -H 'Content-Type: application/json' -d "{\"publisher_org_id\":\"$NEWPUB_ID\"}")
+[ "$BLOCKED" = "400" ] && pass "...and cannot be partnered with, so it can never be paid" || fail "partnered with unvetted: $BLOCKED"
+A -XPATCH $API/v1/admin/orgs/$NEWPUB_ID -H 'Content-Type: application/json' -d '{"approved":true}' >/dev/null
+SHOWN=$(curl -s "$API/v1/publishers" -H "Authorization: Bearer $PRO_TOKEN" | grep -c "Unvetted $S" || true)
+[ "$SHOWN" = "1" ] && pass "admin approval puts it in the directory" || fail "approval did not publish it"
+
+# ---------- account recovery ----------
+RT=$(A -XPOST $API/v1/admin/orgs/$NEWPUB_ID/reset-token | j .reset_token)
+[ -n "$RT" ] && pass "admin issues a single-use reset token" || fail "no reset token"
+RESET=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/auth/reset -H 'Content-Type: application/json' \
+  -d "{\"token\":\"$RT\",\"password\":\"brand-new-password\"}")
+[ "$RESET" = "201" ] && pass "the locked-out tenant sets a new password" || fail "reset: $RESET"
+RELOGIN=$(curl -s -XPOST $API/v1/auth/login -H 'Content-Type: application/json' \
+  -d "{\"email\":\"unvetted$S@t.com\",\"password\":\"brand-new-password\"}" | j .token)
+[ -n "$RELOGIN" ] && pass "...and can log in with it" || fail "new password rejected"
+REUSE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/auth/reset -H 'Content-Type: application/json' \
+  -d "{\"token\":\"$RT\",\"password\":\"another-password\"}")
+[ "$REUSE" = "401" ] && pass "a spent reset token cannot be replayed" || fail "token reusable: $REUSE"
+
 echo "12. Kill switch & offboarding"
 KILL=$(A -XPOST $API/v1/admin/campaigns/$CAMP_ID/kill -H 'Content-Type: application/json' -d '{"reason":"abuse report"}')
 [ "$(echo "$KILL" | j .status)" = "ended" ] && pass "kill switch ends the campaign" || fail "kill: $KILL"

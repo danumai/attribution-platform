@@ -45,8 +45,9 @@ import {
   normTz,
 } from '../../common/attribution';
 import { recordDecision } from '../../common/obs';
+import { splitFee } from '../../common/rates';
 import { ipHash, sha256, str } from '../../common/security';
-import { ledger, lockedBalance } from '../../database/ledger';
+import { lockedBalance, payout } from '../../database/ledger';
 import { Tx, prisma } from '../../database/prisma';
 import { orgFromKey } from './api-key';
 
@@ -60,6 +61,8 @@ interface ClaimableScan {
   coin_rate: number;
   guest_rate: number;
   grace_days: number;
+  /** basis points of the payout the platform retains, snapshotted on the partnership */
+  platform_fee_bps: number;
   /** the scan's stored device signals, scored against the ones presented at first open */
   tz: string | null;
   screen: string | null;
@@ -79,7 +82,7 @@ interface ClaimableScan {
 const byReferrer = (tx: Tx, publisherId: string, claimId: string) =>
   tx.$queryRaw<ClaimableScan[]>`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
-           p.coin_rate, p.guest_rate, p.grace_days,
+           p.coin_rate, p.guest_rate, p.grace_days, p.platform_fee_bps,
            s.tz, s.screen, s.language, s.cores, s.dark
     FROM scans s
     JOIN campaigns c    ON c.id = s.campaign_id
@@ -111,7 +114,7 @@ const fingerprintCandidates = (
 ) =>
   tx.$queryRaw<ClaimableScan[]>`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
-           p.coin_rate, p.guest_rate, p.grace_days,
+           p.coin_rate, p.guest_rate, p.grace_days, p.platform_fee_bps,
            s.tz, s.screen, s.language, s.cores, s.dark
     FROM scans s
     JOIN campaigns c    ON c.id = s.campaign_id
@@ -251,7 +254,7 @@ async function claimInstall(tx: Tx, publisherId: string, installId: string): Pro
     (ClaimableScan & { install_expired: boolean; confidence: number; match_method: string })[]
   >`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status,
-           p.coin_rate, p.guest_rate, p.grace_days,
+           p.coin_rate, p.guest_rate, p.grace_days, p.platform_fee_bps,
            s.tz, s.screen, s.language, s.cores, s.dark,
            i.confidence, i.match_method, (i.expires_at <= now()) AS install_expired
     FROM installs i
@@ -291,6 +294,7 @@ interface ClaimableCode {
   campaign_name: string;
   status: string;
   engagement_rate: number;
+  platform_fee_bps: number;
 }
 
 /**
@@ -318,7 +322,7 @@ async function claimCode(tx: Tx, publisherId: string, code: string): Promise<Cla
   // relying on the unique index to tell one of them it lost.
   const rows = await tx.$queryRaw<(ClaimableCode & { mode: string })[]>`
     SELECT q.id AS qr_code_id, s.id AS scan_id, c.id AS campaign_id, c.name AS campaign_name,
-           c.status, c.mode, p.engagement_rate
+           c.status, c.mode, p.engagement_rate, p.platform_fee_bps
     FROM qr_codes q
     JOIN scans s        ON s.qr_code_id = q.id
     JOIN campaigns c    ON c.id = q.campaign_id
@@ -668,8 +672,9 @@ export class PartnerController {
       }
 
       const ref = `redemption:${red.id}`;
-      await ledger(tx, `campaign:${scan.campaign_id}`, -fee, ref);
-      await ledger(tx, `publisher:${publisher.id}`, fee, ref);
+      const { net, cut } = await payout(
+        tx, scan.campaign_id, publisher.id, fee, scan.platform_fee_bps, ref,
+      );
 
       // The fee is the number worth being able to sum from logs alone when the ledger is the
       // thing under question.
@@ -681,6 +686,7 @@ export class PartnerController {
           campaign_id: scan.campaign_id,
           attribution_id: red.id,
           fee,
+          platform_fee: cut,
           identified,
         },
       );
@@ -693,8 +699,11 @@ export class PartnerController {
         match_method,
         confidence,
         identified,
-        /** marketing fee earned by the publisher, in platform credits. Not user currency. */
+        /** gross marketing fee, in platform credits — what the campaign budget spent. */
         fee,
+        /** what actually landed in the publisher's account: fee minus the platform's cut */
+        publisher_net: net,
+        platform_fee: cut,
         pending_fee: identified ? 0 : scan.coin_rate - scan.guest_rate,
         confirm_deadline: identified
           ? null
@@ -727,11 +736,12 @@ export class PartnerController {
      */
     const prior = await prisma.redemption.findFirst({
       where: { campaign_id: replayCampaignId!, publisher_user_ref },
-      include: { campaign: { select: { name: true, partnership: { select: { coin_rate: true, grace_days: true } } } } },
+      include: { campaign: { select: { name: true, partnership: { select: { coin_rate: true, grace_days: true, platform_fee_bps: true } } } } },
     });
     // Gone only if the campaign was deleted between the two calls; nothing left to replay.
     if (!prior) throw new ConflictException('duplicate_user');
-    const { coin_rate, grace_days } = prior.campaign.partnership;
+    const { coin_rate, grace_days, platform_fee_bps } = prior.campaign.partnership;
+    const split = splitFee(prior.coins, platform_fee_bps);
     // Counted separately from a fresh attribution: a replay moved no money, and a publisher
     // whose replay rate is climbing is one whose retry logic is firing, which is worth seeing.
     recordDecision(
@@ -748,6 +758,8 @@ export class PartnerController {
       confidence: prior.confidence,
       identified: prior.identified,
       fee: prior.coins,
+      publisher_net: split.net,
+      platform_fee: split.cut,
       pending_fee: prior.identified ? 0 : coin_rate - prior.coins,
       confirm_deadline: prior.identified
         ? null
@@ -828,8 +840,9 @@ export class PartnerController {
         }
 
         const ref = `redemption:${red.id}`;
-        await ledger(tx, `campaign:${m.campaign_id}`, -fee, ref);
-        await ledger(tx, `publisher:${publisher.id}`, fee, ref);
+        const { net, cut } = await payout(
+          tx, m.campaign_id, publisher.id, fee, m.platform_fee_bps, ref,
+        );
 
         recordDecision(
           'claim',
@@ -839,6 +852,7 @@ export class PartnerController {
             campaign_id: m.campaign_id,
             attribution_id: red.id,
             fee,
+            platform_fee: cut,
             kind: 'engagement',
           },
         );
@@ -853,8 +867,11 @@ export class PartnerController {
           match_method: 'code',
           confidence: 100,
           identified: true,
-          /** marketing fee earned by the publisher, in platform credits. Not user currency. */
+          /** gross marketing fee, in platform credits — what the campaign budget spent. */
           fee,
+          /** what actually landed in the publisher's account: fee minus the platform's cut */
+          publisher_net: net,
+          platform_fee: cut,
           /** always 0 and always null: an engagement payout settles in one step. */
           pending_fee: 0,
           confirm_deadline: null,
@@ -872,9 +889,10 @@ export class PartnerController {
 
     const prior = await prisma.redemption.findFirst({
       where: { qr_code_id: replayQrCodeId!, kind: 'engagement' },
-      include: { campaign: { select: { name: true } } },
+      include: { campaign: { select: { name: true, partnership: { select: { platform_fee_bps: true } } } } },
     });
     if (!prior) throw new ConflictException('already_claimed');
+    const priorSplit = splitFee(prior.coins, prior.campaign.partnership.platform_fee_bps);
 
     /**
      * Two very different situations reach this line, and they must not get the same answer.
@@ -905,6 +923,8 @@ export class PartnerController {
       confidence: prior.confidence,
       identified: true,
       fee: prior.coins,
+      publisher_net: priorSplit.net,
+      platform_fee: priorSplit.cut,
       pending_fee: 0,
       confirm_deadline: null,
       bonus_label: publisher.bonus_label,
@@ -932,11 +952,12 @@ export class PartnerController {
           campaign_id: string;
           coin_rate: number;
           grace_days: number;
+          platform_fee_bps: number;
           partnership_status: string;
         }[]
       >`
         SELECT rd.id, rd.coins, rd.identified, rd.created_at, rd.campaign_id,
-               p.coin_rate, p.grace_days, p.status AS partnership_status
+               p.coin_rate, p.grace_days, p.platform_fee_bps, p.status AS partnership_status
         FROM redemptions rd
         JOIN campaigns c ON c.id = rd.campaign_id
         JOIN partnerships p ON p.id = c.partnership_id
@@ -963,9 +984,9 @@ export class PartnerController {
       if (delta > 0) {
         if ((await lockedBalance(tx, `campaign:${red.campaign_id}`)) < delta)
           throw new ConflictException('budget_exhausted');
-        const ref = `upgrade:${red.id}`;
-        await ledger(tx, `campaign:${red.campaign_id}`, -delta, ref);
-        await ledger(tx, `publisher:${publisher.id}`, delta, ref);
+        // Same split as the original guest payment, so the platform's cut is taken on the
+        // whole coin_rate however the fee arrived — in one piece or in two.
+        await payout(tx, red.campaign_id, publisher.id, delta, red.platform_fee_bps, `upgrade:${red.id}`);
       }
       await tx.redemption.update({
         where: { id: red.id },

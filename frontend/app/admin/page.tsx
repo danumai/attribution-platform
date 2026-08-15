@@ -57,7 +57,7 @@ import {
   searchInput,
   sectionHead,
   select as selectField,
-  stamp,
+  stampCaps,
   table,
   tableFoot,
   tableWrap,
@@ -625,7 +625,7 @@ export default function Admin() {
             {o.redemptions > 0 && (
               <div className={cx(card, 'mt-3')}>
                 <div className="flex items-baseline justify-between gap-3">
-                  <b className={stamp}>Verified vs guest</b>
+                  <b className={stampCaps}>Verified vs guest</b>
                   <span className={muted}>{num(o.redemptions)} redemptions</span>
                 </div>
                 <Split

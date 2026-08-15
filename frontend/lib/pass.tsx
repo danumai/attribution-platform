@@ -5,7 +5,7 @@
  */
 import { ReactNode } from 'react';
 import { TicketMark } from '@/lib/mark';
-import { cx, riseStagger, stamp } from '@/lib/tw';
+import { cx, riseStagger, stampCaps } from '@/lib/tw';
 
 /** the page frame the card sits on */
 export const passPage = cx(
@@ -143,7 +143,7 @@ export function Fields({ items }: { items: [string, ReactNode][] }) {
     <dl className="grid gap-4">
       {items.map(([dt, dd]) => (
         <div key={dt}>
-          <dt className={stamp}>{dt}</dt>
+          <dt className={stampCaps}>{dt}</dt>
           <dd className="mt-1 text-[13.5px] font-medium tracking-[-0.008em] text-ink">{dd}</dd>
         </div>
       ))}
