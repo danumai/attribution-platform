@@ -35,7 +35,7 @@ servers in one terminal (Ctrl-C stops everything).
 | `pnpm run dev` | Full stack: db + api + web |
 | `pnpm run db:migrate` | Create a migration after editing `backend/prisma/schema.prisma` |
 | `pnpm run db:studio` | Browse the database in Prisma Studio |
-| `pnpm run seed` | Demo promoter, publisher, funded campaign, QR — prints logins |
+| `pnpm run seed` | A month of demo data: tenants, partnerships, campaigns in both modes, scans, payouts — prints logins, keys and scan URLs |
 | `pnpm test` | Security self-check, then the end-to-end suite: full loop, reward tiers, code bounds, security, fraud, ledger integrity, admin portal |
 | `pnpm run build` | Compile both workspaces for production |
 | `pnpm start` | Run the compiled build (expects a configured environment) |
@@ -43,15 +43,19 @@ servers in one terminal (Ctrl-C stops everything).
 
 ## Try it in the browser
 
-Run `pnpm run seed`, then sign in with the promoter login it prints.
+Run `pnpm run seed`, then sign in as `promoter@demo.com` / `password123`.
+**[DEMO.md](DEMO.md)** is the full walkthrough and the test checklist; the short version:
 
-1. **Promoter view** — the seeded campaign has a 5000-coin budget. Open **QR codes &
-   stats** to design the QR: colors, size, quiet zone, error correction, logo. Save or
-   download it as print-ready SVG.
-2. **End user** — open the printed scan URL (`http://localhost:4000/r/{code}`) in a
+1. **Promoter view** — four campaigns with a month of history behind them. Open one for its
+   scan analytics, then design its QR: colors, size, quiet zone, error correction, logo, and
+   download print-ready SVG or PNG.
+2. **End user** — open the scan URL the seeder printed (`http://localhost:4000/r/{code}`) in a
    private window, or scan the QR with your phone. You land on the publisher sim.
-3. Sign up there with any email, pasting the seeded API key into the form. Coins land.
-4. **Both dashboards** now show the scan, the redemption, and the budget drawdown.
+3. Sign up there with any email, pasting the seeded API key into the form. The guest fee is
+   paid immediately; **Confirm** releases the rest.
+4. Scan the engagement code instead and the app is handed a transaction code — one repeat
+   purchase, paid once, whatever the customer's account age.
+5. **Both dashboards** now show the scan, the redemption, and the budget drawdown.
 
 To build the whole thing by hand instead, sign up as a publisher (landing URL
 `http://localhost:3000/publisher-sim`), sign up as a promoter in another browser profile,
@@ -99,8 +103,25 @@ Demo promoter/publisher tenants are skipped entirely when `NODE_ENV=production`.
 
 Operational notes: `GET /healthz` checks the database and is what the load balancer should
 poll. `SIGTERM` drains in-flight requests and closes the pool before exit, so a redeploy
-cannot tear down a half-written attribution. The rate limiter is per-process — running more
-than one instance needs the Redis swap noted in `common/security.ts`.
+cannot tear down a half-written attribution. Rate limits are counted in Redis when `REDIS_URL`
+is set and in-process when it is not — they are security controls, so a second replica without
+a shared store doubles every one of them. `docker-compose.yml` runs Redis on host port
+**6380** (6379 is routinely taken by another stack). A background sweep re-checks the ledger
+for drift every 10 minutes and pushes anything it finds to `ALERT_WEBHOOK_URL`.
+
+### The business layer
+
+| Setting | Default | What it decides |
+|---|---|---|
+| `PLATFORM_FEE_BPS` | `1000` (10%) | The platform's cut of every payout, written to `platform:fees` in the same transaction. Snapshotted onto each partnership at creation, so changing it never reprices an agreed deal. |
+| `SETTLEMENT_DELAY_DAYS` | `14` | How long earnings stay unwithdrawable — the clawback window that makes fraud review a control rather than advice. |
+| `PAYMENT_WEBHOOK_SECRET` | unset | HMAC-SHA256 secret for `POST /v1/payments/webhook`. **Unset means money-in is off** (the route 404s), which is the right default for an endpoint that credits budgets. |
+| `AUTO_APPROVE_PUBLISHERS` | off in prod | A publisher receives money, so an admin approves it before it appears in the directory or can be partnered with. |
+| `ALERT_WEBHOOK_URL` | unset | Slack-compatible sink for ledger drift and budgets about to run dry. Alerts always reach the log regardless. |
+
+Money in is `POST /v1/payments/checkout` → the provider's signed webhook (idempotent on
+redelivery). Money out is `POST /v1/withdrawals` → an admin pays or rejects it. Neither the
+promoter nor the publisher can move money on their own say-so.
 
 ## Database
 
@@ -143,8 +164,9 @@ old script used different index and constraint names.
 | `backend/src/modules/auth/` | Signup/login, session JWT, API keys, claim ids, `AuthGuard` / `AdminGuard` |
 | `backend/src/modules/partner/` | `POST /v1/attribution/claim` — the money path, one DB transaction |
 | `backend/src/modules/public/` | `GET /r/:code` scan redirect + QR image render |
-| `backend/src/modules/portal/` | Portal API — partnerships, campaigns, funding, QR CRUD |
-| `backend/src/modules/admin/` | Admin API — cross-tenant reads + overrides, `AdminGuard` |
+| `backend/src/modules/portal/` | Portal API — partnerships, campaigns, funding, withdrawals, QR CRUD |
+| `backend/src/modules/payments/` | PSP checkout + the signed, idempotent funding webhook |
+| `backend/src/modules/admin/` | Admin API — cross-tenant reads + overrides, approvals, payouts |
 | `frontend/app/admin` | Super admin portal (tabbed: orgs, campaigns, scans, ledger) |
 | `frontend/app/campaigns/[id]` | QR designer with live preview |
 | `frontend/app/publisher-sim` | Stand-in publisher app; `app/api/sim-signup` is its backend |
@@ -195,9 +217,11 @@ admin override and lands in `GET /v1/admin/audit-log`. A blocked scan redirects 
 
 ## What the design doc has that this build doesn't
 
-Redis (in-memory rate limiter instead), BullMQ workers + outbound webhooks, HMAC request
-signing and idempotency keys on the Partner API, PSP checkout (funding is a direct ledger
-credit), settlement statements, multi-user orgs with RBAC roles. Marked with `ponytail:`
+BullMQ workers + outbound webhooks, HMAC request signing on the Partner API (the *payment*
+webhook is signed; the partner API authenticates by key), an adapter for one named PSP (the
+checkout + webhook contract is built and idempotent, but nothing talks to Stripe yet), email
+delivery for password resets (an admin issues the token; only the mailer is missing),
+per-publisher settlement statements, multi-user orgs with RBAC roles. Marked with `ponytail:`
 comments where the shortcut is in the code.
 
 From the CoinGate epics, deliberately **not** built: geo-targeting (Epic 6, needs a Geo-IP

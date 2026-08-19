@@ -1,5 +1,6 @@
 'use client';
 import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { TicketMark } from '@/lib/mark';
 import { num } from '@/lib/fmt';
 import {
@@ -25,6 +26,12 @@ import { alertErr, btn, card, checkLabel, checkbox, cx, field, label, muted, pil
  * was attributable. Any joining bonus shown is the publisher's own, granted by the publisher.
  */
 function Sim() {
+  /**
+   * The one thing an engagement scan puts in the app's hands. It is plumbing between two
+   * servers — inert without the publisher's API key — so it is read off the opening URL and
+   * handed straight to the backend, never shown as something to type in or copy.
+   */
+  const code = useSearchParams().get('qrm_code');
   const [email, setEmail] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [referrer, setReferrer] = useState('');
@@ -59,6 +66,7 @@ function Sim() {
   const signup = (e: any) => {
     e.preventDefault();
     return call({
+      code: code ?? undefined,
       install_referrer: referrer.trim(),
       publisher_user_ref: email.trim().toLowerCase(),
       // Android hands the app a referrer; without one this falls back to the fingerprint match.
@@ -113,7 +121,11 @@ function Sim() {
           <Coupon>
             {brand}
             <PassStamp posted>POSTED</PassStamp>
-            <h1 className={passTitle}>{result.bonus_label ?? 'Joining bonus applied'}</h1>
+            <h1 className={passTitle}>
+              {result.kind === 'engagement'
+                ? 'Purchase reward applied'
+                : (result.bonus_label ?? 'Joining bonus applied')}
+            </h1>
             <p className={passLede}>
               Granted by this publisher under its own new-user policy. The platform recorded the
               install against <strong>{result.campaign_name}</strong> and charged the promoter a{' '}
@@ -163,10 +175,11 @@ function Sim() {
       <Pass>
         <Coupon>
           {brand}
-          <h1 className={passTitle}>First open</h1>
+          <h1 className={passTitle}>{code ? 'Welcome back' : 'First open'}</h1>
           <p className={passLede}>
-            Nothing arrived from the scan. Signing up triggers a server-to-server attribution
-            lookup; the app itself never handles a code.
+            {code
+              ? 'This open carried a transaction code from a boarding pass. Identifying yourself lets this app ask, server-to-server, whether that purchase is rewardable.'
+              : 'Nothing arrived from the scan. Signing up triggers a server-to-server attribution lookup; the app itself never handles a code.'}
           </p>
           <form onSubmit={signup}>
             <label className={label}>Your email (becomes publisher_user_ref)</label>
@@ -178,26 +191,34 @@ function Sim() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="viewer@example.com"
             />
-            <label className={label}>Play install referrer (Android only — leave blank to test the iOS path)</label>
-            <input
-              className={field}
-              value={referrer}
-              onChange={(e) => setReferrer(e.target.value)}
-              placeholder="utm_source=qrmarketer&qrm_claim=…"
-            />
+            {!code && (
+              <>
+                <label className={label}>Play install referrer (Android only — leave blank to test the iOS path)</label>
+                <input
+                  className={field}
+                  value={referrer}
+                  onChange={(e) => setReferrer(e.target.value)}
+                  placeholder="utm_source=qrmarketer&qrm_claim=…"
+                />
+              </>
+            )}
             <label className={label}>Publisher API key (this demo&apos;s stand-in for server config)</label>
             <input className={field} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="pk_…" />
-            <label className={checkLabel}>
-              <input
-                className={checkbox}
-                type="checkbox"
-                checked={verified}
-                onChange={(e) => setVerified(e.target.checked)}
-              />
-              User is verified (full fee) — leave unticked for the guest tier
-            </label>
+            {/* There is no guest tier on a repeat purchase: the customer already transacted
+                with the promoter, which is harder evidence than any verification bar. */}
+            {!code && (
+              <label className={checkLabel}>
+                <input
+                  className={checkbox}
+                  type="checkbox"
+                  checked={verified}
+                  onChange={(e) => setVerified(e.target.checked)}
+                />
+                User is verified (full fee) — leave unticked for the guest tier
+              </label>
+            )}
             <button className={cx(btn, 'mt-3.5')} type="submit" disabled={busy}>
-              {busy ? 'Creating account…' : 'Create account'}
+              {busy ? 'Working…' : code ? 'Continue' : 'Create account'}
             </button>
             {err && <div className={`${alertErr} mt-3.5`}>{err}</div>}
           </form>

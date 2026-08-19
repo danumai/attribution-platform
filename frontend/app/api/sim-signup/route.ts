@@ -17,12 +17,17 @@ async function proxy(path: string, apiKey: string, body?: unknown) {
 }
 
 export async function POST(req: Request) {
-  const { install_referrer, publisher_user_ref, api_key, identified, confirm_id, platform } =
+  const { install_referrer, publisher_user_ref, api_key, identified, confirm_id, platform, code } =
     await req.json();
   if (!api_key) return Response.json({ message: 'publisher API key required' }, { status: 400 });
 
   // Second leg: the user cleared verification, so claim the held-back part of the fee.
   if (confirm_id) return proxy(`/v1/attribution/${confirm_id}/confirm`, api_key);
+
+  // An engagement scan hands the app one thing: an opaque transaction code. It is claimed on
+  // the same endpoint, and explicitly — the acquisition inputs below answer a different question.
+  if (code) return proxy('/v1/attribution/claim', api_key, { publisher_user_ref, code });
+
 
   // A real backend reads these from the request it is already serving. The referrer comes
   // from Play's Install Referrer API on Android; on iOS there is none, so the IP and UA of

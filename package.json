@@ -8,7 +8,7 @@
     "dev:api": "pnpm -C backend start",
     "dev:web": "pnpm -C frontend dev",
     "test": "pnpm -C backend run test:unit && pnpm -C frontend run test:unit && ./e2e-test.sh",
-    "seed": "./seed.sh",
+    "seed": "node --env-file-if-exists=.env seed.mjs",
     "db:reset": "docker compose down -v && pnpm run db",
     "db:migrate": "pnpm -C backend run db:migrate",
     "db:studio": "pnpm -C backend run db:studio",

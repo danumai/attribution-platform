@@ -623,20 +623,30 @@ is [Part III](#part-iii--security-model).
 
 ## Figure 6: The Money Flow
 
-Three kinds of ledger account, and every transfer touches exactly two of them:
+Five kinds of ledger account. A funding or payout touches two of them; a payout that earns
+the platform its cut touches three, and still sums to zero.
 
 ```
-        external:funding                 (the outside world)
+        external:funding                 (the outside world, money coming IN)
                │
-               │  fund:{campaign}:{ts}    -1000 / +1000
+               │  fund:{payment_id}       -1000 / +1000
+               │  ...written by the PSP webhook, never by the promoter directly
                ▼
         campaign:{id}                     "CAMPAIGN BUDGET" (e.g. 5,000 credits)
                │
-               │  redemption:{id}          -50 / +50   (acquisition, full tier)
-               │  upgrade:{id}             -40 / +40   (guest → verified top-up)
-               │  redemption:{id}          -20 / +20   (engagement, one purchase)
+               │  redemption:{id}   -50  →  +45 publisher  +5 platform   (acquisition)
+               │  upgrade:{id}      -40  →  +36 publisher  +4 platform   (guest top-up)
+               │  redemption:{id}   -20  →  +18 publisher  +2 platform   (engagement)
+               │
+               ├──────────────────────────┐
+               ▼                          ▼
+        publisher:{org_id}          platform:fees
+        "PUBLISHER EARNINGS"        "THE PLATFORM'S REVENUE"
+               │                     (platform_fee_bps of every gross payout,
+               │                      snapshotted per partnership at 1000 = 10%)
+               │  withdrawal:{id}    -40 / +40
                ▼
-        publisher:{org_id}                "PUBLISHER EARNINGS"
+        external:payouts                 (the outside world, money going OUT)
 
   Balances live in account_balances and are updated in the same transaction as the
   ledger rows — the ledger is the truth, the balance is the fast read.
@@ -649,6 +659,45 @@ Three kinds of ledger account, and every transfer touches exactly two of them:
   When the budget hits zero the QR stops redirecting and sends people to
   /campaign-ended?reason=budget instead.
 ```
+
+**The take rate is the business model, and it lives in the ledger rather than in a report.**
+Every payout routes through one `payout()` helper that writes all three rows under a single
+ref, so a fee cannot be split on one path and forgotten on another. Rounding floors the
+platform's cut, which means the odd credit always goes to the publisher — the party doing the
+work — and `net + cut` reconstitutes the gross exactly, for every input. That last property is
+what keeps each ref summing to zero; it is asserted exhaustively in `backend/test/money.test.ts`
+and end-to-end in `e2e-test.sh` §11b.
+
+`platform_fee_bps` is **snapshotted onto the partnership when it is created**, never read live
+at payout time. Changing `PLATFORM_FEE_BPS` therefore reprices only future partnerships; an
+existing deal is repriced explicitly by an admin, and that is audited. A commercial term both
+counterparties are living under must not move because a config value did.
+
+### Money in
+
+`POST /v1/campaigns/:id/fund` credits a budget with no payment behind it and stays off in
+production (`ALLOW_SELF_FUNDING`). The real path is two steps: `POST /v1/payments/checkout`
+records what the promoter intends to buy and returns a `payment_id`, and the provider's
+webhook confirms it. The webhook is authenticated by an HMAC-SHA256 signature over the **raw**
+request body — with no secret configured the route 404s outright, because an unsigned funding
+webhook mints budget for whoever finds the URL.
+
+Redelivery is the normal case, not the exception: `status` is flipped by the same UPDATE that
+tests it and the ledger ref is `fund:{payment_id}`, so ten deliveries credit once. The shape is
+PSP-agnostic — swapping Stripe for bKash is an adapter, not a schema change.
+
+### Money out
+
+A publisher's earnings are not cash until an admin pays them. `POST /v1/withdrawals` is a
+*request*: it moves nothing, and it is capped at what has cleared `SETTLEMENT_DELAY_DAYS`
+(default 14) plus whatever is already queued, so the same credits cannot be promised twice.
+
+That delay is the platform's clawback window, and it is what turns fraud review from advice
+into a control. Every accepted risk in [Part III](#part-iii--security-model) — a promoter
+minting codes for purchases that did not happen, a forwarded code, collusion between two
+counterparties — is bounded by the same sentence: *the review runs before real money leaves.*
+Without a holdback that sentence is false, and the ledger's integrity guarantees only mean the
+platform can describe precisely how it was defrauded.
 
 Admins can also adjust a budget by hand (goodwill credit, or clawing back a mis-funded
 campaign). It moves through the same ledger, can never push a balance below zero, and is
@@ -670,6 +719,7 @@ audited.
 │  • see and rotate their OWN API key, used by    │
 │    their booking system / POS to mint one       │
 │    transaction code per purchase                │
+│  • fund a campaign through PSP checkout         │
 │  • void a code whose print run went astray      │
 │  • scans / installs / fees / budget left        │
 └────────────────────────────────────────────────┘
@@ -677,6 +727,8 @@ audited.
 ┌────────────────────────────────────────────────┐
 │  PUBLISHER                                      │
 │  • accept or ignore partnership requests        │
+│  • request a payout of what has cleared the     │
+│    settlement window                            │
 │  • see and rotate their Partner API key         │
 │  • register the Play package and App Store id   │
 │    scans redirect to, plus a web fallback and   │
@@ -689,6 +741,10 @@ audited.
 │  SUPER ADMIN                                    │
 │  • overview, orgs, partnerships, campaigns,     │
 │    scans, redemptions, QR codes, ledger         │
+│  • approve a publisher before it can be paid    │
+│  • pay or reject a withdrawal request           │
+│  • issue a password-reset token for a locked-   │
+│    out tenant                                   │
 │  • suspend or offboard an org, rotate its key   │
 │  • kill a campaign (ends it and voids every     │
 │    code in one shot)                            │
@@ -793,7 +849,7 @@ containing anything that looks like a spendable token fails the build.
 
 | Surface | Auth | Used by |
 |---|---|---|
-| `POST /v1/auth/signup`, `/login` | none | Anyone creating or using an account |
+| `POST /v1/auth/signup`, `/login`, `/reset` | none | Anyone creating or using an account |
 | `GET /r/:code` | none | Phones, on scan |
 | `GET /go/:claim_id` | none | The iOS interstitial forwarding itself to the store (30/min per IP) |
 | `GET /i/:claim_id` | none | The interstitial itself, when an engagement deep link found no app (30/min per IP) |
@@ -802,6 +858,9 @@ containing anything that looks like a spendable token fails the build.
 | `/v1/*` portal routes | session JWT (12h) | Promoter and publisher dashboards |
 | `/v1/attribution/*` | `pk_…` API key | The **publisher's server**, never a browser and never the app |
 | `POST /v1/issue` | `pk_…` API key | The **promoter's server** — booking system or POS, one call per transaction |
+| `POST /v1/payments/checkout`, `GET /v1/payments` | session JWT | The promoter funding a campaign through the PSP |
+| `POST /v1/payments/webhook` | HMAC-SHA256 over the raw body | The **payment provider**. 404s entirely when no secret is configured |
+| `POST /v1/withdrawals`, `GET /v1/withdrawals` | session JWT | The publisher asking to be paid its earnings |
 | `/v1/admin/*` | session JWT + admin role | Super admin console |
 
 Every route sits under a 300/min per-IP ceiling in addition to the specific limits noted
@@ -842,9 +901,16 @@ promoter's calls `/v1/issue` and spends them.
                            mode: "acquisition" | "engagement" }   ← default acquisition
     → 201 campaign, budget 0                                           auth: Bearer <token>
 
-6.  Fund it (ledger credit; PSP checkout in production)
-    POST /v1/campaigns/:id/fund     { coins }
+6.  Fund it. Two paths, and only the first is enabled in production:
+    POST /v1/payments/checkout      { campaign_id, coins }
+    → 201 { payment_id, status: "pending" }                            auth: Bearer <token>
+    Hand `payment_id` to the PSP as metadata; its webhook confirms the charge and the
+    budget is credited then — never on this call. Redelivery is safe.
+
+    POST /v1/campaigns/:id/fund     { coins, idempotency_key }
     → 201 { budget }                                                   auth: Bearer <token>
+    Demo path only: credits the budget with no payment behind it. Refused unless
+    ALLOW_SELF_FUNDING is on, which it is not in production.
 
 7a. ACQUISITION — design and generate a QR code by hand, for a print run
     POST /v1/campaigns/:id/qr-codes { style, expires_in_days, max_uses }
@@ -929,6 +995,14 @@ walks through them properly, with client code and a production checklist.
 7.  Track earnings
     GET  /v1/redemptions              (each row carries `kind`)         auth: Bearer <token>
     GET  /v1/campaigns                (budget + both rates per campaign) auth: Bearer <token>
+    GET  /v1/orgs/me   → { earnings, withdrawable }                     auth: Bearer <token>
+    `earnings` is everything ever earned; `withdrawable` is the part that has cleared the
+    settlement window and is not already queued. Book revenue on `publisher_net`, not `fee`
+    — `fee` is the gross the promoter was charged, before the platform's cut.
+
+8.  Get paid. A request, not a transfer: an admin reviews it and the ledger moves then.
+    POST /v1/withdrawals   { coins }                                    auth: Bearer <token>
+    GET  /v1/withdrawals                                                auth: Bearer <token>
 ```
 
 ### End user journey
@@ -1011,6 +1085,15 @@ Seeded from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on first boot — never created via
 7.  Adjust a budget by hand (goodwill credit, or a clawback)
     POST /v1/admin/campaigns/:id/adjust { coins, reason }
     auth: Bearer <token> (admin) — audited
+
+7b. Approve a publisher before it can be partnered with or paid, review payouts, and
+    recover a locked-out tenant
+    PATCH /v1/admin/orgs/:id          { approved: true }
+    GET   /v1/admin/withdrawals?status=requested
+    POST  /v1/admin/withdrawals/:id/pay      { note }   ← the ledger moves here
+    POST  /v1/admin/withdrawals/:id/reject   { note }
+    POST  /v1/admin/orgs/:id/reset-token     → single-use token, shown once, 1 hour
+    auth: Bearer <token> (admin) — all audited
 
 8.  Suspend, edit, or fully offboard a tenant
     PATCH /v1/admin/orgs/:id        { suspended, name, landing_url, reason }
@@ -1492,6 +1575,13 @@ a key an attacker extracts and a payout an attacker controls.
       batch backfill is not.
 - [ ] **Handle 401 as fatal, not retryable** — it means the key is wrong, rotated, or the
       account is suspended. Retrying will not help; alert a human.
+- [ ] **Read `publisher_net`, not `fee`, when you book revenue.** `fee` is the gross the
+      promoter's budget was charged; `publisher_net` is what actually landed in your account
+      after the platform's cut, and `platform_fee` is the difference. All three are on every
+      attributed response, including replays.
+- [ ] **Expect a settlement delay before you can withdraw.** `GET /v1/orgs/me` returns
+      `earnings` (everything you have ever earned) and `withdrawable` (what has cleared the
+      review window and is not already queued). Request payouts against the second number.
 
 ### Suggested server-side shape
 
@@ -1578,6 +1668,9 @@ Full request/response schemas: the live Swagger UI at `/docs`.
 | `PATCH` | `/v1/partnerships/{id}/rates` | session JWT | Promoter asks to reprice. Pays nothing until accepted |
 | `POST` | `/v1/partnerships/{id}/rates/accept` · `/decline` | session JWT | Publisher rules on an open proposal |
 | `GET` | `/v1/redemptions` | session JWT | Your last 100 attributions, for reconciliation |
+| `POST` · `GET` | `/v1/withdrawals` | session JWT | Request a payout / your payout history |
+| `POST` | `/v1/auth/reset` | none (single-use token) | Set a new password with an admin-issued token |
+| `POST` | `/v1/payments/checkout` | session JWT | Promoter-side: start funding a campaign |
 
 **Two credentials, never mixed:**
 
@@ -1644,6 +1737,8 @@ it can be the person the reward is attributed to, once. See §9.9.
 | Partner API key | `pk_` + 192 bits random | Until rotated | **SHA-256 hash only** |
 | Claim id | 128 bits base64url | One use | Opaque row key, not a credential |
 | Transaction code | 96 bits base64url | One scan, one reward | Opaque row key, not a credential |
+| Password reset token | 192 bits base64url | One use, 1 hour | **SHA-256 hash only** |
+| Payment webhook signature | HMAC-SHA256 over the raw body | Per request | Shared secret, never stored |
 
 - **Keys are never recoverable.** Only the SHA-256 hash is stored. Rotation
   (`POST /v1/api-keys/rotate`) invalidates the previous key on the next request.
@@ -1659,6 +1754,14 @@ it can be the person the reward is attributed to, once. See §9.9.
   authorisation gap gets shipped.
 - **Default secrets refuse to boot.** `JWT_SECRET` left at its dev value in production is a
   total auth bypass, so the process exits at startup instead of serving with it.
+- **Reset tokens are single-use by construction.** The same UPDATE that matches the token
+  clears it, so two submissions of one token change the password once. They are issued by an
+  admin and never by an unauthenticated request — there is no "forgot password" endpoint that
+  a stranger can aim at somebody else's address.
+- **The payment webhook is authenticated by signature, not by secrecy of the URL.** The HMAC
+  is computed over the *raw* body (the parser stashes the bytes) and compared in constant time.
+  With no secret configured the route 404s rather than accepting anything — money-in is off by
+  default, which is the correct failure mode for an endpoint that credits budgets.
 
 ### Brute force and enumeration
 
@@ -1689,6 +1792,12 @@ concurrency and cannot be bypassed by a bug in a handler.
 | Ledger always balances to zero | Append-only double entry; asserted in the suite |
 | Budget can never go negative | `SELECT … FOR UPDATE` on the balance row before every debit |
 | `guest_rate <= coin_rate` | `CHECK` constraint in the migration |
+| The platform's cut never breaks a ref's zero-sum | One `payout()` helper writes all three rows; `net + cut == gross` proved exhaustively in `money.test.ts` |
+| One credit per payment, however often the PSP retries | `status` flipped by the UPDATE that tests it + `UNIQUE (account, ref)` on `fund:{payment_id}` + `UNIQUE (provider_ref)` |
+| A publisher cannot withdraw the same credits twice | Queued requests are subtracted from `withdrawable`, computed under the balance row lock |
+| A withdrawal cannot be paid twice | `status` flipped by the UPDATE that tests it, inside the transaction that moves the money |
+| Earnings cannot leave inside the review window | `SETTLEMENT_DELAY_DAYS` holdback on recent credits |
+| An unvetted publisher cannot be paid at all | `approved` gates both the directory and partnership creation |
 
 The behavioural consequences are spelled out in
 [Figure 5](#figure-5-what-makes-the-money-safe).
@@ -1779,7 +1888,20 @@ so there is no CSRF surface.
 - **Graceful shutdown.** `SIGTERM` drains in-flight requests before exit, so a redeploy cannot
   tear down a half-written attribution.
 - Schema changes go through `prisma migrate deploy` before the process serves traffic; the app
-  never creates tables at boot.
+  never creates tables at boot. Migration directory names must sort in apply order — a
+  timestamped name mixed in with the numbered ones once sorted *before* the migrations it
+  depended on, which broke every fresh deploy while leaving already-migrated databases fine.
+- **Reconciliation runs on a clock, not on a page load.** A background sweep re-checks that the
+  book sums to zero and that every cached balance still equals its ledger entries, at boot and
+  every 10 minutes. Drift means something is spending against a wrong number, so it alerts
+  rather than waiting to be noticed on a dashboard.
+- **Alerts are pushed.** `ALERT_WEBHOOK_URL` (Slack-compatible) receives ledger drift, an
+  unbalanced book, and campaigns whose budget is about to run dry — the last one being a
+  promoter's live print run about to start bouncing. Everything also lands in the structured
+  log at `level=error`, so the webhook is a convenience and never the only record.
+- **Backups.** `docker-compose.prod.yml` runs a nightly `pg_dump` into a named volume, keeping
+  14 days. The ledger is the one thing in this system that cannot be re-derived from anything
+  else; ship those dumps off-host for durability that survives losing the machine.
 
 ## 9. Residual risks — read this part
 
@@ -1869,6 +1991,12 @@ promoter's own transaction records; the campaign budget caps total exposure; iss
 to campaigns the promoter owns and to `engagement` mode. **Commercially, both sides are
 counterparties under contract** — this is a contractual control with technical support.
 
+**And now a technical one with teeth:** earnings are not cash for `SETTLEMENT_DELAY_DAYS`
+(default 14). Collusion still cannot be *detected* inside a two-party ledger, but it can be
+*undone* — the pattern surfaces in the same audit trail it always did, and the money is still
+on the platform when it does. A rate that used to be discovered after the payout is now
+discovered before it. See [Figure 6 — Money out](#money-out).
+
 ### 9.9 A transaction code can be forwarded
 The code is printed on a boarding pass or receipt. Somebody can photograph it, forward it, or
 post it. Whoever scans and claims it first is the person the reward attributes to.
@@ -1885,7 +2013,8 @@ the promoter chose, and one deliberately smaller than an acquisition.
 
 *Levers:* shorten `expires_in_days` at issuance; lower `engagement_rate`; print the passenger
 name beside the code so a gate agent or cashier can see a mismatch. A per-user daily cap is the
-next technical control worth adding if forwarding is ever measured rather than assumed.
+next technical control worth adding if forwarding is ever measured rather than assumed. The
+settlement window applies here too: a misdirected reward spotted inside it is still recoverable.
 
 ### 9.10 No per-user cap on engagement rewards, on purpose
 There is no cooldown and no daily ceiling on how many purchase rewards one
@@ -1901,10 +2030,13 @@ nobody had to buy anything for — and a per-user cooldown becomes required rath
 It is not needed for per-transaction issuance.
 
 ### 9.11 Not built yet, on purpose
-- **Real payment processing** — funding a campaign credits the ledger directly; production
-  would put a PSP checkout in front of it
+- **A specific payment provider** — `POST /v1/payments/checkout` + the signed webhook are the
+  contract, and an adapter for one named PSP (creating the charge, translating its callback)
+  is the remaining work. The ledger side is done and idempotent.
+- **Email delivery** — a password reset is issued by an admin and relayed out of band. The
+  token flow is built; only the mailer is missing, and it calls the same endpoint.
 - **One login per company** — no teams, roles or invitations yet (login *is* the org)
-- **Automated fraud alerts** to a team's Slack or email
+- **TOTP on the org login** — still the next auth control worth adding (see §9.4)
 - **Static counter codes for shops with no POS integration** — deliberately deferred; see the
   scope note below
 - **Bulk issuance** — `/v1/issue` is one call per transaction. A nightly batch of ten thousand
@@ -1975,10 +2107,13 @@ Each of these was considered and declined for a stated reason, not overlooked.
 
 ## The One-Minute Pitch
 
-> A brand pays into a campaign. A QR code goes out into the world. Every scan either opens
-> the publisher's store listing or gets safely turned away with a reason. The install is
-> matched back server-to-server — never by anything the phone carried — and the money only
-> ever moves once, in the right direction, with a double-entry trail behind it.
+> A brand pays into a campaign, through a checkout whose webhook is signed and idempotent. A
+> QR code goes out into the world. Every scan either opens the publisher's store listing or
+> gets safely turned away with a reason. The install is matched back server-to-server — never
+> by anything the phone carried — and the money only ever moves once, in the right direction,
+> with a double-entry trail behind it. The platform keeps an agreed slice of every payout, in
+> the same transaction; the publisher withdraws the rest once it has cleared a review window
+> long enough to take it back if it should not have been paid.
 >
 > And when the brand is an airline rather than a poster, the same machine sells a second
 > thing: one code per ticket, one reward per code, so the traveller who flies eleven times is

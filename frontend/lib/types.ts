@@ -34,7 +34,25 @@ export interface Me {
   deeplink_url: string | null;
   bonus_label: string | null;
   suspended: boolean;
+  approved?: boolean;
+  /** publisher only: everything ever earned — the ledger balance for this org */
   earnings?: number;
+  /**
+   * publisher only: the part of `earnings` that has cleared the settlement window and is not
+   * already reserved by a queued request. This is what a payout can be requested against;
+   * `earnings` is the headline number and is always the larger of the two.
+   */
+  withdrawable?: number;
+}
+
+/** `/v1/withdrawals` — a payout request. It holds no money until an admin pays it. */
+export interface Withdrawal {
+  id: string;
+  coins: number;
+  status: 'requested' | 'paid' | 'rejected';
+  note: string | null;
+  requested_at: string;
+  decided_at: string | null;
 }
 
 /** `/v1/publishers` — `ready` means it has somewhere to send a scan. */

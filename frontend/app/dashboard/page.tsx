@@ -297,6 +297,38 @@ export default function Dashboard() {
   }
 
   /**
+   * Ask to be paid. Capped at `withdrawable` rather than `earnings`: fees inside the
+   * settlement window are earned but not yet payable, and a request for more than that is
+   * refused by the API anyway — better to say so before the publisher types a number.
+   */
+  async function requestPayout() {
+    const available = profile?.withdrawable ?? 0;
+    if (available < 1) {
+      toast.info('Nothing has cleared the settlement window yet. Fees become payable once the review period has passed.');
+      return;
+    }
+    const v = await formDialog({
+      title: 'Request a payout',
+      body: `${num(available)} of your ${num(profile?.earnings ?? 0)} earned credits have cleared settlement and can be paid out. An admin reviews the request before any money moves.`,
+      confirmText: 'Request payout',
+      fields: [
+        {
+          name: 'coins',
+          label: `Credits to withdraw (max ${available})`,
+          type: 'number',
+          value: String(available),
+          required: true,
+        },
+      ],
+    });
+    if (!v) return;
+    await act(
+      () => api('/v1/withdrawals', { method: 'POST', body: JSON.stringify({ coins: +v.coins }) }),
+      'Payout requested — an admin will review it.',
+    );
+  }
+
+  /**
    * Repricing, from the table where the rates actually live. Both tiers here, unlike the
    * campaign dialog: this is the agreement itself, not one campaign spending against it.
    */
@@ -533,6 +565,10 @@ export default function Dashboard() {
       ? { k: 'Coins granted', v: `${capped ? '≥ ' : ''}${num(coinsGranted)}`, go: 'redemptions' }
       : { k: 'Coins earned', v: num(profile?.earnings ?? 0), go: 'redemptions' },
   ];
+  // The publisher's second money number, and the one that answers "can I be paid today?".
+  // Only worth a tile once something has actually been earned.
+  if (!isPromoter && (profile?.earnings ?? 0) > 0)
+    kpis.push({ k: 'Ready to withdraw', v: num(profile?.withdrawable ?? 0), go: 'redemptions' });
 
   // A publisher with no destination registered redirects nobody: every scan of every campaign
   // it is partnered on dies at `no_destination`, silently, for as long as this is unset.
@@ -553,6 +589,10 @@ export default function Dashboard() {
         sec === 'campaigns' && canCreateCampaign ? (
           <button className={btn} onClick={newCampaign} disabled={busy}>
             New campaign
+          </button>
+        ) : sec === 'redemptions' && !isPromoter ? (
+          <button className={btn} onClick={requestPayout} disabled={busy}>
+            Request payout
           </button>
         ) : sec === 'partnerships' && isPromoter ? (
           <button className={btn} onClick={newPartnership} disabled={busy || publishers.length === 0}>
