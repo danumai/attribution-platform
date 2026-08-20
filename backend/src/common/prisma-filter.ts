@@ -10,17 +10,15 @@ import {
 import { BaseExceptionFilter } from '@nestjs/core';
 
 /**
- * Every route here takes an id straight from the URL and hands it to Prisma, and every id
- * column is `@db.Uuid`. A request for `/v1/qr-codes/not-a-uuid/image` therefore reaches
- * Postgres as an invalid uuid literal, Prisma raises, and Nest's default handler turns that
- * into a 500 — for what is plainly a malformed request.
+ * Turns a driver-level error into the 4xx it actually is.
  *
- * Fixing it per-route would mean a `ParseUUIDPipe` on ~20 params and a `::uuid` guard on
- * every raw query, and the next route added would miss it. Translating the driver's own
- * error codes once, here, covers all of them including the ones that do not exist yet.
+ * Every route takes an id straight from the URL and every id column is `@db.Uuid`, so
+ * `/v1/qr-codes/not-a-uuid/image` reaches Postgres as an invalid uuid literal and Nest's
+ * default handler answers 500 for a plainly malformed request. Translating the driver's own
+ * error codes once here covers every route, including the ones that do not exist yet.
  *
- * Only the codes with an unambiguous HTTP meaning are mapped. Anything else stays a 500,
- * because a database error nobody anticipated is a real fault and should page someone.
+ * Only codes with an unambiguous HTTP meaning are mapped — an unanticipated database error is
+ * a real fault and should stay a 500.
  */
 @Catch()
 export class PrismaExceptionFilter extends BaseExceptionFilter {
@@ -35,9 +33,8 @@ export class PrismaExceptionFilter extends BaseExceptionFilter {
 
 function translate(e: any): HttpException | null {
   switch (e?.code) {
-    // Value rejected before/at the driver — an unparseable uuid is the common case.
-    // P2023 ("Inconsistent column data") is the one a malformed uuid on a normal query
-    // actually raises, so it is the code this whole file exists for.
+    // Value rejected at the driver. P2023 ("Inconsistent column data") is what a malformed
+    // uuid on a normal query raises — the code this file exists for.
     case 'P2023':
     case 'P2007':
     case 'P2006':
@@ -48,9 +45,8 @@ function translate(e: any): HttpException | null {
       return new BadRequestException('referenced record does not exist');
     case 'P2025':
       return new NotFoundException();
-    // Raw query failed (P2010), or the pg driver adapter surfaced its own error with no
-    // Prisma code at all. Either way only `22P02` (invalid_text_representation — a bad
-    // `::uuid` cast) is a client mistake; any other failure is ours and stays a 500.
+    // Raw query failure, or the pg adapter's own error with no Prisma code. Only `22P02`
+    // (invalid_text_representation — a bad `::uuid` cast) is a client mistake; the rest is ours.
     default:
       return /\b22P02\b/.test(String(e?.message ?? ''))
         ? new BadRequestException('malformed identifier')

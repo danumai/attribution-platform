@@ -14,26 +14,21 @@ import { closeRedis } from './database/redis';
 import { seedAccounts } from './database/seed';
 
 async function bootstrap() {
-  // Schema is owned by `prisma migrate deploy`, which runs before the process starts
-  // (see the Dockerfile CMD and the `db:deploy` script) — never by the app at boot.
+  // Schema is owned by `prisma migrate deploy`, which runs before this process starts
+  // (Dockerfile CMD / the `db:deploy` script) — never by the app at boot.
   await seedAccounts();
 
-  // `bodyParser: false` because this file mounts its own below. Nest's default one is
-  // registered during `listen()`, i.e. *after* every `app.use` here — so leaving it on meant a
-  // second parser behind the first, and the rate limiter's "before the body parser" position
-  // held only by accident of which middleware happened to consume the stream first.
+  // `bodyParser: false` because this file mounts its own below. Nest registers its default
+  // during `listen()`, i.e. *after* every `app.use` here — leaving it on put a second parser
+  // behind the first and made the rate limiter's position accidental.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   // req.ip must reflect the real client, or per-IP rate limits collapse to one bucket
   app.getHttpAdapter().getInstance().set('trust proxy', TRUST_PROXY);
 
-  // Generated straight from the live controllers — a new route shows up here with no extra
-  // step. Mounted before securityHeaders: that middleware's `default-src 'none'` CSP would
-  // otherwise block Swagger UI's own JS/CSS, and Express never reaches later middleware for
-  // a route this already answered.
-  //
-  // Off by default in production. `/docs` is unauthenticated and enumerates every route,
-  // parameter and error shape in the system — free reconnaissance, and it also sits ahead of
-  // both securityHeaders and globalRateLimit for the reason above.
+  // Mounted before securityHeaders: that middleware's `default-src 'none'` CSP would block
+  // Swagger UI's own JS/CSS, and Express never reaches later middleware for a route this has
+  // already answered. Which is also why it is off by default in production — unauthenticated
+  // `/docs` enumerates every route and sits ahead of the rate limiter.
   if (ENABLE_DOCS) {
     const swaggerDoc = SwaggerModule.createDocument(
       app,
@@ -62,13 +57,12 @@ async function bootstrap() {
   app.use(requestContext);
 
   /**
-   * Scrape target. Mounted here rather than on a controller because it must sit ahead of the
-   * global rate limiter (a throttled scrape blinds the monitoring exactly when traffic is
-   * interesting) and outside the CSP that `securityHeaders` sets for JSON routes.
+   * Scrape target. Mounted here rather than on a controller so it sits ahead of the global rate
+   * limiter — a throttled scrape blinds the monitoring exactly when traffic is interesting —
+   * and outside the CSP `securityHeaders` sets for JSON routes.
    *
-   * Token-gated, and in production absent entirely unless a token is configured: the series it
-   * exposes include the attribution refusal rates, which describe this platform's payout
-   * behaviour to anyone who asks.
+   * Token-gated: the series it exposes include the attribution refusal rates, which describe
+   * this platform's payout behaviour to anyone who asks.
    */
   app.use('/metrics', (req: Request, res: Response, next: NextFunction) => {
     if (req.method !== 'GET') return next();
@@ -104,8 +98,7 @@ async function bootstrap() {
   log.info('server.started', {
     port,
     docs: ENABLE_DOCS,
-    // The two that decide whether this process is safe to replicate: without a shared limiter
-    // store, a second instance doubles every per-IP security limit.
+    // The two that decide whether this process is safe to replicate.
     shared_rate_limiter: Boolean(REDIS_URL),
     metrics: Boolean(METRICS_TOKEN),
   });

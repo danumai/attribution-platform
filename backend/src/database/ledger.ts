@@ -6,16 +6,11 @@ import { Tx, prisma } from './prisma';
 /**
  * Credit/debit an account inside an open transaction, keeping the balance in sync.
  *
- * Seed-then-update rather than the obvious `upsert`, and the reason is subtle enough to be
- * worth stating: Postgres evaluates a table's CHECK constraints against the tuple an
- * `INSERT ... ON CONFLICT DO UPDATE` *proposes*, before it detects the conflict and switches
- * to the update. So `upsert` with `create: { balance: -10 }` is tested as a standalone
- * `balance = -10` row and rejected by `account_balances_non_negative_check` — even when the
- * account holds 100 and the resulting balance would be a perfectly legal 90.
- *
- * That made every debit in the system fail: claim, the confirm upgrade, and the admin
- * adjustment all route through here. Seeding the row at 0 first means the floor is only ever
- * checked against the value that actually lands.
+ * Seed-then-update rather than `upsert`, and the reason is subtle: Postgres checks CHECK
+ * constraints against the tuple an `INSERT ... ON CONFLICT DO UPDATE` *proposes*, before it
+ * detects the conflict. So `create: { balance: -10 }` is tested as a standalone `-10` row and
+ * rejected by `account_balances_non_negative_check` even when the account holds 100. Seeding
+ * at 0 first means the floor is only ever checked against the value that actually lands.
  */
 export async function ledger(tx: Tx, account: string, amount: number, ref: string) {
   await tx.ledgerEntry.create({ data: { account, amount, ref } });
@@ -39,9 +34,9 @@ export async function audit(
 }
 
 /**
- * Pay a publisher out of a campaign budget, keeping the platform's cut — every payout in the
- * system routes through here, so the split can never be applied on one path and forgotten on
- * another. Three entries under one ref, still summing to zero:
+ * Pay a publisher out of a campaign budget, keeping the platform's cut. Every payout routes
+ * through here, so the split cannot be applied on one path and forgotten on another. Three
+ * entries under one ref, still summing to zero:
  *
  *   campaign:{id}     -gross     the promoter's budget spends the agreed rate
  *   publisher:{org}   +net       what the publisher actually earns
@@ -85,13 +80,9 @@ export async function lockedBalance(tx: Tx, account: string): Promise<number> {
  * What a publisher may withdraw right now: its balance, minus earnings still inside the
  * settlement window, minus requests already queued for review.
  *
- * The holdback is the platform's clawback window — the thing that turns "review the fraud
- * pattern" from advice into a control, because no coin earned less than
- * SETTLEMENT_DELAY_DAYS ago can leave while the review runs. Only credits are held: a debit
- * (an earlier withdrawal) never extends the wait on what remains.
- *
- * Takes the open transaction and expects the caller to have locked the balance row first —
- * two concurrent requests must serialise, or both can pass the same check.
+ * The holdback is the clawback window — no coin earned less than SETTLEMENT_DELAY_DAYS ago can
+ * leave while a fraud review runs. Only credits are held: an earlier withdrawal never extends
+ * the wait on what remains. Locks the balance row, so two concurrent requests serialise.
  */
 export async function withdrawable(tx: Tx, publisherOrgId: string): Promise<number> {
   const account = `publisher:${publisherOrgId}`;

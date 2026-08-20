@@ -22,14 +22,10 @@ export const stamp = 'text-stamp text-mut';
 /**
  * The same label in the landing page's wide-tracked caps.
  *
- * The split between this and `stamp` is by what the label is doing, not by which surface
- * it is on. `stamp` names a control a reader is about to operate — a form label is read
- * once per interaction and sentence case is faster to read. This one names a *column*: the
- * heading over a figure, a table head, a section rule. Those are read as identity, glanced
- * at repeatedly and never read as prose, and caps at 10.5px is what makes a label stop
- * competing with the number underneath it for the same rank in the type hierarchy.
- *
- * It is also what stops the console and the landing page from looking like two products.
+ * Split from `stamp` by what the label *does*, not which surface it sits on: `stamp` names a
+ * control about to be operated, and sentence case reads faster. This names a column — a figure
+ * heading, a table head, a section rule — read as identity rather than as prose, where caps at
+ * 10.5px stop the label competing with the number under it.
  */
 export const stampCaps = 'text-stamp-caps uppercase text-mut';
 
@@ -60,9 +56,9 @@ export const inkAccent =
   'border-transparent bg-accent text-accent-on enabled:hover:bg-accent-hover';
 export const inkGhost =
   'border-line bg-card text-ink shadow-contact-sm enabled:hover:bg-card-alt enabled:hover:border-mut/40';
-export const inkDanger =
+const inkDanger =
   'border-transparent bg-bad text-white shadow-contact-sm enabled:hover:bg-[color-mix(in_srgb,var(--color-bad)_86%,#000)]';
-export const inkQuiet =
+const inkQuiet =
   'border-transparent bg-transparent text-ink-soft enabled:hover:bg-card-alt enabled:hover:text-ink';
 
 /** the ordinary button box; odd-shaped controls set their own display instead */
@@ -172,10 +168,8 @@ export const figureStrip = 'grid overflow-hidden rounded-xl border border-line b
 /**
  * How many columns a strip of `n` figures breaks into.
  *
- * `auto-fit` picks the count from a minimum width, which is how a strip of seven ends up as
- * six across and one alone on a row with five cells of empty card beside it. These counts
- * are chosen so a wrapped row is never a single orphan: seven goes four-and-three, five goes
- * three-and-two. Anything past seven falls back to fitting what it can.
+ * Hand-picked rather than `auto-fit`, so a wrapped row is never a single orphan: seven goes
+ * four-and-three, five goes three-and-two. Past seven, fit what you can.
  */
 export function figureColumns(n: number) {
   return (
@@ -257,11 +251,11 @@ const pillBase =
   "before:content-[''] before:size-[6px] before:rounded-full before:bg-current";
 
 export const pillNeutral = `${pillBase} border-line bg-card-alt text-mut`;
-export const pillOk = `${pillBase} border-ok-line bg-ok-soft text-ok`;
-export const pillWarn = `${pillBase} border-warn-line bg-warn-soft text-warn`;
+const pillOk = `${pillBase} border-ok-line bg-ok-soft text-ok`;
+const pillWarn = `${pillBase} border-warn-line bg-warn-soft text-warn`;
 export const pillBad = `${pillBase} border-bad-line bg-bad-soft text-bad`;
 /** live: the dot keeps blinking so "active" reads as a state, not a colour */
-export const pillActive = `${pillOk} before:animate-blink`;
+const pillActive = `${pillOk} before:animate-blink`;
 
 /** maps a status string to its chip */
 export function pill(status?: string | null) {
@@ -273,18 +267,11 @@ export function pill(status?: string | null) {
   return pillNeutral;
 }
 
-/** a figure the page is read for: tight, set in the sans everything else uses.
+/** A figure the page is read for. The size gives way before the number does — a seven-digit
+ *  total that overruns its cell is worse than one set slightly smaller.
  *
- *  The size gives way before the number does. A seven-digit coin total is wider than a cell
- *  gets once a dense strip meets the console's rail — and a figure that overruns its cell is
- *  worse than a figure set slightly smaller.
- *
- *  Proportional figures, not tabular: equal-width digits are what make a column of table rows
- *  line up, and at this size they only make a number like 121 look loose. Nothing in a strip
- *  of stat cells aligns vertically, so there is nothing for them to buy.
- *
- *  No entrance of its own either: the section it sits in already rises once, and seven
- *  numbers each counting themselves in is decoration. */
+ *  Proportional, not tabular: nothing in a strip of stat cells aligns vertically, so equal-width
+ *  digits buy nothing and only make a number like 121 look loose. */
 export const figure =
   'block text-[clamp(22px,1.95vw,29px)] font-[660] tracking-[-0.035em] text-ink';
 
@@ -296,11 +283,9 @@ export const figure =
  * burning down faster is not. The arrow carries the direction on its own, so the chip
  * still reads correctly with the colour taken away.
  *
- * Tinted, not bare. Coloured text floating under a figure has no edge, so at 12px it reads
- * as part of the number's own descender line rather than as a separate fact about it; a
- * soft plate gives it a boundary and lets it sit at the same rank as a status pill, which
- * is what it is. It borrows the pill's own tints so the console has one vocabulary for
- * "a small piece of tinted state" instead of two.
+ * Tinted, not bare: coloured text floating under a figure has no edge and at 12px reads as
+ * part of the number's descender line. A soft plate makes it a separate fact, at the same rank
+ * as a status pill — whose tints it borrows, so the console has one vocabulary for tinted state.
  */
 export function delta(good: boolean) {
   return cx(

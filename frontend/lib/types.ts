@@ -1,11 +1,8 @@
 /**
  * The shapes the API actually returns.
  *
- * `api()` used to be `Promise<any>`, and that one `any` propagated into every `useState`,
- * every table column and every `.map` in the console — so a renamed server field became a
- * blank cell at runtime instead of a build error. These are hand-written rather than
- * generated on purpose: they are the contract the console reads, not the database schema,
- * and every field here is one a page already renders.
+ * Hand-written rather than generated, on purpose: this is the contract the console reads, not
+ * the database schema, and every field here is one a page already renders.
  *
  * Nothing validates at runtime. That is the honest limit of this file: it makes the client
  * consistent with itself, and the e2e suite is what keeps it consistent with the server.
@@ -43,16 +40,6 @@ export interface Me {
    * `earnings` is the headline number and is always the larger of the two.
    */
   withdrawable?: number;
-}
-
-/** `/v1/withdrawals` — a payout request. It holds no money until an admin pays it. */
-export interface Withdrawal {
-  id: string;
-  coins: number;
-  status: 'requested' | 'paid' | 'rejected';
-  note: string | null;
-  requested_at: string;
-  decided_at: string | null;
 }
 
 /** `/v1/publishers` — `ready` means it has somewhere to send a scan. */

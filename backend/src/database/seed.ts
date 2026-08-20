@@ -6,10 +6,10 @@ import { prisma } from './prisma';
 const PROD = process.env.NODE_ENV === 'production';
 
 /**
- * Accounts come from env, never from signup. In development every boot re-asserts the demo
- * logins so the stack is always usable. In production that would be a backdoor: each
- * redeploy would silently reset the admin password to whatever is in env and un-suspend the
- * account. So production bootstraps the admin once, if absent, and never touches the demo tenants.
+ * Accounts come from env, never from signup. Development re-asserts the demo logins on every
+ * boot so the stack is always usable; in production that is a backdoor — a redeploy would reset
+ * the admin password to whatever is in env and un-suspend the account. So production bootstraps
+ * the admin once, if absent, and never touches the demo tenants.
  */
 export async function seedAccounts() {
   const e = process.env;

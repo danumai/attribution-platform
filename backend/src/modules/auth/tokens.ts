@@ -12,7 +12,7 @@ export const JWT_SECRET = process.env.JWT_SECRET ?? DEV_SECRET;
 
 /** The three roles, enforced by a CHECK on `orgs.type`. One definition, so a fourth role
  *  cannot be added to the union without every `switch` and validator here seeing it. */
-export const ORG_TYPES = ['promoter', 'publisher', 'admin'] as const;
+const ORG_TYPES = ['promoter', 'publisher', 'admin'] as const;
 export type OrgType = (typeof ORG_TYPES)[number];
 
 /** Narrow a role read out of the database. Throws rather than casting blind: an unknown

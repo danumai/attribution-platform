@@ -2,10 +2,9 @@
 /**
  * The console's charts, drawn by hand in SVG.
  *
- * There is no charting dependency here on purpose. Every plot this product needs is a
- * time series or a ranking of at most two series against one axis — that is a path
- * string and a scale, not a hundred kilobytes of runtime that would then have to be
- * argued out of its own colours, fonts and tooltips to match the rest of the console.
+ * No charting dependency: every plot here is a time series or a ranking of at most two series
+ * against one axis — a path string and a scale, not a hundred kilobytes of runtime that would
+ * then have to be argued out of its own colours, fonts and tooltips.
  *
  * The rules the drawing follows, so a second chart cannot drift from the first:
  *   · one axis, always. Two measures of different scale are two charts, never two scales.
@@ -17,9 +16,8 @@
  *     without a pointer — arrow keys move the same crosshair, and the table view under
  *     each plot is the whole series in text.
  *
- * Sizes are real pixels measured off the container rather than a scaled `viewBox`: a
- * non-uniform scale is what turns a 2px stroke into 3px on one axis and an end-dot into
- * an ellipse, and no amount of `vector-effect` fixes the dot.
+ * Sizes are real pixels measured off the container, not a scaled `viewBox`: a non-uniform
+ * scale turns a 2px stroke into 3px on one axis and an end-dot into an ellipse.
  */
 import { useEffect, useId, useRef, useState } from 'react';
 import { compact, num } from './fmt';
@@ -49,12 +47,9 @@ function useWidth<T extends HTMLElement>() {
 /**
  * A clean ceiling and the lines under it: steps of 1, 2 or 5 × 10^k.
  *
- * An axis topped at the data's own maximum prints ticks like 37 and 74, which are numbers
- * about this dataset rather than a scale — the reader has to do arithmetic to place a bar.
- *
- * The step never falls below 1. Everything this console plots is a count of things that
- * happened, and a quiet week — three scans on the best day — would otherwise be scaled
- * against 0.5 and 1.5, which are not quantities of scans.
+ * An axis topped at the data's own maximum prints ticks like 37 and 74 — numbers about this
+ * dataset rather than a scale. The step never falls below 1: everything here is a count of
+ * things that happened, and 0.5 scans is not a quantity.
  */
 export function ticks(max: number, count = 4) {
   if (max <= 0) return { top: 1, lines: [0, 1] };

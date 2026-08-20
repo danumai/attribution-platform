@@ -8,17 +8,16 @@
  *   promoter    calls `/v1/issue` to mint a code against a transaction it just took money
  *               for, and *pays* when that code is redeemed.
  *
- * One function rather than two because everything about the check is identical — the same hash,
- * the same suspension rule, the same per-key ceiling — and the only difference is which `type`
- * column the row must have. Two copies of an auth check is two places for the `suspended: false`
- * to be forgotten in.
+ * One function rather than two: the check is identical down to the per-key ceiling, and only
+ * the required `type` differs. Two copies of an auth check is two places to forget
+ * `suspended: false` in.
  */
 import { UnauthorizedException } from '@nestjs/common';
 import { rateLimited, sha256 } from '../../common/security';
 import { prisma } from '../../database/prisma';
 import type { OrgType } from '../auth/tokens';
 
-export interface KeyedOrg {
+interface KeyedOrg {
   id: string;
   name: string;
   bonus_label: string | null;
@@ -33,10 +32,8 @@ export async function orgFromKey(auth: string, type: OrgType): Promise<KeyedOrg>
   if (await rateLimited(`partner:${hash}`, 600))
     throw new UnauthorizedException('rate limit exceeded, slow down');
   const org = await prisma.org.findFirst({
-    // `suspended` matters here as much as it does at login. On the publisher side offboarding
-    // has to stop its server earning fees immediately; on the promoter side it has to stop a
-    // suspended brand minting codes that draw on a budget nobody is watching any more. An API
-    // key never expires on its own, so this is the only thing that ends either.
+    // An API key never expires on its own, so `suspended` is the only thing that ends access:
+    // it stops a publisher earning fees and a promoter minting codes, the moment it is set.
     where: { type, api_key_hash: hash, suspended: false },
     select: { id: true, name: true, bonus_label: true },
   });

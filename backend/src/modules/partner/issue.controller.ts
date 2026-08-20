@@ -1,21 +1,15 @@
 /**
- * The Issuance API: server-to-server, called by the *promoter's* own backend.
+ * The Issuance API: server-to-server, called by the *promoter's* own backend when a ticket is
+ * paid for or a receipt prints.
  *
- * This is the half of the engagement flow that makes a repeat reward mean something. An
- * airline's booking system calls it the moment a ticket is paid for; a shop's POS calls it when
- * the receipt prints. What comes back is one single-use code, and that code is the entire proof
- * that a purchase happened — because the only system that can know a purchase happened is the
- * one that took the money.
+ * What comes back is one single-use code, and that code is the entire proof a purchase
+ * happened — the only system that can know is the one that took the money. "One reward per
+ * code" is therefore "one reward per purchase", minted by a party with no incentive to invent
+ * them: the promoter pays for every code redeemed, out of its own budget.
  *
- * Everything the platform guarantees about an engagement campaign rests on that. "One reward
- * per code" is only "one reward per purchase" because codes are minted here, one per
- * transaction, by a party with no incentive to invent them: the promoter pays for every code
- * that gets redeemed, out of its own funded budget.
- *
- * Deliberately its own controller rather than another method on the promoter portal. That
- * portal is session-authenticated and built for a human designing print artwork — styles,
- * previews, a download. This is a machine call on a different credential, at booking volume,
- * and its answer must be idempotent. Same table underneath, different job entirely.
+ * Its own controller rather than a method on the promoter portal: that one is
+ * session-authenticated and built for a human designing artwork. This is a machine call on a
+ * different credential, at booking volume, and its answer must be idempotent.
  */
 import { BadRequestException, Body, Controller, Headers, NotFoundException, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -32,11 +26,10 @@ export class IssueController {
   /**
    * Mint one code against one transaction.
    *
-   * Idempotent on `issued_ref`, and that is not a nicety — a booking webhook is exactly the
-   * kind of caller that fires twice. A retried request must return the code the first call
-   * made, or one traveller ends up holding two codes for one ticket and the promoter pays
-   * twice for a purchase that happened once. The UNIQUE index is what guarantees it; this
-   * handler only turns the collision into the original answer.
+   * Idempotent on `issued_ref`, because a booking webhook is exactly the kind of caller that
+   * fires twice — and two codes for one ticket is the promoter paying twice for one purchase.
+   * The UNIQUE index is the guarantee; this handler only turns the collision into the original
+   * answer.
    */
   @Post()
   async issue(
@@ -57,13 +50,12 @@ export class IssueController {
     if (!Number.isInteger(days) || days < 1 || days > 3650)
       throw new BadRequestException('expires_in_days must be an integer 1–3650');
 
-    // Ownership is inside the WHERE, so a campaign belonging to someone else is a 404 rather
-    // than a permission error — an existence oracle across tenants is itself a leak.
+    // Ownership is inside the WHERE, so another tenant's campaign is a 404 rather than a
+    // permission error — an existence oracle across tenants is itself a leak.
     //
-    // `mode` is part of it too. Minting a transaction code against an acquisition campaign
-    // would produce a code that scans fine, pays an acquisition fee once, and then silently
-    // never pays a purchase reward however many tickets the traveller buys. Refusing here is
-    // the only place that mistake is cheap; after the boarding passes are printed it is not.
+    // `mode` too: a transaction code minted against an acquisition campaign scans fine, pays an
+    // acquisition fee once, then silently never pays a purchase reward. Refusing here is the
+    // only place that mistake is still cheap.
     const campaign = await prisma.campaign.findFirst({
       where: {
         id: campaign_id,
@@ -94,9 +86,8 @@ export class IssueController {
     } catch (e: any) {
       if (e.code !== 'P2002') throw e;
       // Same campaign, same transaction reference: the first call already minted it. Returning
-      // that code is the honest answer — the caller asked for a code for this booking and
-      // there is one. A 409 here would make correctly-issued codes look like something an
-      // operator has to reconcile by hand, which is exactly what idempotency is for.
+      // that code is the honest answer; a 409 would make correctly-issued codes look like
+      // something to reconcile by hand.
       const prior = await prisma.qrCode.findFirstOrThrow({
         where: { campaign_id, issued_ref },
         select: { id: true, code: true, expires_at: true },

@@ -1,11 +1,9 @@
 /**
  * Landing-page utility strings.
  *
- * This file used to be a second design system: its own buttons, its own headings, its own
- * shadows, all spelled in a printed-ticket vocabulary that the signed-in console no longer
- * shares. It is now an *editorial layer* — the same tokens and the same primitives as
- * `lib/tw.ts`, set at the top of the type scale instead of the bottom, with the few landing-only
- * compositions (the hero grid, the posting board, the coupon strip) defined here.
+ * An *editorial layer* over `lib/tw.ts` rather than a second design system: the same tokens and
+ * primitives, set at the top of the type scale instead of the bottom, plus the few landing-only
+ * compositions (the hero grid, the posting board, the coupon strip).
  *
  * The `lp-*` class names that remain in the TSX are motion hooks only — landing.css owns the
  * entrance sequence and the scroll-linked moves, because @keyframes, @property and

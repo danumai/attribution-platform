@@ -18,11 +18,10 @@ export function org(): {
 /**
  * One fetch wrapper for the whole console.
  *
- * `T` is an assertion, not a validation — nothing here checks the body against the shape the
- * caller asked for. That is deliberate: the alternative is a schema library on every one of
- * ~25 call sites to catch a class of bug the e2e suite already catches against the real
- * server. What the generic buys is that the console stays consistent *with itself*, so a
- * field renamed in `lib/types.ts` fails the build instead of rendering blank.
+ * `T` is an assertion, not a validation — nothing checks the body against the shape asked for.
+ * The alternative is a schema library on ~25 call sites to catch what the e2e suite already
+ * catches against the real server. What the generic buys is that the console stays consistent
+ * *with itself*: a field renamed in `lib/types.ts` fails the build instead of rendering blank.
  *
  * Callers that genuinely ignore the body leave `T` as `void`.
  */

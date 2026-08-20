@@ -36,7 +36,7 @@ import { randomBytes } from 'node:crypto';
 export class AdminController {
   @Get('overview')
   async overview() {
-    // One round trip for 17 aggregates. Seventeen Prisma `count`s would be seventeen queries.
+    // One round trip for 27 aggregates. Twenty-seven Prisma `count`s would be twenty-seven queries.
     const [o] = await prisma.$queryRaw<Record<string, number>[]>`
       SELECT
         (SELECT count(*)::int FROM orgs WHERE type='promoter')            AS promoters,
@@ -436,13 +436,11 @@ export class AdminController {
   /**
    * The admin's inbox: everything a *tenant* did that nobody here has acknowledged yet.
    *
-   * Not a second table. A promoter funding a campaign was already written to the audit log — it
-   * just landed in a list of admin overrides where nothing marked it as news. The actor is the
-   * whole rule: an entry with a tenant behind it is something the platform did not do itself,
-   * so it stays here until it is acknowledged. Every tenant action that gets audited from now
-   * on arrives here for free, which is the point of having one stream instead of two.
+   * Not a second table — the actor is the whole rule: an audit entry with a tenant behind it is
+   * something the platform did not do itself, so it stays here until acknowledged. Every tenant
+   * action audited from now on arrives here for free.
    *
-   * The audit log stays the record; this is only the unread end of it.
+   * The audit log stays the record; this is only its unread end.
    */
   @Get('notifications')
   async notifications(@Query('limit') limit?: string) {

@@ -39,7 +39,7 @@ type Kind = 'success' | 'error' | 'info';
 type Toast = { id: number; kind: Kind; text: string; leaving?: boolean };
 
 /** One control in a dialog. `select` needs `options`; everything else is an `<input>`. */
-export type DialogField = {
+type DialogField = {
   name: string;
   label: string;
   type?: 'text' | 'number' | 'select';
@@ -139,9 +139,8 @@ export function promptDialog(o: {
 /**
  * What a failed load looks like.
  *
- * Both consoles derive "still loading" from the absence of data, so a load that *failed* is
- * indistinguishable from one still in flight: the toast expires after four seconds and the
- * operator is left watching shimmer bars with nothing to click. This replaces the skeleton
+ * Both consoles derive "still loading" from the absence of data, so a *failed* load is
+ * indistinguishable from one in flight once the toast expires. This replaces the skeleton
  * rather than sitting above it — the page is not loading, and must not claim to be.
  */
 export function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -176,14 +175,9 @@ export type Figure = {
 /**
  * A run of figures printed as one strip.
  *
- * Every console surface used to spell this out for itself, and each one drifted: the admin
- * overview, the audience panel and the campaign page all built a `flex-wrap` row of
- * `flex-auto` cells whose widths came out of the numbers inside them, while the two "Live
- * now" rows built the same figures again as separate bordered plates. Four vocabularies for
- * "a number" on surfaces an operator reads side by side.
- *
- * The name is stamped above the value, per the Stamped Field Rule — which also happens to be
- * what makes a strip scannable, since the labels then share a baseline and so do the figures.
+ * One definition, because four surfaces spelling out "a number" for themselves is four
+ * vocabularies an operator reads side by side. The name is stamped above the value, which is
+ * also what makes a strip scannable: the labels share a baseline and so do the figures.
  */
 export function Figures({
   items,

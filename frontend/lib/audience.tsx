@@ -142,11 +142,10 @@ function BarList({
 /**
  * A time series, with its gaps put back.
  *
- * The server only returns buckets it counted something in, so a quiet Tuesday is simply
- * absent from the array. Plotted as-is that Tuesday does not flatten the line, it *removes*
- * it — thirty days of traffic with four quiet ones draws as a twenty-six-point series whose
- * x-axis silently compresses, and a fortnight's dip reads as a plateau. Every time series
- * here is expanded against the slots it should have had, so a zero is drawn as a zero.
+ * The server only returns buckets it counted something in, so a quiet Tuesday is absent
+ * entirely. Plotted as-is it does not flatten the line, it *removes* it — the x-axis silently
+ * compresses and a dip reads as a plateau. Expanded against the slots it should have had, a
+ * zero is drawn as a zero.
  */
 function fill(rows: Bucket[], keys: string[]): Bucket[] {
   const by = new Map(rows.map((r) => [r.key, r]));
@@ -228,10 +227,8 @@ function Series({
 /**
  * The daily plot on its own, for a surface that is not the full audience panel.
  *
- * The admin overview is read to answer "is the platform moving", and three integers cannot
- * answer that — a number says where traffic is, only a line says which way it is going. It
- * is the same component, the same query and the same window as the Audience tab, so the two
- * cannot disagree about a day.
+ * A number says where traffic is; only a line says which way it is going. Same component,
+ * query and window as the Audience tab, so the two cannot disagree about a day.
  */
 export function ScanTrend({ data, className }: { data: Analytics | null; className?: string }) {
   const days = data?.days ?? 30;

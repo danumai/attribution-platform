@@ -11,14 +11,9 @@ export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex'
 /**
  * A fixed window, counted in Redis when `REDIS_URL` is set and in this process when it is not.
  *
- * The distinction is the whole point. Every per-IP control in this system — login throttling,
- * credential stuffing, the signup and scan ceilings, the partner API budget — is a *security*
- * control, not a performance one, and an in-process counter silently multiplies every one of
- * them by the replica count. Two instances behind a load balancer means twice the login
- * attempts before anyone is throttled. So running more than one instance is gated on there
- * being somewhere shared to count, and that is the only thing Redis is used for here.
- *
- * Left unset, the in-process window below is unchanged and correct — for exactly one instance.
+ * Every per-IP control here is a *security* control, so an in-process counter multiplies each
+ * of them by the replica count — two instances means twice the login attempts before anyone is
+ * throttled. In-process is correct for exactly one instance; see REDIS_URL in config.ts.
  */
 const buckets = new Map<string, { n: number; reset: number }>();
 
@@ -51,13 +46,9 @@ async function redisRateLimited(
   windowMs: number,
 ): Promise<boolean> {
   const res = await redis.pipeline().incr(key).pexpire(key, windowMs, 'NX').exec();
-  /**
-   * `exec()` reports a failed command as *data* — a `[error, result]` tuple — instead of
-   * rejecting, and returns `null` outright when the connection is gone. Reading the count
-   * without checking both is how this stopped limiting anything the moment Redis went away:
-   * `undefined > 300` is `false`, so every request passed and nothing was logged. Fail loudly
-   * here so the caller's fallback actually runs.
-   */
+  // `exec()` reports a failed command as *data* — a `[error, result]` tuple — and returns
+  // `null` outright when the connection is gone. Unchecked, `undefined > 300` is `false`, so a
+  // dead Redis silently stops limiting anything. Throw so the caller's fallback runs.
   const [err, n] = res?.[0] ?? [new Error('redis connection unavailable'), null];
   if (err || typeof n !== 'number') throw err ?? new Error('redis returned no count');
   return n > max;
@@ -163,11 +154,9 @@ const isLocal = (h: string) =>
  * text: rejecting every non-http(s) scheme kills `javascript:`/`data:` redirect XSS, and
  * requiring https outside localhost stops a scan being downgraded to cleartext.
  *
- * Two fields go through here and both are redirect targets, which is the whole reason this
- * takes the name rather than hard-coding one: `landing_url`, the web fallback for a desktop
- * scan or a publisher with no app, and `deeplink_url`, where an engagement scan is sent so the
- * OS can open the app. https is also what makes the second one work at all — App Links and
- * Universal Links are only ever claimed on https origins.
+ * Shared by `landing_url` (the web fallback) and `deeplink_url` (where an engagement scan is
+ * sent so the OS can open the app). https is also what makes the second work at all — App
+ * Links and Universal Links are only claimed on https origins.
  */
 function validateRedirectUrl(raw: unknown, name: string): string | null {
   if (raw === undefined || raw === null || raw === '') return null;

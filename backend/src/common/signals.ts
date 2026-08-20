@@ -1,19 +1,17 @@
 /**
  * What a scan tells us about its context, taken from request headers alone.
  *
- * A QR code carries no data about whoever scanned it — everything below comes from the one
- * HTTP request the redirect hop sees. That is also the ceiling: no name, no email, no phone,
- * no precise location, and nothing the store listing hands back. Anyone asking this platform
- * for "who scanned" is asking for something the medium cannot produce.
+ * A QR code carries no data about whoever scanned it — everything below comes from the one HTTP
+ * request the redirect hop sees. That is also the ceiling: no name, email, phone or precise
+ * location, and nothing the store listing hands back.
  *
- * Separate from `attribution.ts` on purpose. That file's `detectPlatform` is one half of the
- * iOS fingerprint match, so it is deliberately coarse and must stay stable — a scan and a
- * first-open have to agree on it. Nothing here feeds matching; it is reporting only, so it can
- * be as fine-grained as the headers allow and can change shape without breaking attribution.
+ * Separate from `attribution.ts` on purpose: that file's signals feed *matching* and must stay
+ * coarse and stable, since a scan and a first-open have to agree on them. Everything here is
+ * reporting only, so it can be as fine-grained as the headers allow and can change shape freely.
  */
 import { Request } from 'express';
 
-export interface ScanSignals {
+interface ScanSignals {
   /** ISO-3166 alpha-2, from the CDN in front of us. NULL when nothing resolved it. */
   country: string | null;
   city: string | null;
@@ -35,10 +33,10 @@ const head = (req: Request, name: string): string => {
 /**
  * Geo comes from the edge, not from a bundled IP database.
  *
- * Cloudflare, Vercel and friends already resolve the client address and pass the answer down
- * as a header, which costs us no dependency, no 60MB database file and no monthly refresh cron.
- * The trade is that geo is NULL in local development and behind any proxy that does not add
- * these — which is why every consumer treats it as optional rather than assuming coverage.
+ * Cloudflare, Vercel and friends already resolve the client address into a header, which costs
+ * no dependency, no 60MB database and no refresh cron. The trade is NULL geo in local
+ * development and behind any proxy that does not add these, so every consumer treats it as
+ * optional.
  *
  * ponytail: edge headers only. Add MaxMind GeoLite2 + a refresh job if geo is ever needed
  * off a CDN, or if city-level accuracy has to be guaranteed rather than best-effort.
@@ -74,10 +72,9 @@ function language(req: Request): string | null {
 /**
  * Host only, never the path.
  *
- * A camera scan sends no Referer at all — a populated one means the "scan" was a click on a
- * page, which is worth knowing (an aggregator reposted the code, or someone is replaying the
- * URL). The host answers that; the path and query would only pull someone else's page state
- * into our database for no reporting gain.
+ * A camera scan sends no Referer, so a populated one means the "scan" was a click on a page —
+ * an aggregator reposted the code, or someone is replaying the URL. The host answers that; the
+ * path and query would only pull someone else's page state into our database.
  */
 function refererHost(req: Request): string | null {
   const raw = head(req, 'referer');
@@ -90,12 +87,10 @@ function refererHost(req: Request): string | null {
 }
 
 /**
- * UA parsing, ordered most-specific first — every in-app browser also claims to be Safari or
- * Chrome, and Edge/Opera/Samsung all claim to be Chrome, so a naive `includes('Chrome')` test
- * swallows six real answers into one wrong one.
- *
- * The in-app rows are the ones that pay for this function: "this scan came through Instagram's
- * webview" is a channel attribution a plain Chrome/Safari split can never give.
+ * UA parsing, ordered most-specific first: every in-app browser also claims Safari or Chrome,
+ * and Edge/Opera/Samsung all claim Chrome, so a naive `includes('Chrome')` swallows six real
+ * answers into one wrong one. The in-app rows are what pay for this function — "came through
+ * Instagram's webview" is a channel a Chrome/Safari split can never give.
  */
 const BROWSERS: [RegExp, string][] = [
   [/Instagram/i, 'Instagram'],
@@ -155,20 +150,15 @@ function deviceType(req: Request, ua: string, os: string | null): string {
 }
 
 /* ---------------------------------------------------------------------------
- * The second source: what the hand-off screen measured in the browser.
- *
- * Same rule as everything above — reporting only. The timezone, screen, core count and
- * appearance the interstitial also sends are matching signals and are parsed by
- * `attribution.ts` instead, because those five have to survive the crossing into a native SDK
- * and everything here does not. Mixing the two files is how a reporting field ends up scored.
+ * The second source: what the hand-off screen measured in the browser. Reporting only — the
+ * timezone, screen, core count and appearance it also sends are matching signals and are parsed
+ * by `attribution.ts`. Mixing the two is how a reporting field ends up scored.
  * ------------------------------------------------------------------------- */
 
 /**
  * A bounded integer, or absence. Everything here arrives from a phone, so nothing is trusted.
- *
- * The empty check is load-bearing rather than tidy: `Number('')` is `0`, so an absent key would
- * otherwise land in the column as a real, in-range zero — a device that reported no touch
- * points at all, rather than one that was never asked.
+ * The empty check is load-bearing: `Number('')` is `0`, so an absent key would otherwise land
+ * as a real in-range zero — "reported no touch points" rather than "was never asked".
  */
 const int = (raw: unknown, lo: number, hi: number): number | null => {
   const v = String(raw ?? '').trim();
@@ -188,11 +178,10 @@ const tok = (raw: unknown, max = 24): string | null => {
 /**
  * What the browser measured, as a bag of reporting facts.
  *
- * Every value is optional twice over: the API this reads is missing on some engine (Safari has
- * no `deviceMemory` or `connection`, Firefox has neither and no `hardwareConcurrency` either),
- * and the whole screen is skipped for Android and desktop. So this returns NULL rather than an
- * object of nulls — an empty bag in the column would read as "measured nothing" when the truth
- * is "was never asked".
+ * Every value is optional twice over: the API is missing on some engines (Safari has no
+ * `deviceMemory` or `connection`), and the whole screen is skipped for Android and desktop. So
+ * this returns NULL rather than an object of nulls — an empty bag would read as "measured
+ * nothing" when the truth is "was never asked".
  */
 export function clientSignals(q: Record<string, unknown>): Record<string, unknown> | null {
   const bag: Record<string, unknown> = {

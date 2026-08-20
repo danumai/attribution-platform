@@ -14,7 +14,7 @@ export interface Bucket {
   conversions: number;
 }
 
-export interface ScanAnalytics {
+interface ScanAnalytics {
   days: number;
   totals: {
     scans: number;

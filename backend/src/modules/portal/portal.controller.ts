@@ -146,10 +146,10 @@ export class PortalController {
   /**
    * Ask to reprice a live partnership. Promoter side, and a request rather than a change.
    *
-   * The coin rate is what the *publisher* gets paid per signup, so the promoter cannot simply
-   * set it — but it also must not stop the money while the two sides talk. The proposal lands
-   * in its own columns and every payout keeps reading the rates already agreed; the publisher's
-   * `rates/accept` is the only thing that promotes it.
+   * The coin rate is what the *publisher* is paid, so the promoter cannot simply set it — and
+   * the money must not stop while the two sides talk. The proposal lands in its own columns
+   * while payouts keep reading the agreed rates; `rates/accept` is the only thing that promotes
+   * it.
    *
    * `active` only: a pending partnership has no agreed price to renegotiate (the publisher has
    * not accepted the first one), and a suspended one is an admin hold that new terms must not
@@ -425,10 +425,9 @@ export class PortalController {
   /**
    * Where this campaign's scans came from — the reason a promoter funds a second print run.
    *
-   * Read-only for both sides of the partnership, like `stats`: the publisher hosting the code
-   * has as much reason to see which placement works as the promoter who printed it.
-   * `ownedCampaign` is the whole authorisation story — it throws unless this session is one of
-   * the two orgs on the partnership, so the id can never be used to read a stranger's traffic.
+   * Read-only for both sides, like `stats`. `ownedCampaign` is the whole authorisation story:
+   * it throws unless the session is one of the two orgs on the partnership, so the id can never
+   * read a stranger's traffic.
    */
   @Get('campaigns/:id/analytics')
   async analytics(

@@ -2,33 +2,23 @@
  * Observability: a request id that follows a request everywhere, structured logs, and counters
  * for the decisions that *are* the product.
  *
- * The failure this exists to catch is the silent one. A publisher who types their
- * `android_package` wrong does not generate errors — every install simply looks organic, the
- * matcher answers `no_match` forever, and nobody is paid. There is no exception to alert on and
- * no row to count, because refusals are never persisted: `installs` and `redemptions` only ever
- * record what *succeeded*. The refusal rate is invisible in the database by construction, which
- * is exactly why it has to be emitted here instead.
+ * It exists to catch the silent failure. A publisher who mistypes their `android_package`
+ * generates no errors — every install just looks organic and nobody is paid. Refusals are
+ * never persisted (`installs` and `redemptions` record only what succeeded), so the refusal
+ * rate is invisible in the database by construction and has to be emitted here.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { NextFunction, Request, Response } from 'express';
 
-/**
- * Threads the request id through everything one request touches without passing it down every
- * call signature. Stdlib — this is precisely what `AsyncLocalStorage` is for, and a logging
- * library would be a dependency to get the same thing.
- */
+/** Threads the request id through everything one request touches, without putting it in every
+ *  call signature. */
 const ctx = new AsyncLocalStorage<{ request_id: string }>();
 
 type Fields = Record<string, unknown>;
 
-/**
- * One JSON object per line on stdout, which is what every log pipeline already ingests.
- *
- * Deliberately not a logging library: the whole feature is "JSON.stringify with a timestamp and
- * the ambient request id", and that is four lines. `console` also keeps stdout ordering, which
- * matters when correlating a request log against the container's own output.
- */
+/** One JSON object per line on stdout, which is what every log pipeline already ingests.
+ *  Not a logging library: the whole feature is four lines, and `console` keeps stdout ordering. */
 function emit(level: 'info' | 'warn' | 'error', event: string, fields: Fields = {}) {
   const line = {
     ts: new Date().toISOString(),
@@ -48,14 +38,10 @@ export const log = {
 };
 
 /* ---------------------------------------------------------------------------
- * Counters
- *
- * Prometheus text format, rendered by hand. The format is `name{label="v"} 123` and a HELP/TYPE
- * header — a client library would be a dependency for string concatenation.
+ * Counters — Prometheus text format, rendered by hand.
  *
  * Per-process and reset by a restart, which is correct rather than a shortcut: Prometheus
- * scrapes each instance separately and `rate()` already accounts for counter resets. That is
- * also what makes this work with more than one replica, which the shared limiter below is for.
+ * scrapes each instance separately and `rate()` already accounts for counter resets.
  * ------------------------------------------------------------------------- */
 
 const counters = new Map<string, number>();
@@ -139,13 +125,10 @@ export function requestContext(req: Request, res: Response, next: NextFunction) 
 /**
  * Every attribution decision, paid or refused.
  *
- * `reason` is a closed set (`no_match`, `ambiguous`, `low_confidence`, `budget_exhausted`,
- * `duplicate_device`, `device_integrity`, …) so it is safe as a metric label, and it is the
- * series to alert on: a publisher whose store target is misconfigured shows up as `no_match`
- * going to 100% with no error rate to notice it by.
- *
- * The tenant ids go to the log rather than the metric — that is the drill-down once an alert
- * fires, and as a label it would mint a new time series per campaign forever.
+ * `reason` is a closed set (`no_match`, `ambiguous`, `low_confidence`, `budget_exhausted`, …)
+ * so it is safe as a label, and it is the series to alert on: a misconfigured store target
+ * shows up as `no_match` going to 100% with no error rate to notice it by. Tenant ids go to
+ * the log instead — as labels they would mint a time series per campaign forever.
  */
 export function recordDecision(
   stage: 'first_open' | 'claim',

@@ -327,7 +327,7 @@ core count and appearance can ever be read. Skip the hop and the match is left w
 scores 55 against a floor of 70 and is refused. The hop is what makes iOS attribution work.
 
 The page holds for ~900ms, forwards itself with `location.replace`, and degrades in two
-stages: a `<meta refresh>` at 3s if script is blocked, and a real anchor if both fail. It
+stages: a `<meta refresh>` at 4s if script is blocked, and a real anchor if both fail. It
 runs the only inline script in this API, under its own nonce CSP.
 
 `GET /go/:claim_id` writes the signals onto the still-unconsumed scan and redirects to the
@@ -1054,7 +1054,8 @@ Seeded from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on first boot — never created via
     → 200 { token, org: { type: "admin" } }                            auth: none
 
 2.  Platform health at a glance
-    GET  /v1/admin/overview         (17 aggregates + ledger_balanced + conversion_rate)
+    GET  /v1/admin/overview         (27 aggregates + ledger_balanced, balances_reconciled,
+                                      conversion_rate)
     auth: Bearer <token> (admin)
 
 3.  Cross-tenant reads — every org, partnership, campaign, code, scan, redemption
@@ -1068,7 +1069,8 @@ Seeded from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on first boot — never created via
     auth: Bearer <token> (admin)
 
 4.  Override a partnership's commercial terms, or suspend it
-    PATCH /v1/admin/partnerships/:id { coin_rate, guest_rate, grace_days, status }
+    PATCH /v1/admin/partnerships/:id { coin_rate, guest_rate, grace_days, status,
+                                       platform_fee_bps }
     status: pending | active | suspended. `suspended` stops scans and payouts and the
     publisher cannot re-accept its way out of it; `pending` is the publisher's inbox state.
     auth: Bearer <token> (admin) — audited

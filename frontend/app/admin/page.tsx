@@ -1,391 +1,34 @@
 'use client';
-import { MouseEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
-import { Analytics, Audience, ScanTrend, dailySeries } from '@/lib/audience';
-import {
-  Empty,
-  Figure,
-  Figures,
-  LoadError,
-  SkeletonStrip,
-  SkeletonTable,
-  Split,
-  confirmDialog,
-  promptDialog,
-  toast,
-} from '@/lib/ui';
+import { Analytics, Audience } from '@/lib/audience';
+import { toast } from '@/lib/ui';
 import type {
   AdminOrg,
   AdminOverview,
   AdminScan,
   AuditEntry,
   Campaign,
-  Ledger,
+  Ledger as LedgerData,
   Partnership,
   QrCode,
   Redemption,
 } from '@/lib/types';
-import { ago, num, when } from '@/lib/fmt';
-import {
-  btn,
-  btnGhost,
-  btnTinyGhost,
-  card,
-  cx,
-  codeKey,
-  field,
-  filterBar,
-  filterChip,
-  filterChipDrop,
-  health,
-  healthMark,
-  link as linkClass,
-  linkish,
-  menu,
-  menuItem,
-  menuPop,
-  menuScrim,
-  menuSummary,
-  muted,
-  pill as pillFor,
-  pillBad,
-  queueCount,
-  queueRow,
-  search,
-  searchInput,
-  sectionHead,
-  select as selectField,
-  stampCaps,
-  table,
-  tableFoot,
-  tableWrap,
-  tablebar,
-  td,
-  tdNum,
-  th,
-  thNum,
-  tr,
-} from '@/lib/tw';
-
-/** The rail: nine sections, grouped by what an operator is doing when they open them. */
-const TABS = [
-  { id: 'Overview', icon: 'overview', group: '' },
-  { id: 'Organizations', icon: 'orgs', group: 'Accounts' },
-  { id: 'Partnerships', icon: 'partnerships', group: 'Accounts' },
-  { id: 'Campaigns', icon: 'campaigns', group: 'Accounts' },
-  { id: 'Audience', icon: 'overview', group: 'Traffic' },
-  { id: 'Scans', icon: 'scans', group: 'Traffic' },
-  { id: 'Redemptions', icon: 'redemptions', group: 'Traffic' },
-  { id: 'QR codes', icon: 'qr', group: 'Traffic' },
-  { id: 'Ledger', icon: 'ledger', group: 'Money' },
-  { id: 'Notifications', icon: 'audit', group: 'Money' },
-  { id: 'Audit log', icon: 'audit', group: 'Money' },
-] as const;
-type Tab = (typeof TABS)[number]['id'];
-
-const HEAD: Record<Tab, string> = {
-  Overview: 'Does the money add up, and what is waiting on you.',
-  Organizations: 'Every promoter and publisher on the platform.',
-  Partnerships:
-    'Rates are per redemption. Guest rate is paid up front for an unidentified signup; the delta is released if the user identifies within the grace window.',
-  Campaigns: 'Budgets, conversion and the kill switch.',
-  Audience:
-    'Where scans come from, on what, and when. Everything here is read off the request the redirect already receives — a QR code carries nothing about whoever scanned it.',
-  Scans: 'Every QR scan, newest first. IPs are stored as a truncated hash — enough to spot a repeat scanner, not enough to identify a person.',
-  Redemptions: 'Every signup a publisher vouched for.',
-  'QR codes': 'Issued codes, their limits and their state.',
-  Ledger: 'Account balances and the entries behind them.',
-  Notifications:
-    'What tenants have done that nobody here has acknowledged — a funded budget, a repriced partnership. Marking one handled moves it out of here; the audit log keeps it forever.',
-  'Audit log': 'Every privileged override, newest first.',
-};
-
-// Fallback only: scans recorded before the signal columns existed have nothing but their UA.
-// ponytail: crude UA bucketing. New scans carry `device_type` from the server instead.
-const device = (ua: string) =>
-  !ua ? '—' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobile/.test(ua) ? 'Mobile' : 'Desktop';
-
-/**
- * Everything the hand-off screen measured about one handset, as a single hover.
- *
- * A column each would be a dozen more on a table that already runs off the side of the screen,
- * and these are read once — when someone is disputing a single attribution — rather than
- * scanned down. Screen leads because it is the highest-weighted signal in the match.
- */
-const handset = (x: AdminScan) => {
-  const rows = Object.entries({
-    screen: x.screen,
-    tz: x.tz,
-    cores: x.cores,
-    theme: x.dark == null ? null : x.dark ? 'dark' : 'light',
-    ...(x.client ?? {}),
-  }).filter(([, v]) => v !== null && v !== undefined);
-  return rows.length
-    ? rows.map(([k, v]) => `${k}  ${v}`).join('\n')
-    : 'No hand-off screen — this scan went straight to its destination.';
-};
-
-/** `Intl` knows every country name already — a lookup table here would be dead weight. */
-const regionNames =
-  typeof Intl !== 'undefined' && 'DisplayNames' in Intl
-    ? new Intl.DisplayNames(['en'], { type: 'region' })
-    : null;
-const country = (code: string) => {
-  try {
-    return regionNames?.of(code) ?? code;
-  } catch {
-    return code;
-  }
-};
-const pill = (s: string) => <span className={pillFor(s)}>{s}</span>;
-
-/**
- * A column over rows of `T`. `sort` is required whenever `get` returns markup: comparing two
- * React elements with `>` is always false both ways, so those headers used to announce
- * `aria-sort="ascending"` over an order that had not changed.
- */
-type Col<T> = { h: string; get: (row: T) => ReactNode; sort?: (row: T) => unknown; num?: boolean };
-
-const PAGE = 50;
-
-/**
- * One lowercase haystack per row, cached on the row object itself.
- *
- * The filter used to `JSON.stringify` every row inside the predicate, so with `limit=1000`
- * scans it re-serialised a thousand rows on every keystroke. A WeakMap keyed on the row means
- * each row is serialised once and the cache is collected with the data it describes.
- */
-const haystacks = new WeakMap<object, string>();
-function haystack(row: object): string {
-  let s = haystacks.get(row);
-  if (s === undefined) haystacks.set(row, (s = JSON.stringify(row).toLowerCase()));
-  return s;
-}
-
-/** Row actions live behind one control instead of a run of dot-separated links. */
-function Actions({ children }: { children: ReactNode }) {
-  // click-away and pick-an-item both close the menu, the way a native popover would
-  const close = (e: MouseEvent<HTMLElement>) => e.currentTarget.closest('details')?.removeAttribute('open');
-  return (
-    <details className={menu}>
-      <summary className={menuSummary} aria-label="Row actions" title="Actions">
-        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <circle cx="3" cy="8" r="1.5" />
-          <circle cx="8" cy="8" r="1.5" />
-          <circle cx="13" cy="8" r="1.5" />
-        </svg>
-      </summary>
-      <div className={menuScrim} onClick={close} />
-      <div className={menuPop} onClick={close}>
-        {children}
-      </div>
-    </details>
-  );
-}
-
-/** One table for every tab: free-text filter, click-to-sort headers, paged rendering. */
-function Table<T extends object>({
-  cols,
-  rows,
-  empty = 'Nothing here yet.',
-  loading,
-}: {
-  cols: Col<T>[];
-  rows: T[];
-  empty?: string;
-  loading?: boolean;
-}) {
-  const [q, setQ] = useState('');
-  const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
-  const [limit, setLimit] = useState(PAGE);
-
-  // Deliberately outside the memo's dependencies. Every call site passes `cols` as an inline
-  // array literal, so a fresh identity arrives on every render and the memo never hit — it
-  // re-filtered the whole table each time an unrelated piece of state (`busy`) changed. The
-  // only part of `cols` the sort reads is the accessor for the sorted column, and `sort.i`
-  // already changes whenever that does.
-  const colsRef = useRef(cols);
-  colsRef.current = cols;
-
-  const shown = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const out = needle ? rows.filter((r) => haystack(r).includes(needle)) : rows.slice();
-    if (sort) {
-      // A column with no `sort` sorts on its rendered value, which is only meaningful when
-      // that value is a primitive. `sortable()` is what stops a header claiming otherwise.
-      const key = colsRef.current[sort.i].sort ?? colsRef.current[sort.i].get;
-      out.sort((a, b) => {
-        const [x, y] = [key(a), key(b)] as [any, any];
-        return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
-      });
-    }
-    return out;
-  }, [q, rows, sort]);
-
-  /**
-   * Whether clicking this header actually reorders anything.
-   *
-   * Without an explicit `sort`, the comparator falls back to `get`, and for a column that
-   * renders markup that means comparing two React elements — always false in both directions,
-   * so the order never changed while `aria-sort` told a screen reader it had. Probing the
-   * first row is enough: a column renders the same kind of thing for every row.
-   */
-  const sortable = (c: Col<T>) => {
-    if (!c.h) return false;
-    if (c.sort) return true;
-    if (!rows.length) return false;
-    const v = c.get(rows[0]);
-    return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
-  };
-
-  // a narrowed result set starts at the top again, not 300 rows down
-  useEffect(() => setLimit(PAGE), [q, sort]);
-
-  if (loading) return <SkeletonTable className="mt-3" rows={6} cols={Math.min(cols.length, 6)} />;
-
-  return (
-    <>
-      <div className={tablebar}>
-        <div className={search}>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-            <circle cx="7" cy="7" r="4.5" />
-            <path d="m10.5 10.5 3 3" strokeLinecap="round" />
-          </svg>
-          <input className={searchInput} placeholder="Filter these rows…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter rows" />
-          {q && (
-            <button className={cx(btnTinyGhost, 'shrink-0')} onClick={() => setQ('')}>
-              Clear
-            </button>
-          )}
-        </div>
-        <span className={muted}>
-          {shown.length}
-          {shown.length !== rows.length && ` of ${rows.length}`} rows
-        </span>
-      </div>
-
-      {shown.length ? (
-        <div className={tableWrap}>
-          <table className={table}>
-            <thead>
-              <tr>
-                {cols.map((c, i) => {
-                  const can = sortable(c);
-                  return (
-                    <th
-                      key={i}
-                      className={cx(c.num ? thNum : th, sort?.i === i && 'text-accent-text')}
-                      aria-sort={
-                        can && sort?.i === i ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined
-                      }
-                      style={{ cursor: can ? 'pointer' : 'default', userSelect: 'none' }}
-                      onClick={() =>
-                        can && setSort((s) => (s?.i === i ? { i, dir: s.dir === 1 ? -1 : 1 } : { i, dir: 1 }))
-                      }
-                    >
-                      {c.h}
-                      {can && sort?.i === i && <span className="ml-1">{sort.dir === 1 ? '↑' : '↓'}</span>}
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.slice(0, limit).map((r, i) => (
-                // every row type here carries one or the other; the index is the last resort
-                <tr className={tr} key={(r as { id?: string; account?: string }).id ?? (r as { account?: string }).account ?? i}>
-                  {cols.map((c, j) => (
-                    <td key={j} className={c.num ? tdNum : td}>
-                      {c.get(r)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {shown.length > limit && (
-            <div className={tableFoot}>
-              <button className={btnGhost} onClick={() => setLimit((l) => l + PAGE)}>
-                Show {Math.min(PAGE, shown.length - limit)} more
-              </button>
-              <span className={muted}>{shown.length - limit} rows below</span>
-            </div>
-          )}
-        </div>
-      ) : (
-        <Empty
-          className="mt-3"
-          title={q ? 'Nothing matches that filter' : empty}
-          body={q ? `No row contains “${q}”.` : undefined}
-          action={
-            q ? (
-              <button className={btnGhost} onClick={() => setQ('')}>
-                Clear the filter
-              </button>
-            ) : undefined
-          }
-        />
-      )}
-    </>
-  );
-}
-
-/** Counts, ready for the shared strip. */
-const counts = (items: [string, number | undefined][]): Figure[] =>
-  items.map(([k, v]) => ({ k, v: num(v ?? 0) }));
-
-/**
- * Whether the platform's coins still sum to zero.
- *
- * It leads the Overview and it opens the Ledger, because those are the two places an
- * operator looks before authorising anything, and a integrity check that is only on one of
- * them is a check the other page silently claims to have passed.
- */
-function LedgerHealth({ ok, sum, onOpen }: { ok: boolean; sum: number; onOpen?: () => void }) {
-  return (
-    <div className={health(ok)}>
-      <div className={healthMark(ok)} aria-hidden="true">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          {ok ? <path d="m5 10.5 3.2 3L15 6.5" /> : <path d="M10 5.5v5.5M10 14v.1" />}
-        </svg>
-      </div>
-      <div>
-        <b className="font-[650] tracking-[-0.015em]">
-          {ok ? 'Ledger balanced' : `Ledger off by ${num(sum)}`}
-        </b>
-        <p className={cx(muted, 'mt-0.75 max-w-[62ch]')}>
-          {ok
-            ? 'Every entry sums to zero — no coins have been created or lost.'
-            : 'Entries do not sum to zero. Coins have been created or destroyed outside the ledger — investigate before any payout.'}
-        </p>
-      </div>
-      {!ok && onOpen && (
-        <span className="ml-auto self-center whitespace-nowrap">
-          <button className={linkish} onClick={onOpen}>
-            Open the ledger
-          </button>
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Everything the console holds at once. Partial because it fills in as the fetches land. */
-interface AdminData {
-  overview?: AdminOverview;
-  orgs?: AdminOrg[];
-  partnerships?: Partnership[];
-  campaigns?: Campaign[];
-  scans?: AdminScan[];
-  redemptions?: Redemption[];
-  qrCodes?: QrCode[];
-  ledger?: Ledger;
-  audit?: AuditEntry[];
-  notifications?: AuditEntry[];
-  analytics?: Analytics;
-}
+import { num } from '@/lib/fmt';
+import { btn, btnGhost, card, codeKey, cx, pillBad, select as selectField } from '@/lib/tw';
+import { HEAD, TABS, type AdminData, type Tab } from './types';
+import { AuditLog } from './sections/AuditLog';
+import { Campaigns } from './sections/Campaigns';
+import { Ledger } from './sections/Ledger';
+import { Notifications } from './sections/Notifications';
+import { Organizations } from './sections/Organizations';
+import { Overview } from './sections/Overview';
+import { Partnerships } from './sections/Partnerships';
+import { QrCodes } from './sections/QrCodes';
+import { Redemptions } from './sections/Redemptions';
+import { Scans } from './sections/Scans';
 
 export default function Admin() {
   const r = useRouter();
@@ -436,7 +79,7 @@ export default function Admin() {
         api<AdminScan[]>(
           `/v1/admin/scans?limit=1000${campaignFilter ? `&campaign_id=${campaignFilter}` : ''}`,
         ),
-        api<Ledger>(
+        api<LedgerData>(
           `/v1/admin/ledger${ledgerAccount ? `?account=${encodeURIComponent(ledgerAccount)}` : ''}`,
         ),
         api<Analytics>(
@@ -449,10 +92,7 @@ export default function Admin() {
     }
   }, [campaignFilter, ledgerAccount, days]);
 
-  const load = useCallback(
-    () => Promise.all([loadCore(), loadFiltered()]),
-    [loadCore, loadFiltered],
-  );
+  const load = useCallback(() => Promise.all([loadCore(), loadFiltered()]), [loadCore, loadFiltered]);
 
   useEffect(() => {
     if (!token()) return void r.replace('/login');
@@ -466,53 +106,46 @@ export default function Admin() {
     if (token()) loadFiltered();
   }, [loadFiltered]);
 
-  async function act(fn: () => Promise<any>, ok = 'Done') {
-    setBusy(true);
-    try {
-      const res = await fn();
-      // a rotated key is shown exactly once, so it goes to a sticky panel rather than a toast
-      if (res?.api_key) setNewKey(res.api_key);
-      else toast.success(ok);
-      await load();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  const patch = (path: string, body: any, ok?: string) =>
-    act(() => api(path, { method: 'PATCH', body: JSON.stringify(body) }), ok);
-  const post = (path: string, body: any, ok?: string) =>
-    act(() => api(path, { method: 'POST', body: JSON.stringify(body) }), ok);
-  /** An in-page jump. A button, not an <a> without an href — that takes no keyboard focus. */
-  const link = (label: string, onClick: () => void, danger = false) => (
-    <button
-      className={cx(linkish, danger && 'text-bad')}
-      disabled={busy}
-      onClick={onClick}
-    >
-      {label}
-    </button>
-  );
-  /** One row inside an Actions menu. */
-  const item = (label: string, onClick: () => void, danger = false) => (
-    <button key={label} className={menuItem(danger)} disabled={busy} onClick={onClick}>
-      {label}
-    </button>
+  const act = useCallback(
+    async (fn: () => Promise<any>, ok = 'Done') => {
+      setBusy(true);
+      try {
+        const res = await fn();
+        // a rotated key is shown exactly once, so it goes to a sticky panel rather than a toast
+        if (res?.api_key) setNewKey(res.api_key);
+        else toast.success(ok);
+        await load();
+      } catch (e: any) {
+        toast.error(e.message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load],
   );
 
+  const patch = (path: string, body: unknown, ok?: string) =>
+    void act(() => api(path, { method: 'PATCH', body: JSON.stringify(body) }), ok);
+  const post = (path: string, body: unknown, ok?: string) =>
+    void act(() => api(path, { method: 'POST', body: JSON.stringify(body) }), ok);
+
+  const filterScans = (campaignId: string) => {
+    setCampaignFilter(campaignId);
+    setTab('Scans');
+  };
+  const filterLedger = (account: string) => {
+    setLedgerAccount(account);
+    setTab('Ledger');
+  };
+
   if (!me) return null;
+
   // A failed load is its own state — not "still loading", and not data.
   const failed = !d.overview && Boolean(loadErr);
   const loading = !d.overview && !failed;
   const o = d.overview;
-  const campaigns = d.campaigns ?? [];
-  // The shape behind the two headline figures, gaps included: a quiet day the analytics query
-  // never returned still has to draw as a trough, or the trace flatters itself.
-  const trend = dailySeries(d.analytics ?? null);
-  // Redemptions carry the publisher's user ref; scans only know the device. Join so a scan row
-  // can show who it turned into.
-  const userByScan = new Map((d.redemptions ?? []).map((x) => [x.scan_id, x]));
+  const shared = { d, loading, busy, patch, post, go: setTab, filterScans, filterLedger };
+
   // One control, two tabs — Audience and Scans are the same rows counted two ways, so a
   // campaign chosen on one must still be chosen on the other.
   const campaignPicker = (
@@ -523,7 +156,7 @@ export default function Admin() {
       aria-label="Campaign"
     >
       <option value="">All campaigns</option>
-      {campaigns.map((c) => (
+      {(d.campaigns ?? []).map((c) => (
         <option key={c.id} value={c.id}>
           {c.name} — {c.promoter_name}
         </option>
@@ -552,9 +185,7 @@ export default function Admin() {
       lede={HEAD[tab]}
       actions={
         <>
-          {o && !o.ledger_balanced && (
-            <span className={pillBad}>ledger off by {num(o.ledger_sum)}</span>
-          )}
+          {o && !o.ledger_balanced && <span className={pillBad}>ledger off by {num(o.ledger_sum)}</span>}
           <button className={btnGhost} onClick={() => load()}>
             Refresh
           </button>
@@ -582,654 +213,27 @@ export default function Admin() {
         </div>
       )}
 
-      {tab === 'Overview' &&
-        (!o ? (
-          failed ? (
-            <LoadError message={loadErr} onRetry={() => load()} />
-          ) : (
-            <SkeletonStrip className="mt-3" />
-          )
-        ) : (
-          <>
-            {/* The one thing a platform operator has to know before anything else: does the
-                money add up. It leads the page rather than sitting in a footnote row. */}
-            <LedgerHealth
-              ok={o.ledger_balanced}
-              sum={o.ledger_sum}
-              onOpen={() => setTab('Ledger')}
-            />
-
-            <h2 className={sectionHead}>Live now</h2>
-            <Figures
-              className="mt-3"
-              onPick={(go) => setTab(go as Tab)}
-              items={[
-                { k: 'Scans, last 24h', v: num(o.scans_24h), go: 'Audience', spark: trend.scans },
-                { k: 'Active campaigns', v: num(o.active_campaigns), go: 'Campaigns' },
-                {
-                  k: 'Scan → signup',
-                  v: `${((o.conversion_rate ?? 0) * 100).toFixed(1)}%`,
-                  go: 'Audience',
-                  spark: trend.signups,
-                },
-              ]}
-            />
-
-            {/* Three integers say where the platform is; only a line says which way it is
-                going, which is the question this page is opened to answer. Same query and
-                same window as the Audience tab, so the two cannot disagree about a day. */}
-            <ScanTrend className="mt-3" data={d.analytics ?? null} />
-
-            {/* Exact, unlike the dashboard's version of the same split: these two counts come
-                off the overview endpoint rather than being derived from a capped page of rows. */}
-            {o.redemptions > 0 && (
-              <div className={cx(card, 'mt-3')}>
-                <div className="flex items-baseline justify-between gap-3">
-                  <b className={stampCaps}>Verified vs guest</b>
-                  <span className={muted}>{num(o.redemptions)} redemptions</span>
-                </div>
-                <Split
-                  className="mt-3"
-                  verified={o.identified_redemptions}
-                  guest={o.guest_redemptions}
-                />
-                <div className="mt-2.5 flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-ink-soft">
-                  <span>
-                    <b className="font-semibold text-ok">{num(o.identified_redemptions)}</b> verified
-                  </span>
-                  <span>
-                    <b className="font-semibold text-warn">{num(o.guest_redemptions)}</b> still guest
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <h2 className={sectionHead}>Needs attention</h2>
-            <div className={cx(card, 'mt-3 p-2')}>
-              {[
-                ['Tenant changes you have not acknowledged', o.open_notifications, 'Notifications'],
-                ['Partnerships waiting on a publisher', o.pending_partnerships, 'Partnerships'],
-                ['Suspended organizations', o.suspended_orgs, 'Organizations'],
-                ['Voided QR codes', o.voided_codes, 'QR codes'],
-              ].map(([k, v, go]) => (
-                <button className={queueRow} key={k as string} onClick={() => setTab(go as Tab)}>
-                  <span className={queueCount(Boolean(v))}>{num(v as number)}</span>
-                  <span>{k as string}</span>
-                  <span className="ml-auto text-mut" aria-hidden="true">
-                    →
-                  </span>
-                </button>
-              ))}
-              {!o.open_notifications && !o.pending_partnerships && !o.suspended_orgs && !o.voided_codes && (
-                <p className={cx(muted, 'px-3 py-2.5')}>Nothing is waiting on you.</p>
-              )}
-            </div>
-
-            <h2 className={sectionHead}>Coins</h2>
-            <Figures
-              className="mt-3"
-              items={counts([
-                ['funded', o.total_funded],
-                ['granted', o.coins_granted],
-                ['unspent', (o.total_funded ?? 0) - (o.coins_granted ?? 0)],
-                ['identified', o.identified_redemptions],
-                ['guest', o.guest_redemptions],
-              ])}
-            />
-
-            <h2 className={sectionHead}>Platform</h2>
-            <Figures
-              className="mt-3"
-              items={counts([
-                ['promoters', o.promoters],
-                ['publishers', o.publishers],
-                ['partnerships', o.partnerships],
-                ['campaigns', o.campaigns],
-                ['QR codes', o.qr_codes],
-                ['scans', o.scans],
-                ['redemptions', o.redemptions],
-              ])}
-            />
-          </>
-        ))}
-
-      {tab === 'Organizations' && (
-        <Table
-          loading={loading}
-          rows={d.orgs ?? []}
-          cols={[
-            { h: 'Name', get: (x) => x.name },
-            { h: 'Type', sort: (x) => x.type, get: (x) => pill(x.type) },
-            { h: 'Email', get: (x) => x.email },
-            { h: 'Landing URL', sort: (x) => x.landing_url ?? '', get: (x) => (x.landing_url ? <a className={linkClass} href={x.landing_url} target="_blank" rel="noreferrer">{x.landing_url}</a> : '—') },
-            { h: 'API key', sort: (x) => x.has_api_key, get: (x) => (x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="text-bad">missing</span>) },
-            { h: 'Campaigns', num: true, get: (x) => x.campaigns },
-            { h: 'Coins', num: true, get: (x) => x.coin_balance ?? '—' },
-            { h: 'Joined', get: (x) => when(x.created_at), sort: (x) => x.created_at },
-            { h: 'Status', get: (x) => pill(x.suspended ? 'suspended' : 'active'), sort: (x) => x.suspended },
-            {
-              h: '',
-              get: (x) => (
-                <Actions>
-                  {item(x.suspended ? 'Reinstate' : 'Suspend', () =>
-                    patch(`/v1/admin/orgs/${x.id}`, { suspended: !x.suspended }, x.suspended ? 'Reinstated' : 'Suspended'),
-                  )}
-                  {item('Rename', async () => {
-                    const name = await promptDialog({
-                      title: `Rename ${x.name}`,
-                      inputLabel: 'Organization name',
-                      input: x.name,
-                      confirmText: 'Rename',
-                    });
-                    if (name && name !== x.name) patch(`/v1/admin/orgs/${x.id}`, { name }, 'Renamed');
-                  })}
-                  {x.type === 'publisher' && (
-                    <>
-                      {item('Set landing URL', async () => {
-                        const landing_url = await promptDialog({
-                          title: `Landing URL for ${x.name}`,
-                          body: 'Where a scanned user is redirected. Must be https.',
-                          inputLabel: 'URL',
-                          input: x.landing_url ?? '',
-                          confirmText: 'Save',
-                        });
-                        if (landing_url) patch(`/v1/admin/orgs/${x.id}`, { landing_url }, 'Landing URL updated');
-                      })}
-                      {item('Rotate API key', async () => {
-                        const go = await confirmDialog({
-                          title: `Rotate the API key for ${x.name}?`,
-                          body: 'The old key stops working immediately, and their backend will fail until they deploy the new one.',
-                          confirmText: 'Rotate key',
-                          danger: true,
-                        });
-                        if (go) post(`/v1/admin/orgs/${x.id}/rotate-key`, {});
-                      })}
-                    </>
-                  )}
-                  {item(
-                    'Offboard org',
-                    async () => {
-                      const reason = await promptDialog({
-                        title: `Offboard ${x.name}?`,
-                        body: 'Suspends the org, revokes its API key and ends every campaign it takes part in. Recorded in the audit log.',
-                        inputLabel: 'Reason',
-                        input: '',
-                        confirmText: 'Offboard',
-                        danger: true,
-                      });
-                      if (reason !== null) post(`/v1/admin/orgs/${x.id}/offboard`, { reason }, 'Org offboarded');
-                    },
-                    true,
-                  )}
-                </Actions>
-              ),
-            },
-          ]}
-        />
-      )}
-
-      {tab === 'Partnerships' && (
-        <Table
-          loading={loading}
-          rows={d.partnerships ?? []}
-          cols={[
-            { h: 'Promoter', get: (x) => x.promoter_name },
-            { h: 'Publisher', get: (x) => x.publisher_name },
-            ...(['coin_rate', 'guest_rate', 'engagement_rate', 'grace_days'] as const).map((f) => ({
-              h:
-                f === 'grace_days'
-                  ? 'Grace (days)'
-                  : f === 'coin_rate'
-                    ? 'Coins / signup'
-                    : f === 'engagement_rate'
-                      ? 'Coins / purchase'
-                      : 'Guest rate',
-              sort: (x: any) => x[f],
-              get: (x: any) => (
-                <input
-                  className={cx(field, 'w-22.5 px-2 py-1.5 text-[13px]')}
-                  type="number"
-                  defaultValue={x[f]}
-                  onBlur={(e) =>
-                    +e.target.value !== x[f] &&
-                    patch(`/v1/admin/partnerships/${x.id}`, { [f]: +e.target.value }, 'Rate updated')
-                  }
-                />
-              ),
-            })),
-            { h: 'Status', sort: (x) => x.status, get: (x) => pill(x.status) },
-            { h: 'Created', get: (x) => when(x.created_at), sort: (x) => x.created_at },
-            {
-              h: '',
-              // Pausing sets `suspended`, not `pending`: `pending` is the publisher's own inbox
-              // state, and a publisher can accept its way out of that one.
-              get: (x) =>
-                x.status === 'active'
-                  ? link('Suspend', () =>
-                      patch(`/v1/admin/partnerships/${x.id}`, { status: 'suspended' }, 'Partnership suspended'),
-                    )
-                  : link(x.status === 'pending' ? 'Force approve' : 'Reactivate', () =>
-                      patch(`/v1/admin/partnerships/${x.id}`, { status: 'active' }, 'Partnership approved'),
-                    ),
-            },
-          ]}
-        />
-      )}
-
-      {tab === 'Campaigns' && (
-        <Table
-          loading={loading}
-          rows={campaigns}
-          cols={[
-            { h: 'Campaign', get: (x) => x.name },
-            { h: 'Promoter', get: (x) => x.promoter_name },
-            { h: 'Publisher', get: (x) => x.publisher_name },
-            // Which guarantee this campaign's redemptions live under. Worth a column of its
-            // own because it changes what every other number on the row means: an engagement
-            // campaign's conversion is per purchase, not per person.
-            { h: 'Pays for', sort: (x) => x.mode, get: (x) => pill(x.mode === 'engagement' ? 'repeat' : 'signup') },
-            {
-              h: 'Rate',
-              num: true,
-              sort: (x) => (x.mode === 'engagement' ? x.engagement_rate : x.coin_rate),
-              get: (x) => (x.mode === 'engagement' ? x.engagement_rate : x.coin_rate),
-            },
-            // `scans`/`redemptions` are counted only by the admin listing, hence optional
-            { h: 'Scans', num: true, get: (x) => x.scans ?? 0 },
-            { h: 'Redemptions', num: true, get: (x) => x.redemptions ?? 0 },
-            {
-              h: 'Conv.',
-              num: true,
-              sort: (x) => (x.scans ? (x.redemptions ?? 0) / x.scans : -1),
-              get: (x) => (x.scans ? `${(((x.redemptions ?? 0) / x.scans) * 100).toFixed(0)}%` : '—'),
-            },
-            {
-              h: 'Budget',
-              num: true,
-              sort: (x) => x.budget,
-              get: (x) => (
-                <span
-                  className={
-                    x.budget < (x.mode === 'engagement' ? x.engagement_rate : x.coin_rate)
-                      ? 'text-bad'
-                      : ''
-                  }
-                >
-                  {num(x.budget)}
-                </span>
-              ),
-            },
-            {
-              h: 'Status',
-              sort: (x) => x.status,
-              get: (x) => (
-                <select
-                  className={cx(selectField, 'w-27.5 px-2 py-1.5 text-[13px]')}
-                  value={x.status}
-                  onChange={(e) => patch(`/v1/admin/campaigns/${x.id}`, { status: e.target.value }, 'Campaign updated')}
-                >
-                  {['active', 'paused', 'ended'].map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              ),
-            },
-            {
-              h: '',
-              get: (x) => (
-                <Actions>
-                  {item('Adjust budget', async () => {
-                    const v = await promptDialog({
-                      title: `Adjust budget for "${x.name}"`,
-                      body: `Current budget is ${num(x.budget)} coins. Negative claws back; the result cannot go below zero.`,
-                      inputLabel: 'Coins',
-                      input: '100',
-                      confirmText: 'Adjust',
-                    });
-                    if (v) post(`/v1/admin/campaigns/${x.id}/adjust`, { coins: +v }, 'Budget adjusted');
-                  })}
-                  {item('View its scans', () => {
-                    setCampaignFilter(x.id);
-                    setTab('Scans');
-                  })}
-                  {item('View its ledger', () => {
-                    setLedgerAccount(`campaign:${x.id}`);
-                    setTab('Ledger');
-                  })}
-                  {x.status !== 'ended' &&
-                    item(
-                      'Kill campaign',
-                      async () => {
-                        const reason = await promptDialog({
-                          title: `Kill "${x.name}"?`,
-                          body: 'Ends the campaign and voids every QR code it ever issued. Printed codes stop working immediately.',
-                          inputLabel: 'Reason',
-                          input: '',
-                          confirmText: 'Kill campaign',
-                          danger: true,
-                        });
-                        if (reason !== null) post(`/v1/admin/campaigns/${x.id}/kill`, { reason }, 'Campaign killed');
-                      },
-                      true,
-                    )}
-                </Actions>
-              ),
-            },
-          ]}
-        />
-      )}
-
+      {tab === 'Overview' && <Overview {...shared} failed={failed} loadErr={loadErr} onRetry={() => load()} />}
+      {tab === 'Organizations' && <Organizations {...shared} />}
+      {tab === 'Partnerships' && <Partnerships {...shared} />}
+      {tab === 'Campaigns' && <Campaigns {...shared} />}
       {tab === 'Audience' && (
         <>
           {campaignPicker}
-          <Audience data={d.analytics ?? null} days={days} onDays={setDays} scoped={Boolean(campaignFilter)} />
-        </>
-      )}
-
-      {tab === 'Scans' && (
-        <>
-          <p className={cx(muted, 'mt-3')}>
-            The user column fills in once the scan converts and the publisher reports its user reference.
-          </p>
-          {campaignPicker}
-          <Table
-            loading={loading}
-            rows={d.scans ?? []}
-            empty="No scans recorded."
-            cols={[
-              { h: 'When', sort: (x) => x.scanned_at, get: (x) => <span title={when(x.scanned_at)}>{ago(x.scanned_at)}</span> },
-              { h: 'Campaign', get: (x) => x.campaign_name },
-              { h: 'Publisher', get: (x) => x.publisher_name },
-              { h: 'QR', sort: (x) => x.qr_code, get: (x) => <code>{x.qr_code}</code> },
-              {
-                h: 'Where',
-                sort: (x) => x.country ?? '',
-                get: (x) =>
-                  x.country ? (
-                    <span title={x.city ?? undefined}>
-                      {country(x.country)}
-                      {x.city ? <span className={cx(muted, 'ml-1.5')}>{x.city}</span> : null}
-                    </span>
-                  ) : (
-                    '—'
-                  ),
-              },
-              // device_type is stored from the scan itself; the UA fallback only covers rows
-              // recorded before those columns existed.
-              { h: 'Device', sort: (x) => x.device_type ?? device(x.user_agent ?? ''), get: (x) => <span title={x.user_agent ?? ''}>{x.device_type ?? device(x.user_agent ?? '')}</span> },
-              { h: 'OS', sort: (x) => x.os ?? '', get: (x) => x.os ?? '—' },
-              { h: 'Browser', sort: (x) => x.browser ?? '', get: (x) => x.browser ?? '—' },
-              { h: 'Lang', sort: (x) => x.language ?? '', get: (x) => x.language ?? '—' },
-              // The signals an iOS match is scored on. Hover carries the rest of them.
-              {
-                h: 'Handset',
-                sort: (x) => x.screen ?? '',
-                get: (x) =>
-                  x.screen ? (
-                    <code title={handset(x)}>{x.screen}</code>
-                  ) : (
-                    <span className={muted} title={handset(x)}>
-                      —
-                    </span>
-                  ),
-              },
-              { h: 'From', sort: (x) => x.referer_host ?? '', get: (x) => x.referer_host ?? <span className={muted}>camera</span> },
-              { h: 'IP hash', sort: (x) => x.ip_hash ?? '', get: (x) => <code>{x.ip_hash ?? '—'}</code> },
-              {
-                h: 'User',
-                sort: (x) => userByScan.get(x.id)?.publisher_user_ref ?? '',
-                get: (x) => {
-                  const u = userByScan.get(x.id);
-                  return u ? <code title={u.identified ? 'identified' : 'guest'}>{u.publisher_user_ref}</code> : '—';
-                },
-              },
-              { h: 'Token', sort: (x) => x.consumed, get: (x) => (x.consumed ? 'spent' : 'open') },
-              {
-                h: 'Converted',
-                sort: (x) => x.redeemed,
-                get: (x) => <span className={x.redeemed ? 'text-ok' : 'text-mut'}>{x.redeemed ? `+${num(x.coins)} coins` : '—'}</span>,
-              },
-            ]}
+          <Audience
+            data={d.analytics ?? null}
+            days={days}
+            onDays={setDays}
+            scoped={Boolean(campaignFilter)}
           />
         </>
       )}
-
-      {tab === 'Redemptions' && (
-        <Table
-          loading={loading}
-          rows={d.redemptions ?? []}
-          empty="No redemptions yet."
-          cols={[
-            { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-            { h: 'Campaign', get: (x) => x.campaign_name },
-            { h: 'Promoter', get: (x) => x.promoter_name },
-            { h: 'Publisher', get: (x) => x.publisher_name },
-            { h: 'Publisher user', sort: (x) => x.publisher_user_ref, get: (x) => <code>{x.publisher_user_ref}</code> },
-            { h: 'Pays for', sort: (x) => x.kind, get: (x) => pill(x.kind === 'engagement' ? 'repeat' : 'signup') },
-            // An engagement row is always settled in full — there is no guest tier for somebody
-            // who already transacted — so this column only ever varies on acquisitions.
-            {
-              h: 'Tier',
-              sort: (x) => x.identified,
-              get: (x) =>
-                x.kind === 'engagement' ? '—' : pill(x.identified ? 'identified' : 'guest'),
-            },
-            { h: 'Upgraded', sort: (x) => x.upgraded_at ?? '', get: (x) => when(x.upgraded_at) },
-            { h: 'Coins', num: true, sort: (x) => x.coins, get: (x) => num(x.coins) },
-            {
-              h: '',
-              get: (x) =>
-                link('Ledger', () => {
-                  setLedgerAccount(`campaign:${x.campaign_id}`);
-                  setTab('Ledger');
-                }),
-            },
-          ]}
-        />
-      )}
-
-      {tab === 'QR codes' && (
-        <Table
-          loading={loading}
-          rows={d.qrCodes ?? []}
-          empty="No codes issued."
-          cols={[
-            { h: 'Code', sort: (x) => x.code, get: (x) => <code>{x.code}</code> },
-            { h: 'Campaign', get: (x) => x.campaign_name ?? '' },
-            { h: 'Scans', num: true, sort: (x) => x.scans ?? 0, get: (x) => x.scans ?? 0 },
-            { h: 'Uses', sort: (x) => x.uses, get: (x) => `${x.uses}${x.max_uses ? ` / ${x.max_uses}` : ' / ∞'}` },
-            { h: 'Expires', sort: (x) => x.expires_at ?? '', get: (x) => (x.expires_at ? when(x.expires_at) : 'never') },
-            { h: 'Created', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-            { h: 'State', sort: (x) => x.voided, get: (x) => pill(x.voided ? 'suspended' : 'active') },
-            {
-              h: '',
-              get: (x) => (
-                <Actions>
-                  <a className={menuItem()} href={x.scan_url} target="_blank" rel="noreferrer">
-                    Open the scan URL
-                  </a>
-                  {item('Copy scan URL', () => {
-                    navigator.clipboard.writeText(x.scan_url);
-                    toast.success('Scan URL copied');
-                  })}
-                  {item('Set expiry', async () => {
-                    const v = await promptDialog({
-                      title: `Expiry for /${x.code}`,
-                      body: 'ISO timestamp, or leave blank for a code that never expires.',
-                      inputLabel: 'Expires at',
-                      input: x.expires_at ? new Date(x.expires_at).toISOString() : '',
-                      confirmText: 'Save',
-                    });
-                    if (v !== null) patch(`/v1/admin/qr-codes/${x.id}`, { expires_at: v.trim() || null }, 'Expiry updated');
-                  })}
-                  {item('Set max uses', async () => {
-                    const v = await promptDialog({
-                      title: `Use limit for /${x.code}`,
-                      body: 'Leave blank for unlimited scans.',
-                      inputLabel: 'Max uses',
-                      input: String(x.max_uses ?? ''),
-                      confirmText: 'Save',
-                    });
-                    if (v !== null) patch(`/v1/admin/qr-codes/${x.id}`, { max_uses: v.trim() ? +v : null }, 'Max uses updated');
-                  })}
-                  {item(
-                    x.voided ? 'Restore this code' : 'Void this code',
-                    () => patch(`/v1/admin/qr-codes/${x.id}`, { voided: !x.voided }, x.voided ? 'Code restored' : 'Code voided'),
-                    !x.voided,
-                  )}
-                </Actions>
-              ),
-            },
-          ]}
-        />
-      )}
-
-      {tab === 'Ledger' && (
-        <>
-          {/* The integrity check leads this tab as it leads the Overview. An operator who
-              deep-links straight here would otherwise read balances with no way to know
-              whether they still sum to zero. */}
-          {o && <LedgerHealth ok={o.ledger_balanced} sum={o.ledger_sum} />}
-
-          <h2 className={sectionHead}>Account balances</h2>
-          <Table
-            loading={loading}
-            rows={d.ledger?.balances ?? []}
-            empty="No accounts."
-            cols={[
-              { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
-              {
-                h: 'Balance',
-                num: true,
-                sort: (x) => x.balance,
-                // A balance carries its own sign: coins drawn out of an account are a debit,
-                // and printing them in the same ink as a credit hides the direction.
-                get: (x) => (
-                  <span className={x.balance < 0 ? 'text-bad' : x.balance > 0 ? 'text-ok' : ''}>
-                    {num(x.balance)}
-                  </span>
-                ),
-              },
-              { h: '', get: (x) => link('Entries', () => setLedgerAccount(x.account)) },
-            ]}
-          />
-
-          <h2 className={sectionHead}>Entries</h2>
-          {/* What is narrowing the table is a control above it, not a clause inside the
-              heading — a filter you cannot see is a filter you forget you set. */}
-          <div className={filterBar}>
-            {ledgerAccount ? (
-              <>
-                <span className={filterChip}>
-                  <code>{ledgerAccount}</code>
-                  <button
-                    className={filterChipDrop}
-                    onClick={() => setLedgerAccount('')}
-                    aria-label="Show every account"
-                    title="Show every account"
-                  >
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                      <path d="m4.5 4.5 7 7m0-7-7 7" />
-                    </svg>
-                  </button>
-                </span>
-                <span className={muted}>Every entry posted against this account.</span>
-              </>
-            ) : (
-              <span className={muted}>
-                The 300 newest entries, every account. Pick one above to see all of its.
-              </span>
-            )}
-          </div>
-          <Table
-            loading={loading}
-            rows={d.ledger?.entries ?? []}
-            empty="No entries."
-            cols={[
-              { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-              { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
-              { h: 'Amount', num: true, sort: (x) => x.amount, get: (x) => <span className={x.amount < 0 ? 'text-bad' : 'text-ok'}>{num(x.amount)}</span> },
-              { h: 'Ref', sort: (x) => x.ref, get: (x) => <code>{x.ref}</code> },
-            ]}
-          />
-        </>
-      )}
-
-      {/* The unread end of the audit log. Same rows, same shape — what makes this a separate
-          tab is that leaving it is an action: a budget the platform did not fund itself is news
-          exactly once. */}
-      {tab === 'Notifications' && (
-        <>
-          {(d.notifications?.length ?? 0) > 0 && (
-            <div className="mt-3 flex justify-end">
-              <button
-                className={btnGhost}
-                disabled={busy}
-                onClick={() => post('/v1/admin/notifications/ack', {}, 'Inbox cleared.')}
-              >
-                Mark all handled
-              </button>
-            </div>
-          )}
-          <Table
-            loading={loading}
-            rows={d.notifications ?? []}
-            empty="Nothing from a tenant is waiting — every budget change has been seen."
-            cols={[
-              { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-              {
-                h: 'Who',
-                sort: (x) => x.actor_name ?? '',
-                get: (x) => (
-                  <>
-                    {x.actor_name ?? 'system'}
-                    {x.actor_type && <span className={cx(muted, 'ml-1.5')}>{x.actor_type}</span>}
-                  </>
-                ),
-              },
-              { h: 'Action', sort: (x) => x.action, get: (x) => <code>{x.action}</code> },
-              { h: 'Target', sort: (x) => x.target, get: (x) => <code>{x.target}</code> },
-              {
-                h: 'Detail',
-                sort: (x) => JSON.stringify(x.detail),
-                get: (x) => (
-                  <span className={cx(muted, 'whitespace-pre-wrap')}>{JSON.stringify(x.detail)}</span>
-                ),
-              },
-              {
-                h: '',
-                get: (x) =>
-                  link('Mark handled', () =>
-                    post('/v1/admin/notifications/ack', { ids: [x.id] }, 'Marked handled.'),
-                  ),
-              },
-            ]}
-          />
-        </>
-      )}
-
-      {tab === 'Audit log' && (
-        <Table
-          loading={loading}
-          rows={d.audit ?? []}
-          empty="No admin actions recorded."
-          cols={[
-            { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-            { h: 'Actor', get: (x) => x.actor_name ?? 'system', sort: (x) => x.actor_name ?? '' },
-            { h: 'Action', sort: (x) => x.action, get: (x) => <code>{x.action}</code> },
-            { h: 'Target', sort: (x) => x.target, get: (x) => <code>{x.target}</code> },
-            {
-              h: 'Detail',
-              sort: (x) => JSON.stringify(x.detail),
-              get: (x) => (
-                <span className={cx(muted, 'whitespace-pre-wrap')}>
-                  {JSON.stringify(x.detail)}
-                </span>
-              ),
-            },
-          ]}
-        />
-      )}
+      {tab === 'Scans' && <Scans {...shared} campaignPicker={campaignPicker} />}
+      {tab === 'Redemptions' && <Redemptions {...shared} />}
+      {tab === 'QR codes' && <QrCodes {...shared} />}
+      {tab === 'Ledger' && <Ledger {...shared} account={ledgerAccount} onAccount={setLedgerAccount} />}
+      {tab === 'Notifications' && <Notifications {...shared} />}
+      {tab === 'Audit log' && <AuditLog {...shared} />}
     </Shell>
   );
 }

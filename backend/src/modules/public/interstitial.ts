@@ -7,57 +7,40 @@
  * so the only moment we can read this device's timezone, screen geometry, core count and
  * appearance is right here, in a browser, before the App Store takes the session away.
  *
- * Design world is DESIGN.md's "printed instrument", and it fits the moment exactly — the
- * scanner is holding the printed artifact this page is dressed as, seconds after scanning it.
- * So the page is the stub being validated: press-blue reader sweep across the code plate,
- * stamped caps labels over monospace values, a punched perforation, and a progress rule that
- * feeds for exactly as long as the hold lasts. No spinner, because a spinner would be the one
- * element here that measures nothing.
+ * The page is dressed as the printed stub being validated — a reader sweep across the code
+ * plate, stamped labels over monospace values, and a progress rule that feeds for exactly as
+ * long as the hold lasts. The header row answers "where am I going" without a sentence: the
+ * code plate, a dotted route, and the destination store's own tile at the far end.
  *
- * The header row is the whole message in one line of furniture: the code plate the camera just
- * read, a dotted route with traffic running along it, and the destination store's own tile at
- * the far end. It answers "where am I going" without a sentence, and when the hold expires the
- * route resolves — the card recedes and the store tile takes the screen. That hand-off is the
- * same gesture whether the reader waited it out or pressed Continue, because it is the same
- * event.
+ * Three constraints shape the implementation, each ruling out an otherwise obvious choice:
  *
- * Three constraints shape the implementation and are worth stating, because each one rules
- * out something that would otherwise be the obvious choice:
+ *   Self-contained.  CSP is `default-src 'none'` across this API; this page relaxes it only to
+ *                    a nonce for its own inline style and script, plus `data:` for the fibre
+ *                    tile. Nothing loads over the network — no webfont (a blocking request on a
+ *                    page that lives one second) and no vendor-hosted store badge.
  *
- *   Self-contained.  CSP is `default-src 'none'` everywhere in this API. This page relaxes it
- *                    to a nonce for its own inline style and script and `data:` for the fibre
- *                    tile, and loads nothing over the network. No webfont — Archivo would be
- *                    a blocking request on a page that lives about a second, so the display
- *                    line is set in the system grotesque at the same weight and tracking. The
- *                    store marks are drawn as inline SVG for the same reason: a store badge
- *                    served from Apple's or Google's CDN would be a third-party request on the
- *                    critical path, and the CSP forbids it outright.
- *
- *   Front-loaded.    The authored sequence has ~900ms before the hand-off begins. A 1.4s
- *                    reveal like the landing page's would be half-seen. Everything lands
- *                    inside the first 560ms and the loops carry the remainder.
+ *   Front-loaded.    ~900ms before the hand-off begins, so everything lands inside the first
+ *                    560ms and the loops carry the remainder.
  *
  *   Legible at rest. Under `prefers-reduced-motion`, and with script blocked entirely, every
- *                    word is on screen and the store link still works. Nothing here is hidden
- *                    by default and revealed by animation.
+ *                    word is on screen and the store link still works.
  */
 
 /**
  * How long the page is held before the hand-off starts.
  *
- * Not decoration. Two things need it: the signals have to get away before the document is
- * discarded, and a `location.replace` fired in the same tick as page load is unreliable inside
- * in-app webviews — Instagram and TikTok both swallow it. A beat also means the scanner sees
- * their scan was accepted rather than a flash of buff card.
+ * Not decoration: the signals have to get away before the document is discarded, and a
+ * `location.replace` fired in the same tick as page load is swallowed by in-app webviews
+ * (Instagram, TikTok). A beat also lets the scanner see the scan was accepted.
  *
  * ponytail: fixed hold. If measured drop-off between scan and store install ever justifies it,
  * shorten it — `client.held_ms` on every scan row is exactly the measurement to shorten it
  * against. The signals must still be away before the document goes.
  */
-export const HOLD_MS = 900;
+const HOLD_MS = 900;
 
 /** The hand-off itself: card away, store tile forward. Runs after the hold, then it navigates. */
-export const EXIT_MS = 340;
+const EXIT_MS = 340;
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -76,13 +59,10 @@ export type Store = 'ios' | 'android' | 'web';
 /**
  * The destination's own mark, drawn rather than fetched.
  *
- * Both store marks are rendered in their real brand colours on their real ground, against the
- * house rule that this world is duotone. A recoloured store badge is not the store badge — the
- * whole job of this tile is instant recognition of where the next tap lands, and a press-blue
- * Google Play triangle would be a mark nobody has ever seen.
- *
- * The stroke and facet geometry is authored, not traced: close enough to be unmistakable at
- * 62px, and nothing here is passed off as the vendors' official asset.
+ * Real brand colours, against the house duotone rule: this tile's whole job is instant
+ * recognition of where the next tap lands, and a recoloured store badge is not the store badge.
+ * The geometry is authored rather than traced — unmistakable at 62px, and not passed off as the
+ * vendors' official asset.
  */
 const MARKS: Record<Store, { heading: string; title: string; svg: string }> = {
   ios: {
@@ -135,7 +115,7 @@ const MARKS: Record<Store, { heading: string; title: string; svg: string }> = {
   },
 };
 
-export interface InterstitialCopy {
+interface InterstitialCopy {
   /** the publisher's org name — the destination this scan routes to */
   destination: string;
   /** where the Continue link and the scripted redirect both point */
@@ -546,15 +526,13 @@ h1{
   /**
    * The signals this page exists to collect.
    *
-   * Each read is wrapped, and that is not defensiveness for its own sake: this runs in every
-   * in-app webview there is, some of them years behind, and one throw would strand the scanner
-   * on a page whose only job is to leave. A missing signal costs a report bucket or a few
-   * points of match confidence. A thrown one costs the install.
+   * Each read is wrapped: this runs in every in-app webview there is, some years behind, and
+   * one throw strands the scanner on a page whose only job is to leave. A missing signal costs
+   * a report bucket or a few points of confidence; a thrown one costs the install.
    *
-   * Five of these are scored at first open (tz, sc, lang, cores, dark) and must therefore be
-   * things a native SDK can also report. The rest are reporting only — deliberately, because a
-   * signal that means something different in a browser than in an app is worse than no signal:
-   * it does not merely fail to match, it drags a real match below the acceptance line.
+   * Five are scored at first open (tz, sc, lang, cores, dark) and must be things a native SDK
+   * can also report. The rest are reporting only — a signal that means something different in a
+   * browser than in an app drags a real match below the acceptance line.
    */
   var q = [];
   var add = function(k, v){

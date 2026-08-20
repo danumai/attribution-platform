@@ -105,11 +105,11 @@ export class PublicController {
     const publisher = campaign.partnership.publisher;
 
     /**
-     * An engagement scan is sent to the publisher's App Link / Universal Link instead of
-     * straight to the store, so the OS can open the app when it is installed — which for a
-     * returning traveller is the normal case, and the one the whole flow exists for.
+     * An engagement scan is sent to the publisher's App Link / Universal Link rather than
+     * straight to the store, so the OS can open the app when it is installed — the normal case
+     * for a returning traveller.
      *
-     * Two things ride along, and neither is spendable on its own:
+     * Two things ride along, neither spendable on its own:
      *
      *   qrm_code      the transaction code. The app hands it to its own backend, which claims
      *                 the purchase reward with its server-side API key. Inert without that key.
@@ -169,20 +169,15 @@ export class PublicController {
     if (!claimed)
       return end(qr.expires_at && qr.expires_at <= new Date() ? 'expired' : 'used_up');
 
-    // iOS has no install-referrer channel, so this scan will have to be matched on device
-    // signals — and the only moment we can read them is right now, in a browser, before the
-    // App Store takes over. One interstitial hop buys the timezone, screen geometry and
-    // locale that lift this match from "someone on this NAT" to "this handset".
+    // iOS has no install-referrer channel, so this scan must be matched on device signals —
+    // and the only moment to read them is now, in a browser, before the App Store takes over.
+    // One hop buys the timezone, screen and locale that lift the match from "someone on this
+    // NAT" to "this handset".
     //
-    // Android with a Play listing deliberately skips it: the referrer already names the exact
-    // scan, so a hop would cost conversion and buy nothing. Desktop and app-less publishers
-    // skip it too — there is no install to attribute either way.
-    //
-    // An engagement scan with a deep link registered skips it as well, and for a third reason:
-    // the code already names the transaction deterministically, so there is no fingerprint to
-    // collect and the ~900ms hold would be pure conversion cost. The traveller most likely has
-    // the app already; if they do not, `qrm_fallback` sends them through `/i/:claim_id`, which
-    // is this same page — so the signals are still collected in the one case that needs them.
+    // Skipped everywhere it buys nothing: Android with a Play listing (the referrer already
+    // names the scan), desktop and app-less publishers (no install to attribute), and an
+    // engagement scan with a deep link (the code names the transaction, and `qrm_fallback`
+    // routes an app-less traveller through `/i/:claim_id` — this same page — anyway).
     if (iosHandoff && !(engagement && publisher.deeplink_url))
       return this.interstitial(res, claim_id, publisher.name, 'ios');
 
@@ -195,8 +190,8 @@ export class PublicController {
   /**
    * The only page in this API that runs script, so it is also the only one with a relaxed CSP.
    *
-   * Everything about it is a fallback around a fallback, because the failure mode is silent —
-   * a scanner who never reaches the store is a scanner the publisher never hears about:
+   * Fallbacks all the way down, because the failure mode is silent — a scanner who never
+   * reaches the store is one the publisher never hears about:
    *   - script runs             → signals collected, `location.replace` after a short hold
    *   - script blocked / errors → `<meta refresh>` at 3s, no signals, so the match falls back
    *                               to IP + platform and is then correctly refused as too weak
@@ -228,12 +223,10 @@ export class PublicController {
   /**
    * The interstitial, reached from an engagement deep link that found no app installed.
    *
-   * `/r/:code` normally renders this page inline, which is fine when the decision is ours to
-   * make. On an engagement scan it is not: the OS decides whether the app opens, offline and
-   * after we have already answered. So the hand-off screen needs a URL of its own to be the
-   * `qrm_fallback` of a deep link that did not resolve — and the traveller who lands here is
-   * exactly the one whose iOS acquisition would otherwise be unmatchable, because nothing
-   * would ever have read this handset's timezone, screen or locale.
+   * `/r/:code` normally renders this page inline, but on an engagement scan the OS decides
+   * whether the app opens — offline, after we have answered. So the hand-off screen needs a URL
+   * of its own to be the `qrm_fallback` of a deep link that did not resolve, and the traveller
+   * who lands here is exactly the one whose iOS acquisition would otherwise be unmatchable.
    *
    * No use is burned and no scan is created: `/r/:code` already did both, and this only names
    * the scan it made. An unknown or already-bound claim id is turned away rather than

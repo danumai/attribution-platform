@@ -67,7 +67,7 @@ export function validateBonusLabel(raw: unknown): string | null {
   return v;
 }
 
-export interface AppTargets {
+interface AppTargets {
   android_package: string | null;
   ios_app_id: string | null;
   landing_url: string | null;
@@ -112,22 +112,16 @@ export function storeUrl(
  * Where an *engagement* scan is sent: the publisher's App Link / Universal Link, carrying the
  * transaction code and the store URL to fall back to.
  *
- * There is no "is the app installed" check here, or anywhere else in this codebase, because
- * both mobile platforms already answer that question — correctly, offline, before the request
- * leaves the handset — and no server can:
+ * There is deliberately no "is the app installed" check, here or anywhere — both platforms
+ * answer that offline, before the request leaves the handset, and no server can:
  *
- *   installed      the OS intercepts the https URL and opens the app with `qrm_code`. We never
- *                  see the request. The app hands the code to its own backend, which claims the
- *                  purchase reward with its API key.
- *   not installed  the browser loads the publisher's page normally, which forwards to
- *                  `qrm_fallback` — a store URL we built, so the Play referrer inside it cannot
- *                  be assembled wrong by a third party. The traveller installs, signs up, and
- *                  is attributed as an acquisition; on Android the referrer also carries the
- *                  code, so the purchase reward survives the install too.
+ *   installed      the OS opens the app with `qrm_code` and we never see the request.
+ *   not installed  the browser loads the publisher's page, which forwards to `qrm_fallback` —
+ *                  a store URL we built, so its Play referrer cannot be assembled wrong by a
+ *                  third party.
  *
- * A publisher with no `deeplink_url` registered simply gets the acquisition destination. The
- * campaign still works — the code reaches them through the referrer on Android — so this is a
- * setting that improves an engagement campaign rather than one that gates it.
+ * No `deeplink_url` registered simply falls back to the acquisition destination; on Android the
+ * referrer still carries the code, so the campaign works either way.
  */
 export function engagementUrl(
   platform: Platform,
@@ -208,12 +202,11 @@ export function normLang(raw: unknown): string | null {
 
 /**
  * Logical CPU count: `navigator.hardwareConcurrency` in the browser, `activeProcessorCount`
- * natively. One of the very few hardware facts both sides report as the same integer, and it
- * splits handsets by generation where the screen only splits them by body size — an iPhone 13
- * and a 15 share `390x844@3` and do not share a core count.
+ * natively. It splits handsets by generation where the screen only splits them by body size —
+ * an iPhone 13 and a 15 share `390x844@3` and do not share a core count.
  *
- * Bounded rather than trusted: this arrives from a phone on one side and another company's
- * server on the other, and a nonsense value must land as NULL rather than as its own bucket.
+ * Bounded rather than trusted: it crosses a trust boundary on both sides, and a nonsense value
+ * must land as NULL rather than as its own bucket.
  */
 export function normCores(raw: unknown): number | null {
   const n = typeof raw === 'number' ? raw : Number(String(raw ?? '').trim());
@@ -224,10 +217,9 @@ export function normCores(raw: unknown): number | null {
  * Whether the device is in dark appearance: `prefers-color-scheme` in the browser,
  * `userInterfaceStyle` / `isNightModeActive` natively.
  *
- * Worth one bit and weighted like one. It earns its place as a tiebreaker: when two scans on
- * one NAT agree on everything else, the appearance setting is often the only thing that does
- * not — and `decide()` refuses a tie rather than guessing, so a bit that splits one is a match
- * that would otherwise have been thrown away.
+ * Worth one bit and weighted like one. It earns its place as a tiebreaker: `decide()` refuses
+ * a tie rather than guessing, so a bit that splits two otherwise-identical scans on one NAT is
+ * a match that would otherwise be thrown away.
  */
 export function normDark(raw: unknown): boolean | null {
   if (typeof raw === 'boolean') return raw;
@@ -256,11 +248,9 @@ export interface DeviceSignals {
  * SCREEN outweighs TZ + LANG together because it is the only one with real entropy — a whole
  * country shares a timezone and a language, while screen geometry splits it by model.
  *
- * The weights sum to exactly 100 with `BASE`, which is what makes a confidence readable as a
- * percentage in the console and comparable against `MIN_CONFIDENCE`. Adding a signal therefore
- * costs the existing ones a few points each — deliberately, because the alternative is either
- * a scale that no longer tops out at 100 or a cap that turns every good match into a 100 and
- * hands `decide()` ties it then has to refuse.
+ * The weights sum to exactly 100 with `BASE`, so a confidence reads as a percentage and
+ * compares directly against `MIN_CONFIDENCE`. A new signal has to be paid for out of the
+ * existing ones.
  */
 export const BASE = 55;
 export const WEIGHTS = { tz: 8, screen: 22, language: 7, cores: 5, dark: 3 } as const;
@@ -278,7 +268,7 @@ export function score(scan: Partial<DeviceSignals>, open: DeviceSignals): number
   return n;
 }
 
-export type Decision<T> =
+type Decision<T> =
   | { scan: T; confidence: number }
   | { reason: 'no_match' | 'ambiguous' | 'low_confidence'; confidence?: number };
 

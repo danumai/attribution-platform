@@ -197,15 +197,12 @@ type Match =
 /**
  * Answer `unattributed`, but roll the transaction back first.
  *
- * `claimInstall` and `claimAtSignup` both flip their guard (`redeemed` / `consumed`) *before*
- * the budget is known — the fee depends on `identified`, which is only resolved once the match
- * is in hand. Returning normally from the transaction callback commits that flip, so a signup
- * that arrives one credit short of the budget permanently burned the install: topping the
- * campaign back up could never make that user attributable again, and the publisher had
- * already created the account.
+ * `claimInstall` and `claimAtSignup` flip their guard (`redeemed` / `consumed`) *before* the
+ * budget is known, because the fee depends on `identified`. Returning normally would commit
+ * that flip, so a signup arriving one credit short of the budget would permanently burn the
+ * install — topping the campaign back up could never make that user attributable again.
  *
- * `firstOpen` avoids this by checking the budget before it consumes anything. Here that is not
- * available, so the rollback is the guard instead.
+ * `firstOpen` checks the budget before consuming anything; here the rollback is the guard.
  */
 class Rollback extends Error {
   constructor(public reason: string) {
@@ -300,21 +297,14 @@ interface ClaimableCode {
 /**
  * The engagement path: a code minted against one real purchase, scanned once, paid once.
  *
- * There is no matching to do here and that is the point. The acquisition paths exist because a
- * phone walks off to a store and has to be recognised when it comes back — deterministically if
- * Play kept the referrer, probabilistically and reluctantly if it did not. A boarding-pass code
- * skips all of it: the promoter's booking system minted it against a named transaction, the
- * traveller scanned that exact code, and the publisher is presenting that exact code back. So
- * `match_method` is `code` and confidence is 100, and neither is a flattering label — this is
- * the strongest evidence in the system, stronger than a referrer, because the code names a
- * purchase rather than a device.
+ * There is no matching to do, and that is the point. `match_method` is `code` and confidence is
+ * 100 because the code names a *purchase* rather than a device — stronger evidence than a
+ * referrer, not a flattering label.
  *
- * Note what is deliberately NOT checked: `scans.consumed`. That flag is the acquisition guard —
- * one install per scan — and an engagement reward is a different fact about the same scan. A
- * traveller with no app scans a boarding pass, installs, signs up and has bought a ticket: that
- * is genuinely an acquisition and genuinely a purchase, and both are payable. Sharing one flag
- * between them would make the two race, and whichever call arrived second would be told the
- * scan was already spent. The engagement guarantee is its own partial unique index instead.
+ * Note what is deliberately NOT checked: `scans.consumed`. That flag is the acquisition guard,
+ * and an engagement reward is a different fact about the same scan — a traveller who scans a
+ * boarding pass, installs, signs up and has bought a ticket earns both, payably. Sharing one
+ * flag would make them race. The engagement guarantee is its own partial unique index.
  */
 async function claimCode(tx: Tx, publisherId: string, code: string): Promise<ClaimableCode | { reason: string }> {
   // `FOR UPDATE OF q` holds the code row for the rest of the transaction, so two simultaneous
@@ -378,20 +368,17 @@ export class PartnerController {
   /**
    * Stage one: the app has just opened for the first time. Nothing is paid here.
    *
-   * This exists because matching and paying happen at different moments and the old single
-   * call pretended otherwise. First open is minutes after the scan — while the device is
-   * still on the same network, still in the same timezone, still the same shape. Signup is
-   * whenever the user gets round to it, which on a content app is routinely the next day.
-   * Matching at signup forced one window to cover both, and the fingerprint path could not
-   * survive that: short enough to be honest meant it matched almost nothing.
+   * Matching and paying happen at different moments. First open is minutes after the scan —
+   * same network, same timezone, same device shape. Signup is whenever the user gets round to
+   * it, routinely the next day. One window covering both is what made the fingerprint path
+   * useless: short enough to be honest meant it matched almost nothing.
    *
    * So the publisher's server calls this at launch, banks the `install_id`, and presents it
    * again at signup. The scan is consumed here — the claim is bound — but no ledger entry
-   * exists until somebody actually signs up.
+   * exists until somebody signs up.
    *
-   * Idempotent by construction: a second call for the same device finds the scan already
-   * consumed and comes back `no_match`, so the SDK must persist `install_id` locally rather
-   * than re-deriving it. An install that is never signed up simply expires.
+   * Idempotent by construction: a second call finds the scan already consumed and comes back
+   * `no_match`, so the SDK must persist `install_id` rather than re-derive it.
    */
   @Post('first-open')
   @HttpCode(200)
@@ -427,17 +414,15 @@ export class PartnerController {
      * Device integrity is *asserted* by the SDK, never observed by us, so it is graded rather
      * than trusted uniformly:
      *
-     *   emulator  blocks. Nobody installs a consumer content app on an emulator by accident;
-     *             this is the shape of every install farm and the signal is cheap to act on.
-     *   rooted    recorded only. Rooted and jailbroken handsets have a large honest
-     *             population, and refusing them would deny real users a real reward.
-     *   vpn       recorded only — and note it is not really a fraud signal here at all. A VPN
-     *             changes the address between scan and open, so the fingerprint simply fails
-     *             to match. Recording it is what lets someone reviewing a `no_match` rate see
-     *             why, rather than concluding the matcher is broken.
+     *   emulator  blocks — the shape of every install farm, and cheap to act on.
+     *   rooted    recorded only; the honest population is large enough that refusing them
+     *             would deny real users a real reward.
+     *   vpn       recorded only, and barely a fraud signal — a VPN changes the address between
+     *             scan and open, so the fingerprint just fails to match. Recording it is what
+     *             explains a `no_match` rate instead of leaving the matcher looking broken.
      *
-     * All three are stored on accepted installs too. The pattern worth finding is the one
-     * that got paid.
+     * All three are stored on accepted installs too: the pattern worth finding is the one that
+     * got paid.
      */
     const risk = {
       emulator: b.emulator === true,
@@ -536,13 +521,12 @@ export class PartnerController {
    * first open and this call only turns it into money.
    *
    * The device fields are the legacy single-call shape, kept working for publishers already
-   * integrated against it. They run the same matcher at signup time, which means the same
-   * short fingerprint window now has to stretch across onboarding: on Android the referrer
-   * makes that irrelevant, on iOS it is why this path barely attributed anything. Move.
+   * integrated against it. They run the matcher at signup time, so the short fingerprint window
+   * has to stretch across onboarding — irrelevant on Android, and why this path barely
+   * attributed anything on iOS.
    *
-   * Unattributed is a normal answer, not an error: most installs are organic. It returns 200
-   * with `attributed: false` so the publisher's signup path never has to treat this call as
-   * a failure it must handle.
+   * Unattributed is a normal answer, not an error: most installs are organic. 200 with
+   * `attributed: false`, so a publisher's signup path never treats this as a failure.
    */
   @Post('claim')
   @HttpCode(200)
@@ -568,11 +552,9 @@ export class PartnerController {
        * The engagement path: a transaction code the promoter minted and the user scanned. Bare
        * (`Ab3x…`) or as the whole Play referrer it arrived in, whichever the SDK banked.
        *
-       * Explicit, and never read out of `install_referrer` implicitly, even though the referrer
-       * on an engagement scan carries both. The two are different payouts on different terms,
-       * and one call quietly deciding which of them the publisher meant is exactly the kind of
-       * accounting surprise that has to be reconciled by hand later. Send the referrer to
-       * `first-open` for the signup, and the code here for the purchase.
+       * Explicit, never read out of `install_referrer` implicitly, even though an engagement
+       * referrer carries both: they are different payouts on different terms, and one call
+       * quietly picking between them is an accounting surprise to reconcile by hand later.
        */
       code?: string;
       /**
@@ -615,13 +597,12 @@ export class PartnerController {
     };
 
     /**
-     * The fee buys an *acquisition*, so an existing account signing in again is not one. Only
-     * the publisher can know that — we see a `publisher_user_ref`, not an account age — so it
-     * is asserted here, and refused before the install is spent: an install burned on a
-     * returning user would be unclaimable afterwards for no reason.
+     * The fee buys an *acquisition*, and an existing account signing in again is not one. Only
+     * the publisher can know that, so it is asserted — and refused before the install is spent,
+     * or a returning user would burn an install that is then unclaimable for no reason.
      *
-     * The UNIQUE on (campaign, publisher_user_ref) still catches the same *ref* twice; this
-     * catches the case that constraint cannot see — a returning user handed a fresh ref.
+     * The UNIQUE on (campaign, publisher_user_ref) catches the same ref twice; this catches
+     * what that constraint cannot see — a returning user handed a fresh ref.
      */
     if (b.is_new_user === false) return unattributed('not_a_new_user');
 
@@ -726,13 +707,11 @@ export class PartnerController {
     if (fresh) return fresh;
 
     /**
-     * Replay. This exact user was already attributed for this campaign, which in practice
-     * almost always means the publisher's first call succeeded and its *response* was lost —
-     * a timeout, a retried job, an at-least-once queue. Returning 409 there would make a
-     * correctly-recorded attribution look like a failure the publisher must reconcile by hand,
-     * so instead the original answer is replayed verbatim. Calling `claim` twice for one user
-     * is safe by construction: the UNIQUE constraint, not this handler, is what guarantees the
-     * fee was only ever paid once.
+     * Replay. This user was already attributed for this campaign, which in practice means the
+     * first call succeeded and its *response* was lost — a timeout, a retried job, an
+     * at-least-once queue. A 409 would make a correctly-recorded attribution look like a
+     * failure to reconcile by hand, so the original answer is replayed verbatim. The UNIQUE
+     * constraint, not this handler, is what guarantees the fee was paid once.
      */
     const prior = await prisma.redemption.findFirst({
       where: { campaign_id: replayCampaignId!, publisher_user_ref },
@@ -772,19 +751,17 @@ export class PartnerController {
   /**
    * The engagement payout: a repeat purchase, paid on the code that proves it happened.
    *
-   * Deliberately not routed through the acquisition machinery above, even though both end in a
-   * redemption row and a ledger pair. That machinery is entirely about *recognising a device*
-   * — an install stage, a scored fingerprint, two windows, a device-dedupe check — and none of
-   * it has a question to answer here. The code was minted against one named transaction and
-   * scanned once; there is nothing to infer. Threading a `code` through eight branches of a
-   * matcher that would never run is how a money path stops being readable.
+   * Deliberately not routed through the acquisition machinery above. All of that is about
+   * *recognising a device* — an install stage, a scored fingerprint, two windows, a dedupe
+   * check — and none of it has a question to answer here: the code was minted against one named
+   * transaction and scanned once.
    *
    * What it does share is the shape that matters: the same budget lock, the same double-entry
-   * ledger, the same rollback-on-refusal, and the same "a retry replays, it never re-pays".
+   * ledger, the same rollback-on-refusal, the same "a retry replays, it never re-pays".
    *
-   * There is no guest tier. `identified` splits an acquisition fee because a brand-new account
-   * is worth less until somebody vouches for it — a repeat customer already transacted with the
-   * promoter, which is a harder fact than any verification bar the publisher could apply.
+   * There is no guest tier. `identified` splits an acquisition fee because a new account is
+   * worth less until somebody vouches for it; a repeat customer already transacted with the
+   * promoter, which is a harder fact than any verification the publisher could apply.
    */
   private async claimPurchase(
     publisher: { id: string; bonus_label: string | null },
@@ -897,14 +874,12 @@ export class PartnerController {
     /**
      * Two very different situations reach this line, and they must not get the same answer.
      *
-     * Same user  the publisher's first call succeeded and its response was lost — a timeout, a
-     *            pod restart, a queue redelivering. Replaying the original answer is what stops
-     *            a correctly-recorded reward looking like something to reconcile by hand.
+     * Same user  the first call succeeded and its response was lost. Replaying the original
+     *            answer stops a recorded reward looking like something to reconcile by hand.
      *
-     * Different  somebody else's boarding pass. A forwarded screenshot, a shared code, a bug in
-     *   user     the publisher's own plumbing. Replaying here would hand the second user a
-     *            reward the first one earned and quietly tell the publisher it was attributed.
-     *            One reward per code was the guarantee; this is it being kept.
+     * Different  somebody else's boarding pass — forwarded, shared, or a bug in the publisher's
+     *   user     plumbing. Replaying would hand the second user a reward the first earned. One
+     *            reward per code was the guarantee; this is it being kept.
      */
     if (prior.publisher_user_ref !== publisher_user_ref) return unattributed('already_claimed');
 
