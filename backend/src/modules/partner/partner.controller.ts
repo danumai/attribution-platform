@@ -714,7 +714,14 @@ export class PartnerController {
      * constraint, not this handler, is what guarantees the fee was paid once.
      */
     const prior = await prisma.redemption.findFirst({
-      where: { campaign_id: replayCampaignId!, publisher_user_ref },
+      // `kind` is not decoration here. The unique index that just fired is PARTIAL —
+      // `WHERE kind = 'acquisition'` — so without the same predicate in this WHERE, Postgres
+      // cannot prove the index applies and reads `redemptions` sequentially on every replay.
+      // It is also the correctness half: a traveller who was both a new user and a repeat
+      // purchase on one campaign has two rows under this (campaign, user_ref) pair, and an
+      // unscoped findFirst can hand back the engagement one — a different fee, a different
+      // attribution id, and a /confirm that then answers `already_full`.
+      where: { campaign_id: replayCampaignId!, publisher_user_ref, kind: 'acquisition' },
       include: { campaign: { select: { name: true, partnership: { select: { coin_rate: true, grace_days: true, platform_fee_bps: true } } } } },
     });
     // Gone only if the campaign was deleted between the two calls; nothing left to replay.

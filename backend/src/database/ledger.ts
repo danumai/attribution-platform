@@ -82,11 +82,24 @@ export async function lockedBalance(tx: Tx, account: string): Promise<number> {
  *
  * The holdback is the clawback window — no coin earned less than SETTLEMENT_DELAY_DAYS ago can
  * leave while a fraud review runs. Only credits are held: an earlier withdrawal never extends
- * the wait on what remains. Locks the balance row, so two concurrent requests serialise.
+ * the wait on what remains.
+ *
+ * `lock` is the difference between the two callers, and it is not a micro-optimisation.
+ * Deciding a request must serialise, so it takes the balance row FOR UPDATE and a second
+ * concurrent request is judged against a pool the first already claimed from. *Rendering* the
+ * number on a dashboard must not: `FOR UPDATE` is an exclusive row lock, and every attribution
+ * payout to this publisher updates that same row — so a polled dashboard was blocking the
+ * money path to display a figure nothing then spends against.
  */
-export async function withdrawable(tx: Tx, publisherOrgId: string): Promise<number> {
+export async function withdrawable(
+  tx: Tx,
+  publisherOrgId: string,
+  lock = true,
+): Promise<number> {
   const account = `publisher:${publisherOrgId}`;
-  const bal = await lockedBalance(tx, account);
+  const bal = lock
+    ? await lockedBalance(tx, account)
+    : ((await tx.accountBalance.findUnique({ where: { account } }))?.balance ?? 0);
   const [held] = await tx.$queryRaw<{ recent: number; queued: number }[]>`
     SELECT
       (SELECT coalesce(sum(amount), 0)::int FROM ledger_entries

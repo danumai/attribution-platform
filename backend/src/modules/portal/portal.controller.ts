@@ -20,7 +20,7 @@ import {
 } from '../../common/attribution';
 import { QrStyle, validateStyle } from '../../common/qr';
 import { capped } from '../../common/paging';
-import { validateRates } from '../../common/rates';
+import { splitFee, validateRates } from '../../common/rates';
 import { sha256, str, validateDeeplinkUrl, validateLandingUrl } from '../../common/security';
 import { scanAnalytics } from '../../database/analytics';
 import { audit, balance, balances, ledger, withdrawable } from '../../database/ledger';
@@ -562,7 +562,9 @@ export class PortalController {
       ? {
           ...org,
           earnings: await balance(`publisher:${org.id}`),
-          withdrawable: await prisma.$transaction((tx) => withdrawable(tx, org.id)),
+          // Read without the lock and without a transaction: this is a figure on a page, and
+          // the request that spends against it takes the lock itself.
+          withdrawable: await withdrawable(prisma, org.id, false),
         }
       : org;
   }
@@ -669,10 +671,30 @@ export class PortalController {
           },
         },
       },
-      include: { campaign: { select: { name: true } } },
+      include: {
+        campaign: {
+          select: { name: true, partnership: { select: { platform_fee_bps: true } } },
+        },
+      },
       orderBy: { created_at: 'desc' },
       take: capped(limit ?? '100'),
     });
-    return rows.map(({ campaign, ...r }) => ({ ...r, campaign_name: campaign.name }));
+    // This is the endpoint the integration guide tells publishers to reconcile against, and it
+    // tells them to book revenue on `publisher_net` — which was only ever on the claim
+    // response. `coins` is the gross the promoter's budget was charged; a publisher summing it
+    // over-reports its own revenue by the platform's cut on every row. Recomputed from the
+    // snapshotted bps through the same `splitFee` the payout used, so the two cannot drift.
+    return rows.map(({ campaign, ...r }) => {
+      const { net, cut } = splitFee(r.coins, campaign.partnership.platform_fee_bps);
+      return {
+        ...r,
+        campaign_name: campaign.name,
+        /** gross — what the promoter's campaign budget spent on this row */
+        fee: r.coins,
+        /** what actually landed in the publisher's account */
+        publisher_net: net,
+        platform_fee: cut,
+      };
+    });
   }
 }

@@ -298,7 +298,15 @@ export class AdminController {
     @Session() s: SessionClaims,
     @Param('id') id: string,
     @Body()
-    b: { coin_rate?: number; guest_rate?: number; grace_days?: number; platform_fee_bps?: number; status?: string },
+    b: {
+      coin_rate?: number;
+      guest_rate?: number;
+      grace_days?: number;
+      /** priced separately from the acquisition pair — see `validateRates` */
+      engagement_rate?: number;
+      platform_fee_bps?: number;
+      status?: string;
+    },
   ) {
     // `suspended` rather than `pending` is the pause lever: `pending` is the publisher's own
     // inbox state and the publisher can accept its way out of it, which is exactly what made
@@ -319,11 +327,37 @@ export class AdminController {
     // — raising only `guest_rate` has to be judged against the `coin_rate` already stored.
     const rates = validateRates(b, current);
 
+    // An open proposal is cleared by any rate override, and that is the whole point: without
+    // it an admin override is revertible by the party it was aimed at. Promoter proposes 80,
+    // admin overrides to 30, publisher clicks accept on the proposal still sitting in its
+    // inbox — `decideRates` compare-and-sets on the `proposed_*` columns alone, so it passes,
+    // and 80 is back in force. Same shape as the `status: 'pending'` guard on `accept`: an
+    // admin control must not be undoable by a tenant.
+    const repriced =
+      rates.coin_rate !== current.coin_rate ||
+      rates.guest_rate !== current.guest_rate ||
+      rates.engagement_rate !== current.engagement_rate;
     const updated = await prisma.partnership.update({
       where: { id },
-      data: { ...rates, platform_fee_bps: b.platform_fee_bps ?? undefined, status: b.status ?? undefined },
+      data: {
+        ...rates,
+        platform_fee_bps: b.platform_fee_bps ?? undefined,
+        status: b.status ?? undefined,
+        ...(repriced && current.proposed_coin_rate !== null
+          ? {
+              proposed_coin_rate: null,
+              proposed_guest_rate: null,
+              proposed_engagement_rate: null,
+            }
+          : {}),
+      },
     });
-    await audit(s.org_id, 'partnership.patch', `partnership:${id}`, b);
+    await audit(s.org_id, 'partnership.patch', `partnership:${id}`, {
+      ...b,
+      // The proposal did not merely go stale, it was discarded — and the publisher is about to
+      // find an empty inbox where its pending price was.
+      proposal_cleared: repriced && current.proposed_coin_rate !== null,
+    });
     return updated;
   }
 
