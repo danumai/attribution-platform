@@ -562,6 +562,24 @@ HELDCLAIM=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $
 [ "$HELDCLAIM" = "false" ] && pass "...and stops claims paying out against it" || fail "suspended partnership still pays: $HELDCLAIM"
 A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"status":"active"}' >/dev/null
 
+# An admin overriding the commercial terms must not be undoable by the party it was aimed at.
+# A proposal left standing was exactly that: the publisher's inbox still held the promoter's
+# old number, `rates/accept` compare-and-sets on the proposal columns alone, and one click put
+# the overridden rate straight back in force.
+RATES "$PRO_TOKEN" '{"coin_rate":90,"guest_rate":10}' >/dev/null
+OVERRIDE=$(A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"coin_rate":30,"guest_rate":10}')
+[ "$(echo "$OVERRIDE" | j .coin_rate)" = "30" ] && [ -z "$(echo "$OVERRIDE" | j .proposed_coin_rate)" ] \
+  && pass "an admin rate override discards the open proposal" || fail "override: $OVERRIDE"
+REVERT=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships/$PART_ID/rates/accept -H "Authorization: Bearer $PUB_TOKEN")
+[ "$REVERT" = "404" ] && pass "...which the publisher cannot accept its way back out of" \
+  || fail "publisher reverted an admin override: HTTP $REVERT"
+# An engagement rate is a negotiated number like the other three, so the admin lever reaches it too.
+ENGOVR=$(A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"engagement_rate":25}' | j .engagement_rate)
+[ "$ENGOVR" = "25" ] && pass "admin can override the engagement rate" || fail "engagement override: $ENGOVR"
+# Back to the numbers every payout assertion above was priced on.
+A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' \
+  -d '{"coin_rate":50,"guest_rate":10,"engagement_rate":20}' >/dev/null
+
 echo "11b. The business layer: revenue, money in, money out"
 # Runs here on purpose: after section 11 has finished counting the admin inbox (these flows
 # add audit entries of their own) and before section 12 offboards the publisher.
@@ -582,6 +600,15 @@ CREDITED=$(q "SELECT coalesce(sum(amount),0) FROM ledger_entries WHERE amount>0 
 # ...and no single payout ref is unbalanced, which a global sum could hide.
 BADREF=$(q "SELECT count(*) FROM (SELECT ref FROM ledger_entries GROUP BY ref HAVING sum(amount)<>0) x")
 [ "$BADREF" = "0" ] && pass "every ledger ref sums to zero individually" || fail "$BADREF unbalanced refs"
+
+# The endpoint the integration guide sends publishers to reconcile against. `coins` is the
+# GROSS the promoter's budget was charged; a publisher summing it over-reports its own revenue
+# by the platform's cut on every row, which is why the split has to be on the row itself.
+RECON=$(curl -s "$API/v1/redemptions?limit=1" -H "Authorization: Bearer $PUB_TOKEN")
+R_FEE=$(echo "$RECON" | j '[0].fee'); R_NET=$(echo "$RECON" | j '[0].publisher_net'); R_CUT=$(echo "$RECON" | j '[0].platform_fee')
+[ -n "$R_NET" ] && [ "$R_FEE" = "$((R_NET + R_CUT))" ] \
+  && pass "reconciliation rows carry the payout split (fee $R_FEE = net $R_NET + cut $R_CUT)" \
+  || fail "redemptions row has no usable split: $RECON"
 
 # ---------- money in: PSP checkout + signed webhook ----------
 BUDGET_BEFORE=$(q "SELECT coalesce(balance,0) FROM account_balances WHERE account='campaign:$CAMP_ID'")

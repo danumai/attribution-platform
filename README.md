@@ -11,6 +11,8 @@ mechanism, which is what App Store 3.1.1 forbids. See
 [Figure 8](SYSTEM_FLOW.md#figure-8-why-the-qr-unlocks-nothing).
 
 - **Swagger UI at `/docs`** — full API reference, generated from the live controllers
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — start here if you are joining: setup, the one command
+  CI runs, and the house rules for the money path
 - **[SYSTEM_FLOW.md](SYSTEM_FLOW.md)** — the whole system in one document:
   Part I how it works and every role's end-to-end flow,
   [Part II](SYSTEM_FLOW.md#part-ii--publisher-integration) the publisher integration guide,
@@ -36,7 +38,8 @@ servers in one terminal (Ctrl-C stops everything).
 | `pnpm run db:migrate` | Create a migration after editing `backend/prisma/schema.prisma` |
 | `pnpm run db:studio` | Browse the database in Prisma Studio |
 | `pnpm run seed` | A month of demo data: tenants, partnerships, campaigns in both modes, scans, payouts — prints logins, keys and scan URLs |
-| `pnpm test` | Security self-check, then the end-to-end suite: full loop, reward tiers, code bounds, security, fraud, ledger integrity, admin portal |
+| `pnpm check` | Lint, typecheck and unit tests. No database, no running server — what to run before every push |
+| `pnpm test` | `pnpm check`'s tests plus the 167-assertion end-to-end suite: full loop, reward tiers, code bounds, security, fraud, ledger integrity, admin portal. **Needs `pnpm dev` already running** |
 | `pnpm run build` | Compile both workspaces for production |
 | `pnpm start` | Run the compiled build (expects a configured environment) |
 | `pnpm run db:reset` | Wipe the database volume and start clean |

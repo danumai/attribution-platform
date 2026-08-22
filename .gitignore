@@ -24,3 +24,5 @@ backend/src/generated/
 *.local.json
 # The design system describes the project rather than the developer, so it stays tracked.
 !.impeccable/design.json
+# Regenerated from .agents/, which is ignored above.
+skills-lock.json

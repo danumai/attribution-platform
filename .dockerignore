@@ -18,6 +18,6 @@ dist
 **/.impeccable
 docs
 e2e-test.sh
-seed.sh
+seed.mjs
 *.md
 !backend/src/**/*.md

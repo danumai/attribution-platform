@@ -166,8 +166,15 @@ export const SETTLEMENT_DELAY_DAYS = int('SETTLEMENT_DELAY_DAYS', 14, 0, 365);
  * HMAC secret shared with the payment provider's webhook. Unset, `POST /v1/payments/webhook`
  * answers 404 and money-in is impossible — the correct failure mode, since an unsigned funding
  * webhook mints budgets for whoever finds it.
+ *
+ * `.env.example` ships the dev value below so the e2e suite's signature assertions run on a
+ * fresh clone. Shipping it to production would let anyone who reads this repo credit a budget,
+ * so it is refused at boot there — the same treatment JWT_SECRET's default gets.
  */
+const DEV_WEBHOOK_SECRET = 'dev-payment-webhook-secret-change-me';
 export const PAYMENT_WEBHOOK_SECRET = process.env.PAYMENT_WEBHOOK_SECRET ?? '';
+if (PROD && PAYMENT_WEBHOOK_SECRET === DEV_WEBHOOK_SECRET)
+  throw new Error('PAYMENT_WEBHOOK_SECRET must be set to a non-default value in production');
 if (PROD && PAYMENT_WEBHOOK_SECRET && PAYMENT_WEBHOOK_SECRET.length < 16)
   throw new Error('PAYMENT_WEBHOOK_SECRET must be at least 16 characters in production');
 

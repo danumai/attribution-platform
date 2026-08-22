@@ -1,0 +1,61 @@
+# Runs the same `pnpm check` a contributor runs locally, then the e2e suite against a real
+# stack. Two jobs rather than one: `check` needs no Docker and answers in ~1 minute, so a
+# typo fails fast instead of waiting behind a Postgres boot.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: lint · typecheck · unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+
+  e2e:
+    name: end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The dev defaults are the ones the suite asserts against — ports, demo tenants,
+      # ALLOW_SELF_FUNDING. Do not swap in production-shaped values here.
+      - run: cp .env.example .env
+
+      # `pnpm run db` starts the compose stack and applies migrations. The suite reaches into
+      # the `qrreward-db` container with psql for its ledger assertions, so the real compose
+      # file is required — a bare service container has no such name.
+      - run: pnpm run db
+
+      - name: Start the API
+        run: |
+          pnpm run dev:api > /tmp/api.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:4000/healthz >/dev/null && exit 0
+            sleep 1
+          done
+          echo "API did not become healthy"; cat /tmp/api.log; exit 1
+
+      - run: ./e2e-test.sh
+
+      # The API's own log is where a failed assertion says why — the suite only sees the
+      # HTTP status it got back.
+      - name: API log
+        if: failure()
+        run: cat /tmp/api.log
