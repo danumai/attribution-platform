@@ -34,6 +34,8 @@ import {
 import {
   DeviceSignals,
   Platform,
+  bonusLabel,
+  bonusesFor,
   claimIdFromReferrer,
   codeFromReferrer,
   decide,
@@ -406,6 +408,10 @@ export class PartnerController {
     },
   ) {
     const publisher = await publisherFromKey(auth);
+    // Resolved once per request rather than per return: the publisher's own offers are echoed
+    // back on every answer this handler can give, refusals included. Scoped to the claim being
+    // answered — a signup bonus is not what a repeat purchase earns.
+    const bonuses = bonusesFor(publisher.bonuses, 'acquisition');
     const open = readSignals(b as Record<string, unknown>);
     if (!open.claimId && !open.fingerprint)
       throw new BadRequestException('install_referrer or ip required to attribute an install');
@@ -495,7 +501,8 @@ export class PartnerController {
         /** 0–100. 100 is Play's referrer; below that, how many device signals agreed. */
         confidence,
         signup_deadline: expires_at.toISOString(),
-        bonus_label: publisher.bonus_label,
+        bonuses,
+        bonus_label: bonusLabel(bonuses),
       };
     });
 
@@ -568,6 +575,10 @@ export class PartnerController {
     },
   ) {
     const publisher = await publisherFromKey(auth);
+    // Resolved once per request rather than per return: the publisher's own offers are echoed
+    // back on every answer this handler can give, refusals included. Scoped to the claim being
+    // answered — a signup bonus is not what a repeat purchase earns.
+    const bonuses = bonusesFor(publisher.bonuses, 'acquisition');
     // Bounded before anything is parsed or stored: `publisher_user_ref` becomes a unique-index
     // entry, and the rest are attacker-shaped strings from another company's server.
     const publisher_user_ref = str(b.publisher_user_ref, 'publisher_user_ref', 200)!;
@@ -593,7 +604,7 @@ export class PartnerController {
     // worth counting them — including the ones raised inside a transaction that then rolls back.
     const unattributed = (reason: string) => {
       recordDecision('claim', { reason }, { publisher_org_id: publisher.id });
-      return { attributed: false, reason, bonus_label: publisher.bonus_label };
+      return { attributed: false, reason, bonuses, bonus_label: bonusLabel(bonuses) };
     };
 
     /**
@@ -690,10 +701,11 @@ export class PartnerController {
           ? null
           : new Date(Date.now() + scan.grace_days * 86_400_000).toISOString(),
         /**
-         * The publisher's own declared joining bonus, echoed back for their logs. This is a
-         * label describing what they grant, never an instruction from this platform.
+         * The publisher's own declared offers for a signup, echoed back for their logs. A
+         * description of what they grant, never an instruction from this platform.
          */
-        bonus_label: publisher.bonus_label,
+        bonuses,
+        bonus_label: bonusLabel(bonuses),
         /** false on the first answer for this user; see the replay note on retries. */
         replay: false,
       };
@@ -750,7 +762,8 @@ export class PartnerController {
       confirm_deadline: prior.identified
         ? null
         : new Date(prior.created_at.getTime() + grace_days * 86_400_000).toISOString(),
-      bonus_label: publisher.bonus_label,
+      bonuses,
+      bonus_label: bonusLabel(bonuses),
       replay: true,
     };
   }
@@ -771,13 +784,14 @@ export class PartnerController {
    * promoter, which is a harder fact than any verification the publisher could apply.
    */
   private async claimPurchase(
-    publisher: { id: string; bonus_label: string | null },
+    publisher: { id: string; bonuses: unknown },
     code: string,
     publisher_user_ref: string,
   ) {
+    const bonuses = bonusesFor(publisher.bonuses, 'engagement');
     const unattributed = (reason: string) => {
       recordDecision('claim', { reason, match_method: 'code' }, { publisher_org_id: publisher.id });
-      return { attributed: false, reason, bonus_label: publisher.bonus_label };
+      return { attributed: false, reason, bonuses, bonus_label: bonusLabel(bonuses) };
     };
 
     // Set when the UNIQUE fires, so the replay can be answered after the transaction has rolled
@@ -859,8 +873,9 @@ export class PartnerController {
           /** always 0 and always null: an engagement payout settles in one step. */
           pending_fee: 0,
           confirm_deadline: null,
-          /** the publisher's own declared bonus, echoed back. A label, never an instruction. */
-          bonus_label: publisher.bonus_label,
+          /** the publisher's own declared offers, echoed back. Never an instruction. */
+          bonuses,
+      bonus_label: bonusLabel(bonuses),
           replay: false,
         };
       })
@@ -909,7 +924,8 @@ export class PartnerController {
       platform_fee: priorSplit.cut,
       pending_fee: 0,
       confirm_deadline: null,
-      bonus_label: publisher.bonus_label,
+      bonuses,
+      bonus_label: bonusLabel(bonuses),
       replay: true,
     };
   }

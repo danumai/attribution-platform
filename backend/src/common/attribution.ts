@@ -20,6 +20,7 @@
  *            first open and matched inside a short window. Probabilistic on purpose.
  */
 import { BadRequestException } from '@nestjs/common';
+import { str } from './security';
 
 export type Platform = 'android' | 'ios' | 'other';
 
@@ -58,13 +59,91 @@ export function validateIosAppId(raw: unknown): string | null {
   return v;
 }
 
-/** Free text the publisher declares about *their own* joining bonus. Never an instruction. */
-export function validateBonusLabel(raw: unknown): string | null {
-  if (raw === undefined || raw === null || raw === '') return null;
-  if (typeof raw !== 'string') throw new BadRequestException('bonus_label must be a string');
-  const v = raw.trim();
-  if (v.length > 120) throw new BadRequestException('bonus_label must be 120 characters or fewer');
-  return v;
+/**
+ * What the publisher gives a user out of its *own* pocket — coins, a subscription, a discount,
+ * whatever it runs. A list, not a field: a publisher offers more than one thing, and the two
+ * events this platform can name are already different products (a signup, a repeat purchase).
+ *
+ * `type` is free text and there is no registry of allowed kinds. That is not laziness about
+ * validation — it is the same rule as everywhere else on this boundary: the platform never
+ * issues or fulfils any of these, so a type it does not recognise costs it nothing. The
+ * publisher's own app switches on `type` and grants `value`/`unit`; this side only stores,
+ * echoes, and bounds. Anything narrower would be a deploy here every time a publisher invented
+ * an offer.
+ */
+export type BonusOn = 'acquisition' | 'engagement' | 'both';
+const BONUS_ON: BonusOn[] = ['acquisition', 'engagement', 'both'];
+
+export type Bonus = {
+  /** the publisher's own slug for the kind of thing granted: `coins`, `subscription`, … */
+  type: string;
+  /** human wording, for artwork and reports */
+  label: string;
+  /** optional amount, for the offers that have one: 100 coins, 7 days */
+  value?: number;
+  /** optional unit for `value`: `coins`, `days`, `percent` */
+  unit?: string;
+  /** which claim this is granted on. `both` is the default and what one label always meant. */
+  on: BonusOn;
+  // A type alias rather than an interface on purpose: only an alias gets the implicit index
+  // signature Prisma's `InputJsonValue` requires, so this writes to a JSONB column uncast.
+};
+
+/** Matches the CHECK in 9d_publisher_bonuses; one PATCH must not bloat every claim response. */
+export const MAX_BONUSES = 20;
+
+export function validateBonuses(raw: unknown): Bonus[] {
+  if (raw === undefined || raw === null || raw === '') return [];
+  if (!Array.isArray(raw)) throw new BadRequestException('bonuses must be an array');
+  if (raw.length > MAX_BONUSES)
+    throw new BadRequestException(`bonuses must be ${MAX_BONUSES} entries or fewer`);
+  return raw.map((entry, i) => {
+    const at = `bonuses[${i}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+      throw new BadRequestException(`${at} must be an object`);
+    const e = entry as Record<string, unknown>;
+    // Slug rather than free text: `type` is the key the publisher's app switches on, and a
+    // key with spaces or punctuation in it is one nobody can match on reliably.
+    const type = str(e.type, `${at}.type`, 40)!.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9_-]*$/.test(type))
+      throw new BadRequestException(`${at}.type must be a slug, e.g. coins or subscription`);
+    const label = str(e.label, `${at}.label`, 120)!.trim();
+    if (!label) throw new BadRequestException(`${at}.label is required`);
+    const on = (e.on ?? 'both') as BonusOn;
+    if (!BONUS_ON.includes(on))
+      throw new BadRequestException(`${at}.on must be one of ${BONUS_ON.join(', ')}`);
+    const bonus: Bonus = { type, label, on };
+    if (e.value !== undefined && e.value !== null && e.value !== '') {
+      const value = Number(e.value);
+      if (!Number.isFinite(value) || value < 0 || value > 1_000_000_000)
+        throw new BadRequestException(`${at}.value must be a number between 0 and 1000000000`);
+      bonus.value = value;
+    }
+    const unit = str(e.unit, `${at}.unit`, 20, false)?.trim();
+    if (unit) bonus.unit = unit;
+    return bonus;
+  });
+}
+
+/**
+ * The offers that apply to one claim. Read defensively — the column is JSONB, so a row written
+ * before this shape existed, or by hand, must degrade to "no offers" rather than throw inside
+ * a payout response.
+ */
+export function bonusesFor(raw: unknown, kind: 'acquisition' | 'engagement'): Bonus[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Bonus[]).filter(
+    (b) => b && typeof b === 'object' && (b.on === kind || b.on === 'both' || b.on === undefined),
+  );
+}
+
+/**
+ * The one-line summary that used to be the whole feature. Still returned everywhere it was, so
+ * a publisher integrated against `bonus_label` keeps working and only the artwork and the app
+ * need to learn about the list.
+ */
+export function bonusLabel(list: Bonus[]): string | null {
+  return list.map((b) => b.label).join(' + ') || null;
 }
 
 interface AppTargets {

@@ -303,7 +303,25 @@ banner until you fix it.
 | `ios_app_id` | The numeric App Store adam id | `1234567890` |
 | `landing_url` | Web fallback for desktop scans and app-less publishers | `http://localhost:3000/publisher-sim` |
 | `deeplink_url` | **Engagement only.** An https origin you have claimed as an Android App Link / iOS Universal Link | `http://localhost:3000/publisher-sim` |
-| `bonus_label` | What *you* call your own joining bonus. A label for reporting and artwork — never an instruction from this platform | `100 free coins` |
+| `bonuses` | Everything *you* give the user, as a list. A description for reporting and artwork and a machine-readable one your app acts on — never an instruction from this platform | `[{ "type": "coins", "label": "100 free coins", "value": 100, "unit": "coins", "on": "acquisition" }]` |
+
+**The offers list.** One publisher runs more than one offer, so `bonuses` is an array rather
+than a line of text. Each entry:
+
+| Key | Required | What it is |
+|---|---|---|
+| `type` | yes | Your own slug for the kind of thing you grant — `coins`, `subscription`, `discount`, anything. Lowercased; letters, digits, `-` and `_` only. **There is no list of allowed kinds**, because this platform never issues or fulfils any of them — your app is what switches on this and grants |
+| `label` | yes | The wording, ≤120 chars. This is what artwork and reports show |
+| `value` | no | The amount, if the offer has one: `100`, `7` |
+| `unit` | no | What `value` counts: `coins`, `days`, `percent` |
+| `on` | no | Which claim earns it — `acquisition` (a signup), `engagement` (a repeat purchase), or `both` (the default). Every attribution answer carries only the offers that apply to *that* claim |
+
+At most 20 entries. `bonuses` is replaced **wholesale** on every PATCH that sends it — send the
+full list, and send `[]` to clear it. Omit the key to leave the offers alone.
+
+`bonus_label`, the single line this replaced, is still returned on every Partner API response
+as the one-line summary of whichever offers applied (`"100 free coins + 7 days of premium"`), so
+an integration written against it keeps working.
 
 **Rules enforced:** every URL must be absolute and **https** (http is allowed only for
 localhost), must not embed credentials, and must not use a `javascript:` or `data:` scheme.
@@ -326,6 +344,8 @@ scan arrives at /r/:code
 - [ ] All five fields save and read back from Settings.
 - [ ] A non-localhost `http://` URL, a `javascript:` or `data:` scheme, and a URL with embedded credentials are each rejected with 400.
 - [ ] Sending `""` clears a field; omitting the field leaves it unchanged.
+- [ ] Several offers with different `on` values save, read back, and each attribution answer carries only the ones that claim earned — a signup never advertises the repeat-purchase offer.
+- [ ] An entry with no `type` or no `label`, a `type` with a space in it, an `on` outside the three values, and a 21st entry are each rejected with 400.
 - [ ] With all three destinations cleared, every scan on your partnerships answers `reason=no_destination` and the dashboard shows the warning banner.
 - [ ] With them set, each device path resolves to the destination the table above predicts.
 
@@ -745,7 +765,10 @@ exists until somebody signs up.
 ```json
 { "attributed": true, "install_id": "…", "campaign_id": "…", "campaign_name": "…",
   "match_method": "referrer", "confidence": 100,
-  "signup_deadline": "2026-09-23T…", "bonus_label": "100 free coins" }
+  "signup_deadline": "2026-09-23T…",
+  "bonuses": [{ "type": "coins", "label": "100 free coins", "value": 100, "unit": "coins",
+                "on": "acquisition" }],
+  "bonus_label": "100 free coins" }
 ```
 
 **Bank the `install_id`.** It is idempotent by construction: a second call finds the scan
@@ -766,7 +789,7 @@ Authorization: Bearer pk_…
   "match_method": "referrer", "confidence": 100, "identified": false,
   "fee": 10, "publisher_net": 9, "platform_fee": 1,
   "pending_fee": 40, "confirm_deadline": "2026-08-31T…",
-  "bonus_label": "…", "replay": false }
+  "bonuses": [ … ], "bonus_label": "…", "replay": false }
 ```
 
 | Field | Means |
@@ -1939,7 +1962,7 @@ Response headers on every route: `default-src 'none'` CSP, `nosniff`, `X-Frame-O
                         │   Org    │  promoter | publisher | admin
                         └────┬─────┘  api_key_hash, approved, suspended,
                              │        landing_url, android_package, ios_app_id,
-              promoter ──────┤        deeplink_url, bonus_label
+              promoter ──────┤        deeplink_url, bonuses (JSONB)
               publisher ─────┤
                         ┌────▼────────────┐
                         │  Partnership    │  coin_rate, guest_rate, grace_days,

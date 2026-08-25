@@ -105,8 +105,10 @@ XSS=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/campaigns/$CAMP_ID/q
 
 echo "5. Scan → store listing (nothing redeemable reaches the device)"
 # Register the publisher's apps, so scans go to a store rather than the web fallback.
+# Two offers, deliberately scoped to different events: what a new user gets is not what a
+# returning customer gets, and each claim answer must carry only the ones it earned.
 curl -s -XPATCH $API/v1/orgs/me -H "Authorization: Bearer $PUB_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"android_package":"com.dramabox.app","ios_app_id":"123456789","bonus_label":"100 free coins"}' >/dev/null
+  -d '{"android_package":"com.dramabox.app","ios_app_id":"123456789","bonuses":[{"type":"coins","label":"100 free coins","value":100,"unit":"coins","on":"acquisition"},{"type":"subscription","label":"7 days of premium","value":7,"unit":"days","on":"engagement"}]}' >/dev/null
 ANDROID='Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36'
 IOS='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1'
 
@@ -131,6 +133,8 @@ COINS=$(echo "$RED" | j .fee); RED_ID=$(echo "$RED" | j .attribution_id)
 [ "$COINS" = "10" ] && pass "unverified install pays guest tier only (10 credits)" || fail "fee: $RED"
 [ "$(echo "$RED" | j .pending_fee)" = "40" ] && pass "40-credit delta held back pending identification" || fail "pending: $RED"
 [ "$(echo "$RED" | j .bonus_label)" = "100 free coins" ] && pass "publisher's own bonus echoed back as a label" || fail "bonus: $RED"
+[ "$(echo "$RED" | j ".bonuses[0].type")" = "coins" ] && pass "signup answer carries the publisher's coin offer" || fail "bonuses: $RED"
+[ "$(echo "$RED" | j .bonuses.length)" = "1" ] && pass "the repeat-purchase offer is not advertised on a signup" || fail "bonus scope: $RED"
 REM=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 [ "$REM" = "90" ] && pass "budget debited 100→90 (guest tier only)" || fail "budget_remaining=$REM"
 
@@ -258,6 +262,8 @@ FLYER="flyer$S@x.com"
 E1=$(EC "{\"code\":\"$ECODE\",\"publisher_user_ref\":\"$FLYER\"}")
 [ "$(echo "$E1" | j .attributed)" = "true" ] && pass "purchase reward paid on the transaction code" || fail "engagement claim: $E1"
 [ "$(echo "$E1" | j .kind)" = "engagement" ] && pass "recorded as a repeat purchase, not a signup" || fail "kind: $E1"
+[ "$(echo "$E1" | j ".bonuses[0].type")" = "subscription" ] && pass "purchase answer carries the subscription offer instead" || fail "engagement bonuses: $E1"
+[ "$(echo "$E1" | j .bonus_label)" = "7 days of premium" ] && pass "and summarises that one, not the signup coins" || fail "engagement bonus_label: $E1"
 [ "$(echo "$E1" | j .match_method)" = "code" ] && [ "$(echo "$E1" | j .confidence)" = "100" ] \
   && pass "match method is the code itself, at full confidence" || fail "method: $E1"
 [ "$(echo "$E1" | j .fee)" = "20" ] && pass "paid at the engagement rate (20), not the signup rate" || fail "fee: $E1"

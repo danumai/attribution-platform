@@ -39,9 +39,14 @@ model Org {
   android_package String?
   /// publishers only; numeric App Store id a scan sends iPhones to
   ios_app_id      String?
-  /// publishers only; describes the publisher's OWN joining bonus. A label for reporting
-  /// and QR artwork — never an instruction this platform issues or fulfils.
-  bonus_label     String?
+  /// publishers only; the offers the publisher grants out of its OWN pocket, as a list:
+  /// `[{ type, label, value?, unit?, on }]` — coins on signup, a free week of premium on a
+  /// repeat purchase, whatever it runs. `type` is free text and there is no registry of
+  /// allowed kinds, because this platform never issues or fulfils any of them: the publisher's
+  /// app reads `type`/`value`/`unit` and grants, `label` is what artwork and reports show, and
+  /// `on` says which event it is granted for (acquisition | engagement | both).
+  /// Shape floor — array, at most 20 — is a CHECK in the migration.
+  bonuses         Json     @default("[]")
   suspended     Boolean  @default(false)
   /// publishers only; an unapproved publisher is hidden from the directory and cannot enter a
   /// partnership. Auto-true in dev (AUTO_APPROVE_PUBLISHERS); an admin decision in production.

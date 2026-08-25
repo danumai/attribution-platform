@@ -120,7 +120,7 @@ async function run() {
 
   ok(await call('/v1/orgs/me', {
     method: 'PATCH', token: publisher.token,
-    body: { android_package: 'com.dramabox.app', ios_app_id: '1571484032', landing_url: `${WEB}/publisher-sim`, deeplink_url: `${WEB}/publisher-sim`, bonus_label: '100 free coins' },
+    body: { android_package: 'com.dramabox.app', ios_app_id: '1571484032', landing_url: `${WEB}/publisher-sim`, deeplink_url: `${WEB}/publisher-sim`, bonuses: [{ type: 'coins', label: '100 free coins', value: 100, unit: 'coins', on: 'acquisition' }, { type: 'subscription', label: '7 days of premium', value: 7, unit: 'days', on: 'engagement' }] },
   }), 'publisher destinations');
   log('  ✓ 2 tenants, publisher destinations registered');
 

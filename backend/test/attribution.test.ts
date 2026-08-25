@@ -14,9 +14,12 @@ import {
   normLang,
   normScreen,
   normTz,
+  bonusLabel,
+  bonusesFor,
   score,
   storeUrl,
   validateAndroidPackage,
+  validateBonuses,
   validateIosAppId,
 } from '../src/common/attribution';
 
@@ -150,5 +153,40 @@ d = decide([{ ...bare }, { ...bare }], OPEN, MIN);
 assert.ok('reason' in d && d.reason === 'ambiguous');
 
 assert.ok('reason' in decide([], OPEN, MIN) && (decide([], OPEN, MIN) as any).reason === 'no_match');
+
+
+// ---------- the publisher's own offers ----------
+// Everything here is the publisher describing what *it* grants; nothing on this side ever
+// fulfils one. So the checks are about shape and scope, never about the kinds themselves.
+const offers = validateBonuses([
+  { type: ' Coins ', label: '100 free coins', value: '100', unit: 'coins' },
+  { type: 'subscription', label: '7 days of premium', value: 7, unit: 'days', on: 'engagement' },
+]);
+assert.deepEqual(offers[0], {
+  type: 'coins',
+  label: '100 free coins',
+  on: 'both',
+  value: 100,
+  unit: 'coins',
+});
+assert.equal(offers[1].on, 'engagement');
+
+assert.deepEqual(validateBonuses(undefined), []);
+assert.throws(() => validateBonuses({}), /must be an array/);
+assert.throws(() => validateBonuses([{ type: 'free coins', label: 'x' }]), /slug/);
+assert.throws(() => validateBonuses([{ label: 'no kind' }]), /type is required/);
+assert.throws(() => validateBonuses([{ type: 'coins', label: 'x', on: 'signup' }]), /on must be/);
+assert.throws(() => validateBonuses(new Array(21).fill({ type: 'c', label: 'x' })), /20 entries/);
+
+// The scoping that makes a list worth having: a signup answer must not advertise the offer
+// that is only earned by coming back and buying again.
+assert.deepEqual(bonusesFor(offers, 'acquisition').map((b) => b.type), ['coins']);
+assert.deepEqual(bonusesFor(offers, 'engagement').map((b) => b.type), ['coins', 'subscription']);
+// A row written before this shape existed degrades to "no offers" rather than throwing inside
+// a payout response.
+assert.deepEqual(bonusesFor('100 free coins', 'acquisition'), []);
+
+assert.equal(bonusLabel(bonusesFor(offers, 'engagement')), '100 free coins + 7 days of premium');
+assert.equal(bonusLabel([]), null);
 
 console.log('  ✓ attribution self-check passed');

@@ -11,7 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { Request } from 'express';
 import {
   validateAndroidPackage,
-  validateBonusLabel,
+  validateBonuses,
   validateIosAppId,
 } from '../../common/attribution';
 import {
@@ -53,7 +53,8 @@ export class AuthController {
       android_package?: string;
       ios_app_id?: string;
       deeplink_url?: string;
-      bonus_label?: string;
+      /** the offers this publisher grants itself — see `validateBonuses` */
+      bonuses?: unknown;
     },
   ) {
     if (await rateLimited(`signup:${clientIp(req)}`, 10))
@@ -75,7 +76,7 @@ export class AuthController {
     const landing_url = validateLandingUrl(b.landing_url);
     const android_package = validateAndroidPackage(b.android_package);
     const ios_app_id = validateIosAppId(b.ios_app_id);
-    const bonus_label = validateBonusLabel(b.bonus_label);
+    const bonuses = validateBonuses(b.bonuses);
     const deeplink_url = validateDeeplinkUrl(b.deeplink_url);
     // Both tenant types get one now, because both have a server that calls this platform.
     // A publisher's key answers "is this attributable" and earns fees; a promoter's mints a
@@ -99,7 +100,7 @@ export class AuthController {
           android_package,
           ios_app_id,
           deeplink_url,
-          bonus_label,
+          bonuses,
           approved,
         },
         select: { id: true, name: true, type: true, approved: true },

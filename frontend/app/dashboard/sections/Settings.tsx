@@ -2,7 +2,8 @@
 import { ChangeEvent, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { confirmDialog } from '@/lib/ui';
-import { btn, btnGhost, card, code as codeChip, codeKey, cx, field, hint, label, muted, sectionHead } from '@/lib/tw';
+import { btn, btnGhost, card, code as codeChip, codeKey, cx, field, hint, label, muted, sectionHead, select } from '@/lib/tw';
+import type { Bonus } from '@/lib/types';
 import type { SectionProps } from '../types';
 
 /** Where scans are sent, per platform, plus the publisher's own declared joining bonus. */
@@ -12,11 +13,28 @@ const DESTINATIONS = [
   ['landing_url', 'Web fallback (desktop scans, and platforms with no app registered)', 'https://example.com/get-the-app'],
 ] as const;
 
-const EMPTY = { landing_url: '', android_package: '', ios_app_id: '', deeplink_url: '', bonus_label: '' };
+const EMPTY = { landing_url: '', android_package: '', ios_app_id: '', deeplink_url: '' };
+
+/**
+ * One row of the offers editor. Every field is a string here even where the API takes a number:
+ * a half-typed `value` is a string for as long as it is being typed, and the API already treats
+ * an empty one as absent — so there is nothing to parse on this side.
+ */
+type Row = { type: string; label: string; value: string; unit: string; on: Bonus['on'] };
+
+const BLANK: Row = { type: 'coins', label: '', value: '', unit: '', on: 'both' };
+
+/** Which claim an offer is granted on. The two the platform can actually name, plus both. */
+const GRANTED_ON = [
+  ['both', 'Every reward'],
+  ['acquisition', 'New signups'],
+  ['engagement', 'Repeat purchases'],
+] as const;
 
 export function Settings({ d, busy, act }: Pick<SectionProps, 'd' | 'busy' | 'act'>) {
   const { profile } = d;
   const [dest, setDest] = useState(EMPTY);
+  const [rows, setRows] = useState<Row[]>([]);
   // Read in an effect, never in render: this component is prerendered on the server, where
   // there is no localStorage, so reading it during render is a guaranteed hydration mismatch.
   const [apiKey, setApiKey] = useState<string | null>(null);
@@ -32,12 +50,28 @@ export function Settings({ d, busy, act }: Pick<SectionProps, 'd' | 'busy' | 'ac
       android_package: profile.android_package ?? '',
       ios_app_id: profile.ios_app_id ?? '',
       deeplink_url: profile.deeplink_url ?? '',
-      bonus_label: profile.bonus_label ?? '',
     });
+    setRows(
+      (profile.bonuses ?? []).map((b) => ({
+        type: b.type,
+        label: b.label,
+        value: b.value?.toString() ?? '',
+        unit: b.unit ?? '',
+        on: b.on ?? 'both',
+      })),
+    );
   }, [profile]);
 
   const on = (k: keyof typeof dest) => (e: ChangeEvent<HTMLInputElement>) =>
     setDest((prev) => ({ ...prev, [k]: e.target.value }));
+
+  const onRow =
+    (i: number, k: keyof Row) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setRows((prev) => prev.map((r, j) => (j === i ? { ...r, [k]: e.target.value } : r)));
+
+  // A row with no wording is a row somebody started and abandoned — dropping it here is what
+  // stops "Save" failing on a blank the user cannot see is invalid.
+  const payload = { ...dest, bonuses: rows.filter((r) => r.label.trim() && r.type.trim()) };
 
   return (
     <>
@@ -67,23 +101,70 @@ export function Settings({ d, busy, act }: Pick<SectionProps, 'd' | 'busy' | 'ac
           installed and falls back to the store when it is not — the OS decides, not us.
         </p>
 
-        <label className={label}>Your joining bonus, in your own words</label>
-        <input
-          className={field}
-          value={dest.bonus_label}
-          placeholder="100 free coins for new accounts"
-          onChange={on('bonus_label')}
-        />
+        <label className={label}>What you give the user</label>
         <p className={muted}>
-          A label for reporting and for promoters designing artwork. You grant the bonus, on your
-          own terms — this platform never issues or fulfils it.
+          As many offers as you run — coins, a subscription, a discount, anything. The kind is
+          your own word for it and your app is what reads it back off an attribution response and
+          grants it. This platform records and echoes these; it never issues or fulfils one.
         </p>
+
+        {rows.map((r, i) => (
+          <div key={i} className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-[1.6fr_1fr_0.7fr_0.7fr_1.1fr_auto]">
+            <input
+              className={field}
+              value={r.label}
+              placeholder="100 free coins"
+              aria-label="Offer wording"
+              onChange={onRow(i, 'label')}
+            />
+            <input
+              className={field}
+              value={r.type}
+              placeholder="coins"
+              aria-label="Kind"
+              onChange={onRow(i, 'type')}
+            />
+            <input
+              className={field}
+              value={r.value}
+              inputMode="numeric"
+              placeholder="100"
+              aria-label="Amount"
+              onChange={onRow(i, 'value')}
+            />
+            <input
+              className={field}
+              value={r.unit}
+              placeholder="coins"
+              aria-label="Unit"
+              onChange={onRow(i, 'unit')}
+            />
+            <select className={select} value={r.on} aria-label="Granted on" onChange={onRow(i, 'on')}>
+              {GRANTED_ON.map(([v, text]) => (
+                <option key={v} value={v}>
+                  {text}
+                </option>
+              ))}
+            </select>
+            <button
+              className={btnGhost}
+              aria-label="Remove offer"
+              onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+
+        <button className={cx(btnGhost, 'mt-3')} onClick={() => setRows((prev) => [...prev, BLANK])}>
+          Add an offer
+        </button>
 
         <button
           className={cx(btn, 'mt-5')}
           disabled={busy}
           onClick={() =>
-            act(() => api('/v1/orgs/me', { method: 'PATCH', body: JSON.stringify(dest) }), 'Destinations saved.')
+            act(() => api('/v1/orgs/me', { method: 'PATCH', body: JSON.stringify(payload) }), 'Destinations saved.')
           }
         >
           {busy ? 'Saving…' : 'Save destinations'}

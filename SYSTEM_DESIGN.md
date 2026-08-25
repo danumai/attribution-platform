@@ -1100,7 +1100,7 @@ Three separations, each enforced by code rather than by policy language:
 graph TB
     A["1. The QR is a measurement artifact, not a key<br/>a scan resolves to a store listing or the publisher's app link.<br/>What travels is an opaque lookup key, inert without the<br/>publisher's server-side API key. On iOS acquisition: nothing travels."]
     B["2. What moves between companies is a marketing fee<br/>platform credits, promoter → publisher.<br/>Nothing is credited to an end user, by anyone, anywhere."]
-    C["3. The joining bonus is the publisher's own<br/>/claim answers 'is this attributable?' — no amount,<br/>no instruction to grant. bonus_label is a description<br/>the publisher writes about itself."]
+    C["3. The joining bonus is the publisher's own<br/>/claim answers 'is this attributable?' — no amount,<br/>no instruction to grant. bonuses is a list the<br/>publisher writes about itself."]
 ```
 
 The e2e suite asserts this structurally: an acquisition scan redirect containing anything that

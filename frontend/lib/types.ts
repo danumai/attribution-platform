@@ -18,6 +18,20 @@ export interface AuthResult {
   api_key?: string | null;
 }
 
+/**
+ * One offer a publisher grants out of its own pocket. `type` is the publisher's own slug —
+ * `coins`, `subscription`, anything — because this platform never fulfils any of it; the
+ * publisher's app is what reads `type`/`value`/`unit` and grants.
+ */
+export interface Bonus {
+  type: string;
+  label: string;
+  value?: number;
+  unit?: string;
+  /** which claim it is granted on */
+  on: 'acquisition' | 'engagement' | 'both';
+}
+
 /** `/v1/orgs/me` — `earnings` is present only for a publisher. */
 export interface Me {
   id: string;
@@ -29,7 +43,7 @@ export interface Me {
   ios_app_id: string | null;
   /** where an engagement scan is sent so the OS can open the app if it is installed */
   deeplink_url: string | null;
-  bonus_label: string | null;
+  bonuses: Bonus[];
   suspended: boolean;
   approved?: boolean;
   /** publisher only: everything ever earned — the ledger balance for this org */
@@ -46,7 +60,7 @@ export interface Me {
 export interface PublisherOption {
   id: string;
   name: string;
-  bonus_label: string | null;
+  bonuses: Bonus[];
   ready: boolean;
 }
 

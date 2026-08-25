@@ -15,7 +15,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BASE_URL } from '../../config';
 import {
   validateAndroidPackage,
-  validateBonusLabel,
+  validateBonuses,
   validateIosAppId,
 } from '../../common/attribution';
 import { capped } from '../../common/paging';
@@ -171,7 +171,7 @@ export class AdminController {
       android_package?: string;
       ios_app_id?: string;
       deeplink_url?: string;
-      bonus_label?: string;
+      bonuses?: unknown;
       reason?: string;
     },
   ) {
@@ -180,7 +180,7 @@ export class AdminController {
       android_package: validateAndroidPackage(b.android_package),
       ios_app_id: validateIosAppId(b.ios_app_id),
       deeplink_url: validateDeeplinkUrl(b.deeplink_url),
-      bonus_label: validateBonusLabel(b.bonus_label),
+      bonuses: validateBonuses(b.bonuses),
     };
     if (b.suspended !== undefined && typeof b.suspended !== 'boolean')
       throw new BadRequestException('suspended must be a boolean');
@@ -211,7 +211,7 @@ export class AdminController {
         android_package: true,
         ios_app_id: true,
         deeplink_url: true,
-        bonus_label: true,
+        bonuses: true,
         suspended: true,
         approved: true,
       },

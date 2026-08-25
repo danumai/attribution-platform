@@ -20,7 +20,8 @@ import type { OrgType } from '../auth/tokens';
 interface KeyedOrg {
   id: string;
   name: string;
-  bonus_label: string | null;
+  /** raw JSONB — read through `bonusesFor`, which is what makes an odd row degrade to none */
+  bonuses: unknown;
 }
 
 export async function orgFromKey(auth: string, type: OrgType): Promise<KeyedOrg> {
@@ -35,7 +36,7 @@ export async function orgFromKey(auth: string, type: OrgType): Promise<KeyedOrg>
     // An API key never expires on its own, so `suspended` is the only thing that ends access:
     // it stops a publisher earning fees and a promoter minting codes, the moment it is set.
     where: { type, api_key_hash: hash, suspended: false },
-    select: { id: true, name: true, bonus_label: true },
+    select: { id: true, name: true, bonuses: true },
   });
   if (!org) throw new UnauthorizedException('invalid API key');
   return org;

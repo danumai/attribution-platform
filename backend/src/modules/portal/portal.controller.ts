@@ -15,7 +15,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ALLOW_SELF_FUNDING, BASE_URL, PLATFORM_FEE_BPS } from '../../config';
 import {
   validateAndroidPackage,
-  validateBonusLabel,
+  validateBonuses,
   validateIosAppId,
 } from '../../common/attribution';
 import { QrStyle, validateStyle } from '../../common/qr';
@@ -47,7 +47,7 @@ export class PortalController {
       select: {
         id: true,
         name: true,
-        bonus_label: true,
+        bonuses: true,
         landing_url: true,
         android_package: true,
         ios_app_id: true,
@@ -550,7 +550,7 @@ export class PortalController {
         android_package: true,
         ios_app_id: true,
         deeplink_url: true,
-        bonus_label: true,
+        bonuses: true,
         suspended: true,
         approved: true,
       },
@@ -571,7 +571,8 @@ export class PortalController {
 
   /**
    * Where scans go, and what the publisher says it gives new users. Absent = leave unchanged;
-   * an explicit `""` or `null` clears the field.
+   * an explicit `""` or `null` clears the field — and for `bonuses`, an explicit `[]`, since the
+   * list is replaced wholesale rather than merged.
    *
    * Publishers only: these are the five fields the scan redirect reads off the *publisher*
    * side of a partnership. A promoter setting them wrote columns that nothing ever reads.
@@ -586,7 +587,8 @@ export class PortalController {
       ios_app_id?: string;
       /** an https origin claimed as an Android App Link / iOS Universal Link */
       deeplink_url?: string;
-      bonus_label?: string;
+      /** the publisher's own offers, replaced wholesale — see `validateBonuses` */
+      bonuses?: unknown;
     },
   ) {
     if (s.type !== 'publisher') throw new ForbiddenException('publishers only');
@@ -595,7 +597,7 @@ export class PortalController {
       android_package: validateAndroidPackage(b.android_package),
       ios_app_id: validateIosAppId(b.ios_app_id),
       deeplink_url: validateDeeplinkUrl(b.deeplink_url),
-      bonus_label: validateBonusLabel(b.bonus_label),
+      bonuses: validateBonuses(b.bonuses),
     };
     // Filter on whether the key was *sent*, not on the validated value: every validator
     // returns null for a cleared field too, so filtering on the value made clearing impossible.
@@ -614,7 +616,7 @@ export class PortalController {
         android_package: true,
         ios_app_id: true,
         deeplink_url: true,
-        bonus_label: true,
+        bonuses: true,
       },
     });
     // After the write, like every other notification here: an entry for a change that was

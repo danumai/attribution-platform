@@ -170,13 +170,44 @@ export async function newCampaign(activePartnerships: Partnership[], act: Act) {
           { value: 'engagement', label: 'Repeat purchases — one payout per transaction code you issue' },
         ],
       },
+      {
+        name: 'budget',
+        label: 'Starting budget (coins)',
+        type: 'number',
+        required: true,
+        value: '0',
+        hint: 'A campaign with no budget refuses every scan — the scanner is told the offer is claimed. Fund it here or in Edit before printing.',
+      },
     ],
   });
   if (!v) return;
-  await act(
-    () => api('/v1/campaigns', { method: 'POST', body: JSON.stringify(v) }),
-    `Campaign "${v.name}" created.`,
-  );
+
+  const coins = Math.round(+v.budget);
+  if (!Number.isFinite(coins) || coins < 0) return toast.error('Budget must be a positive number of coins.');
+
+  await act(async () => {
+    const c = (await api('/v1/campaigns', {
+      method: 'POST',
+      body: JSON.stringify({ partnership_id: v.partnership_id, name: v.name, mode: v.mode }),
+    })) as { id: string };
+    if (!coins)
+      return toast.info(`Campaign "${v.name}" created — every scan is refused until you fund it.`);
+    // The campaign already exists by now, so a refused top-up must not read as "creation
+    // failed": deployments with self-funding off fund through checkout or an admin adjustment,
+    // and the promoter has to be told which of the two happened. Reported here rather than
+    // through `act`'s success line for the same reason — that line cannot know.
+    try {
+      await api(`/v1/campaigns/${c.id}/fund`, {
+        method: 'POST',
+        body: JSON.stringify({ coins, idempotency_key: `new:${c.id}` }),
+      });
+      toast.success(`Campaign "${v.name}" created and funded with ${num(coins)} coins.`);
+    } catch {
+      toast.error(
+        `"${v.name}" was created but could not be funded here — fund it through checkout, or ask an admin to adjust its budget. Scans are refused until it holds coins.`,
+      );
+    }
+  });
 }
 
 /**
