@@ -37,7 +37,7 @@ servers in one terminal (Ctrl-C stops everything).
 | `pnpm run dev` | Full stack: db + api + web |
 | `pnpm run db:migrate` | Create a migration after editing `backend/prisma/schema.prisma` |
 | `pnpm run db:studio` | Browse the database in Prisma Studio |
-| `pnpm run seed` | A month of demo data: tenants, partnerships, campaigns in both modes, scans, payouts — prints logins, keys and scan URLs |
+| `pnpm run seed` | Minimal demo data: two tenants, a partnership, one campaign per mode, scans, payouts — prints logins, keys and scan URLs |
 | `pnpm check` | Lint, typecheck and unit tests. No database, no running server — what to run before every push |
 | `pnpm test` | `pnpm check`'s tests plus the 167-assertion end-to-end suite: full loop, reward tiers, code bounds, security, fraud, ledger integrity, admin portal. **Needs `pnpm dev` already running** |
 | `pnpm run build` | Compile both workspaces for production |
@@ -49,7 +49,7 @@ servers in one terminal (Ctrl-C stops everything).
 Run `pnpm run seed`, then sign in as `promoter@demo.com` / `password123`.
 **[DEMO.md](DEMO.md)** is the full walkthrough and the test checklist; the short version:
 
-1. **Promoter view** — four campaigns with a month of history behind them. Open one for its
+1. **Promoter view** — two campaigns, one per mode. Open one for its
    scan analytics, then design its QR: colors, size, quiet zone, error correction, logo, and
    download print-ready SVG or PNG.
 2. **End user** — open the scan URL the seeder printed (`http://localhost:4000/r/{code}`) in a

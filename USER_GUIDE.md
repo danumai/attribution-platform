@@ -120,7 +120,7 @@ servers in one terminal. Ctrl-C stops everything.
 In a **second terminal**:
 
 ```bash
-pnpm seed                 # a month of demo data — prints logins, keys and scan URLs
+pnpm seed                 # minimal demo data — prints logins, keys and scan URLs
 ```
 
 **Keep the seeder's output on screen.** The QR codes it prints are new on every run.
@@ -144,8 +144,6 @@ pnpm seed                 # a month of demo data — prints logins, keys and sca
 | Promoter | `promoter@demo.com` | `password123` | Air Dhaka |
 | Publisher | `publisher@demo.com` | `password123` | DramaBox |
 | Super admin | `admin@qrreward.local` | `admin12345` | — |
-| Second promoter | `promoter2@demo.com` | `password123` | (for isolation tests) |
-| Second publisher | `publisher2@demo.com` | `password123` | (for isolation tests) |
 
 The publisher's API key is pinned in `.env` (`pk_devdev…`) so it survives a reset.
 The promoter's key is minted by the seeder and printed **once**.
@@ -155,7 +153,7 @@ The promoter's key is minted by the seeder and printed **once**.
 | Command | What it does |
 |---|---|
 | `pnpm dev` | Full stack: db + api + web |
-| `pnpm seed` | A month of demo data. Re-running adds a *second* set — reset first for a clean run |
+| `pnpm seed` | Minimal demo data: two tenants, one campaign per mode. Re-running adds a *second* set — reset first for a clean run |
 | `pnpm check` | Lint + typecheck + unit tests. No database needed. Run before every push |
 | `pnpm test` | `pnpm check` plus the full end-to-end suite (**needs `pnpm dev` already running**) |
 | `pnpm run db:reset` | Wipe the database volume and start clean |
@@ -1185,8 +1183,8 @@ Everything below is what to check **by hand**.
 | Same on a laptop | 302 to the publisher's landing page |
 | View source on the hand-off screen | One inline script under a nonce. No token, no code |
 | Open the **voided** code the seeder printed | `/campaign-ended?reason=voided` |
-| Scan a code on the **paused** campaign (Eid getaway) | `reason=paused` |
-| Scan a code on the **ended** campaign (Ramadan teaser) | `reason=ended` |
+| Pause the acquisition campaign, then scan one of its codes | `reason=paused` |
+| End it, then scan again | `reason=ended` |
 | Reload one scan URL 31 times in a minute | `reason=rate_limited` on the last few |
 | Suspend the partnership (as admin), then scan | `reason=partnership_inactive` |
 | Clear the publisher's three destination fields, then scan | `reason=no_destination` |
@@ -1251,7 +1249,7 @@ docker exec qrreward-db psql -U qrreward -tAc "select kind, match_method, count(
 
 | Do | Expect |
 |---|---|
-| Log in as `promoter2@demo.com` | Sees **none** of Air Dhaka's campaigns, scans or fees |
+| Sign up a second promoter at `/signup` and log in | Sees **none** of Air Dhaka's campaigns, scans or fees |
 | Call `/v1/issue` with the **publisher's** key | 401 |
 | Call `/v1/attribution/claim` with the **promoter's** key | 401 |
 | Rotate the publisher key, then reuse the old one | 401 immediately |
@@ -1467,7 +1465,6 @@ pulled-from-rotation outage.
 | Attribution rate is 0% on Android | The referrer is being assembled or read wrong. Log the raw Install Referrer string |
 | Everything answers 401 after a deploy | `JWT_SECRET` changed — every session token is now invalid |
 | A code scans but never pays | Check `mode`. An engagement code on an acquisition campaign pays a signup fee once, then nothing, silently |
-| Seeder says it could not backdate | Docker/psql unreachable. Data is fine; every row is just dated today |
 | Re-running `pnpm seed` | Adds a **second** set of campaigns. `pnpm db:reset` first |
 | Charts are one column | Backdating failed — see above |
 | Rate limits feel 2× too loose | More than one replica with no `REDIS_URL`. Counters are per-process |
@@ -2012,7 +2009,7 @@ rows straight to the frontend, so camelCasing in the schema would rename every J
 | `frontend/app/admin/` | Super admin console (11 tabs) |
 | `frontend/app/publisher-sim/` | Stand-in publisher app; `app/api/sim-signup` is its backend |
 | `e2e-test.sh` | 160+ assertions over real HTTP. The executable spec |
-| `seed.mjs` | Builds a month of demo data **through the real HTTP API** |
+| `seed.mjs` | Builds the minimal demo world **through the real HTTP API** |
 
 ## F12. Deliberate ceilings (known, bounded, upgradeable)
 
