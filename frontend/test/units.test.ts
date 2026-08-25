@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { ago, change, num, when } from '../lib/fmt';
 import { DEFAULT_STYLE, contrastProblem, samePlate } from '../lib/qr';
 import { ticks } from '../lib/chart';
+import { place } from '../lib/place';
 
 /* ---------------- ago ---------------- */
 
@@ -99,3 +100,29 @@ assert.equal(change([1, 2, 3], 2), null);
 assert.equal(change([0, 0, 4, 4], 2), null);
 
 console.log('frontend units ok');
+
+/* ---------------- place ---------------- */
+
+// Only the fields `place` reads; the rest of an AdminScan is irrelevant to where it came from.
+const scan = (x: Partial<Parameters<typeof place>[0]>) =>
+  place({ country: null, city: null, tz: null, language: null, ...x } as Parameters<typeof place>[0]);
+
+// The edge answer is the only exact one, and it wins over both handset signals.
+assert.deepEqual(scan({ country: 'DK', city: 'Copenhagen' }), {
+  label: 'Denmark',
+  exact: true,
+  title: 'Copenhagen · DK — resolved at the edge',
+});
+
+// The case this exists for: no CDN, so the row said "—" for a scan that plainly happened in
+// Denmark. The time zone answers it, and the `~` marks it as the inference it is.
+const byTz = scan({ tz: 'Europe/Copenhagen', language: 'en-us' });
+// ICU without the Locale Info API cannot answer this at all — then the locale is all we have.
+if (byTz?.label === '~Denmark') assert.equal(byTz.exact, false);
+else assert.equal(byTz?.label, '~United States');
+
+// Locale only when the time zone is missing, and it is the weaker of the two on purpose: a
+// Dane with an English phone is a scan from Denmark, not from the United States.
+assert.equal(scan({ language: 'da-dk' })?.label, '~Denmark');
+assert.equal(scan({ language: 'en' }), null, 'a language with no region names no place');
+assert.equal(scan({}), null);

@@ -397,7 +397,7 @@ export function Audience({
             rows={d.country ?? []}
             empty={
               geoOff
-                ? 'No CDN in front of this deployment, so no country was resolved.'
+                ? 'No CDN in front of this deployment, so no country was resolved. Individual rows in Scans still infer a region from the handset.'
                 : 'No scans in this window.'
             }
           />

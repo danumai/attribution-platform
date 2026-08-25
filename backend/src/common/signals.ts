@@ -38,20 +38,46 @@ const head = (req: Request, name: string): string => {
  * development and behind any proxy that does not add these, so every consumer treats it as
  * optional.
  *
+ * Off a CDN this stays NULL and the admin's scan rows fall back to inferring a region from the
+ * handset's time zone or locale — marked as inferred there, and deliberately never written
+ * here, since neither is evidence of where the phone actually stood.
+ *
  * ponytail: edge headers only. Add MaxMind GeoLite2 + a refresh job if geo is ever needed
  * off a CDN, or if city-level accuracy has to be guaranteed rather than best-effort.
  */
 function geo(req: Request): { country: string | null; city: string | null } {
+  // Netlify ships the whole answer as one base64 JSON header instead of a header per field.
+  let nf: { country?: { code?: string }; city?: string } = {};
+  const rawNf = head(req, 'x-nf-geo');
+  if (rawNf) {
+    try {
+      nf = JSON.parse(Buffer.from(rawNf, 'base64').toString('utf8'));
+    } catch {
+      /* not our shape — the other headers still get their turn */
+    }
+  }
+
   const raw = (
     head(req, 'cf-ipcountry') ||
     head(req, 'x-vercel-ip-country') ||
+    head(req, 'cloudfront-viewer-country') ||
+    head(req, 'fastly-client-country-code') ||
+    nf.country?.code ||
+    // Akamai packs its answer into one header: `georegion=...,country_code=DK,...`
+    /country_code=([A-Za-z]{2})/.exec(head(req, 'x-akamai-edgescape'))?.[1] ||
+    head(req, 'x-country-code') ||
     head(req, 'x-geo-country')
   ).toUpperCase();
   // CF sends XX for "could not resolve" and T1 for Tor exits — both are absence, not a place.
   const country = /^[A-Z]{2}$/.test(raw) && raw !== 'XX' && raw !== 'T1' ? raw : null;
 
   let city: string | null = null;
-  const rawCity = head(req, 'x-vercel-ip-city') || head(req, 'cf-ipcity');
+  const rawCity =
+    head(req, 'x-vercel-ip-city') ||
+    head(req, 'cf-ipcity') ||
+    head(req, 'cloudfront-viewer-city') ||
+    nf.city ||
+    '';
   if (rawCity) {
     try {
       // Vercel percent-encodes it, so "São Paulo" arrives as "S%C3%A3o%20Paulo".

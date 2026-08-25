@@ -16,6 +16,26 @@ assert.equal(scanSignals(req({ 'cf-ipcountry': 'T1' })).country, null);
 assert.equal(scanSignals(req({ 'cf-ipcountry': 'BANGLADESH' })).country, null);
 assert.equal(scanSignals(req({})).country, null, 'no CDN in front means no country, not a guess');
 
+// The other edges resolve it too, and each spells it differently — Netlify as one base64 blob,
+// Akamai as a packed string. A deployment that is not on Cloudflare still gets its geo.
+assert.equal(scanSignals(req({ 'cloudfront-viewer-country': 'DK' })).country, 'DK');
+assert.equal(scanSignals(req({ 'fastly-client-country-code': 'dk' })).country, 'DK');
+assert.deepEqual(
+  scanSignals(
+    req({
+      'x-nf-geo': Buffer.from(JSON.stringify({ country: { code: 'DK' }, city: 'Copenhagen' })).toString('base64'),
+    }),
+  ),
+  // deepEqual on the pair: the city rides in the same header and must survive the decode.
+  scanSignals(req({ 'cf-ipcountry': 'DK', 'cf-ipcity': 'Copenhagen' })),
+);
+assert.equal(
+  scanSignals(req({ 'x-akamai-edgescape': 'georegion=213,country_code=DK,region_code=84' })).country,
+  'DK',
+);
+// Garbage in that header is absence, not a crash — the request still has a scan to record.
+assert.equal(scanSignals(req({ 'x-nf-geo': 'not base64 json' })).country, null);
+
 assert.equal(scanSignals(req({ 'x-vercel-ip-city': 'S%C3%A3o%20Paulo' })).city, 'São Paulo');
 // A malformed escape must not throw away the whole scan record.
 assert.equal(scanSignals(req({ 'x-vercel-ip-city': 'Dhaka%' })).city, 'Dhaka%');

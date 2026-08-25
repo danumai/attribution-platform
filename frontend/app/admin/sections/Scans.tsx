@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { ago, num, when } from '@/lib/fmt';
 import { cx, muted } from '@/lib/tw';
 import { Table } from '../Table';
-import { country, device, handset } from '../cells';
+import { place } from '@/lib/place';
+import { device, handset } from '../cells';
 import type { SectionProps } from '../types';
 
 type Props = Pick<SectionProps, 'd' | 'loading'> & { campaignPicker: ReactNode };
@@ -28,18 +29,21 @@ export function Scans({ d, loading, campaignPicker }: Props) {
           { h: 'Campaign', get: (x) => x.campaign_name },
           { h: 'Publisher', get: (x) => x.publisher_name },
           { h: 'QR', sort: (x) => x.qr_code, get: (x) => <code>{x.qr_code}</code> },
+          // Edge geo when a CDN resolved it; otherwise the handset's own time zone or locale,
+          // shown muted with a leading `~` so an inference is never read as an address.
           {
             h: 'Where',
-            sort: (x) => x.country ?? '',
-            get: (x) =>
-              x.country ? (
-                <span title={x.city ?? undefined}>
-                  {country(x.country)}
+            sort: (x) => place(x)?.label ?? '',
+            get: (x) => {
+              const p = place(x);
+              if (!p) return <span className={muted} title="No CDN geo, and the handset reported no time zone or locale.">—</span>;
+              return (
+                <span className={cx(!p.exact && muted)} title={p.title}>
+                  {p.label}
                   {x.city ? <span className={cx(muted, 'ml-1.5')}>{x.city}</span> : null}
                 </span>
-              ) : (
-                '—'
-              ),
+              );
+            },
           },
           // device_type is stored from the scan itself; the UA fallback only covers rows
           // recorded before those columns existed.

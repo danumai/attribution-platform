@@ -41,20 +41,6 @@ export const handset = (x: AdminScan) => {
     : 'No hand-off screen — this scan went straight to its destination.';
 };
 
-/** `Intl` knows every country name already — a lookup table here would be dead weight. */
-const regionNames =
-  typeof Intl !== 'undefined' && 'DisplayNames' in Intl
-    ? new Intl.DisplayNames(['en'], { type: 'region' })
-    : null;
-
-export const country = (code: string) => {
-  try {
-    return regionNames?.of(code) ?? code;
-  } catch {
-    return code;
-  }
-};
-
 /**
  * What an audit row records, shared by the Audit log and its unread end in Notifications.
  *
