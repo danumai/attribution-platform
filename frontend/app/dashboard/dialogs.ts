@@ -28,7 +28,7 @@ export async function newPartnership(publishers: PublisherOption[], act: Act) {
         placeholder: 'Select a publisher…',
         options: publishers.map((p) => ({
           value: p.id,
-          label: `${p.name}${p.bonus_label ? ` — ${p.bonus_label}` : ''}${p.ready ? '' : ' (no app registered yet)'}`,
+          label: p.name,
         })),
       },
       { name: 'coin_rate', label: 'Coins granted per verified signup (full tier)', type: 'number', value: '50', required: true },
