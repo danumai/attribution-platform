@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -128,8 +129,17 @@ export class AdminController {
     // `_count`, since it spans two different foreign keys on the same table.
     const [coins, counts] = await Promise.all([
       balances(rows.filter((o) => o.type === 'publisher').map((o) => `publisher:${o.id}`)),
-      prisma.$queryRaw<{ org_id: string; n: number }[]>`
-        SELECT o.id AS org_id, count(c.id)::int AS n
+      prisma.$queryRaw<{ org_id: string; n: number; has_history: boolean }[]>`
+        SELECT o.id AS org_id, count(c.id)::int AS n,
+               -- Anything that makes the org undeletable, as one boolean. The ledger is checked
+               -- by account string, not a join: entries carry publisher:{id} rather than a
+               -- foreign key, which is exactly why they cannot be cleaned up after the fact.
+               (EXISTS (SELECT 1 FROM partnerships p2
+                         WHERE p2.promoter_org_id = o.id OR p2.publisher_org_id = o.id)
+             OR EXISTS (SELECT 1 FROM payments pay WHERE pay.org_id = o.id)
+             OR EXISTS (SELECT 1 FROM withdrawals w WHERE w.publisher_org_id = o.id)
+             OR EXISTS (SELECT 1 FROM ledger_entries le
+                         WHERE le.account = 'publisher:' || o.id)) AS has_history
         FROM orgs o
         LEFT JOIN partnerships p
           ON p.promoter_org_id = o.id OR p.publisher_org_id = o.id
@@ -137,10 +147,12 @@ export class AdminController {
         GROUP BY o.id`,
     ]);
     const campaigns = new Map(counts.map((c) => [c.org_id, c.n]));
+    const history = new Map(counts.map((c) => [c.org_id, c.has_history]));
     return rows.map(({ api_key_hash, ...o }) => ({
       ...o,
       has_api_key: api_key_hash !== null,
       campaigns: campaigns.get(o.id) ?? 0,
+      has_history: history.get(o.id) ?? false,
       coin_balance: o.type === 'publisher' ? (coins.get(`publisher:${o.id}`) ?? 0) : null,
     }));
   }
@@ -274,6 +286,57 @@ export class AdminController {
       campaigns_ended,
     });
     return { ...org, campaigns_ended, api_key_revoked: true };
+  }
+
+  /**
+   * The one deletion this system allows: an org that never traded.
+   *
+   * Everything else is `offboard`. The ledger is append-only by database trigger, and its rows
+   * carry the org id inside an opaque `account` string rather than a foreign key — so removing
+   * a tenant that ever earned or spent would leave balances pointing at nothing, with no way
+   * to ever clean them up. A signup typo has none of that, and leaving it suspended forever is
+   * just permanent clutter in a directory promoters have to read.
+   */
+  @Delete('orgs/:id')
+  async deleteOrg(@Session() s: SessionClaims, @Param('id') id: string) {
+    const org = await prisma.$transaction(async (tx) => {
+      const o = await tx.org.findUnique({
+        where: { id },
+        select: { id: true, name: true, type: true, email: true },
+      });
+      // Admins are excluded the same way every other org route excludes them, and a missing
+      // org is the same 404 — neither tells a caller which of the two it hit.
+      if (!o || o.type === 'admin') throw new NotFoundException('org not found');
+
+      // Counted inside the transaction: checking outside it would let a partnership created
+      // mid-request survive the delete and orphan itself against a tenant that no longer
+      // exists. The FKs are ON DELETE RESTRICT and would catch three of these four anyway —
+      // `ledger_entries` is the one with no foreign key at all, so it needs the guard.
+      const [partnerships, payments, withdrawals, ledger_entries] = await Promise.all([
+        tx.partnership.count({ where: { OR: [{ promoter_org_id: id }, { publisher_org_id: id }] } }),
+        tx.payment.count({ where: { org_id: id } }),
+        tx.withdrawal.count({ where: { publisher_org_id: id } }),
+        tx.ledgerEntry.count({ where: { account: `publisher:${id}` } }),
+      ]);
+      const held = Object.entries({ partnerships, payments, withdrawals, ledger_entries })
+        .filter(([, n]) => n > 0)
+        .map(([k, n]) => `${n} ${k.replace(/_/g, ' ')}`);
+      if (held.length)
+        throw new BadRequestException(
+          `${o.name} has trading history (${held.join(', ')}) and cannot be deleted — offboard it instead`,
+        );
+
+      await tx.org.delete({ where: { id } });
+      return o;
+    });
+    // After the transaction, like `offboard`: the audit row outlives the org it names, which
+    // is the point — `org:{id}` is a string, not a foreign key.
+    await audit(s.org_id, 'org.delete', `org:${id}`, {
+      name: org.name,
+      type: org.type,
+      email: org.email,
+    });
+    return { ...org, deleted: true };
   }
 
   @Get('partnerships')

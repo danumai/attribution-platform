@@ -145,11 +145,15 @@ export interface AdminOrg {
   email: string;
   landing_url: string | null;
   suspended: boolean;
+  /** the publisher-vetting gate: false hides the org from the directory and blocks new partnerships */
+  approved: boolean;
   created_at: string;
   has_api_key: boolean;
   campaigns: number;
   /** null for a promoter — only publishers earn a balance */
   coin_balance: number | null;
+  /** any partnership, payment, withdrawal or ledger entry — true means delete is refused */
+  has_history: boolean;
 }
 
 /** Every field is a count, so the whole thing is numeric bar the two derived flags. */

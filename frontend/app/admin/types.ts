@@ -75,6 +75,7 @@ export interface SectionProps {
   busy: boolean;
   patch: (path: string, body: unknown, ok?: string) => void;
   post: (path: string, body: unknown, ok?: string) => void;
+  del: (path: string, ok?: string) => void;
   go: (tab: Tab) => void;
   filterScans: (campaignId: string) => void;
   filterLedger: (account: string) => void;

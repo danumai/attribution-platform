@@ -6,9 +6,9 @@ import { Actions, Table } from '../Table';
 import { pill, rowControls } from '../cells';
 import type { SectionProps } from '../types';
 
-type Props = Pick<SectionProps, 'd' | 'loading' | 'busy' | 'patch' | 'post'>;
+type Props = Pick<SectionProps, 'd' | 'loading' | 'busy' | 'patch' | 'post' | 'del'>;
 
-export function Organizations({ d, loading, busy, patch, post }: Props) {
+export function Organizations({ d, loading, busy, patch, post, del }: Props) {
   const { item } = rowControls(busy);
 
   return (
@@ -40,11 +40,18 @@ export function Organizations({ d, loading, busy, patch, post }: Props) {
         { h: 'Campaigns', num: true, get: (x) => x.campaigns },
         { h: 'Coins', num: true, get: (x) => x.coin_balance ?? '—' },
         { h: 'Joined', get: (x) => when(x.created_at), sort: (x) => x.created_at },
-        { h: 'Status', get: (x) => pill(x.suspended ? 'suspended' : 'active'), sort: (x) => x.suspended },
+        {
+          h: 'Status',
+          get: (x) => pill(x.suspended ? 'suspended' : !x.approved ? 'pending' : 'active'),
+          sort: (x) => x.suspended,
+        },
         {
           h: '',
           get: (x) => (
             <Actions>
+              {x.type === 'publisher' &&
+                !x.approved &&
+                item('Approve', () => patch(`/v1/admin/orgs/${x.id}`, { approved: true }, 'Approved'))}
               {item(x.suspended ? 'Reinstate' : 'Suspend', () =>
                 patch(
                   `/v1/admin/orgs/${x.id}`,
@@ -99,6 +106,24 @@ export function Organizations({ d, loading, busy, patch, post }: Props) {
                 },
                 true,
               )}
+              {/* Only for an org that never traded — a signup typo, a duplicate. Anything with
+                  a partnership, payment, withdrawal or ledger entry is offboard-only, because
+                  the ledger keeps its rows forever and they would point at nothing. The server
+                  re-checks inside a transaction; this only decides whether to offer it. */}
+              {!x.has_history &&
+                item(
+                  'Delete org',
+                  async () => {
+                    const go = await confirmDialog({
+                      title: `Delete ${x.name}?`,
+                      body: `${x.email} has no partnerships, payments or ledger history, so it can be removed outright. This cannot be undone.`,
+                      confirmText: 'Delete permanently',
+                      danger: true,
+                    });
+                    if (go) del(`/v1/admin/orgs/${x.id}`, 'Org deleted');
+                  },
+                  true,
+                )}
             </Actions>
           ),
         },

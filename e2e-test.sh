@@ -524,6 +524,22 @@ A -XPATCH $API/v1/admin/orgs/$PUB_ID -H 'Content-Type: application/json' -d '{"s
 BACK=$(curl -s -o /dev/null -w '%{http_code}' $API/v1/campaigns -H "Authorization: Bearer $PUB_TOKEN")
 [ "$BACK" = "200" ] && pass "reinstating the org restores access" || fail "reinstate: $BACK"
 
+# Deleting an org is allowed only where it destroys nothing: the ledger is append-only, and its
+# rows name the org in a plain `account` string with no foreign key, so a traded tenant can
+# never be cleaned up afterwards. The publisher above has earned fees by now.
+DELBUSY=$(curl -s -o /dev/null -w '%{http_code}' -XDELETE $API/v1/admin/orgs/$PUB_ID -H "Authorization: Bearer $ADM_TOKEN")
+[ "$DELBUSY" = "400" ] && pass "deleting a traded org is refused (400)" || fail "traded org deletable: $DELBUSY"
+STILL=$(A "$API/v1/admin/orgs?q=pub$S@t.com" | j '[0].email')
+[ "$STILL" = "pub$S@t.com" ] && pass "the refused org is still there" || fail "refused delete removed it anyway: $STILL"
+
+# A signup typo, on the other hand, has nothing to preserve.
+FRESH_ID=$(curl -s -XPOST $API/v1/auth/signup -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Typo $S\",\"email\":\"typo$S@t.com\",\"password\":\"password123\",\"type\":\"promoter\"}" | j .org.id)
+DELOK=$(curl -s -o /dev/null -w '%{http_code}' -XDELETE $API/v1/admin/orgs/$FRESH_ID -H "Authorization: Bearer $ADM_TOKEN")
+GONE=$(A "$API/v1/admin/orgs?q=typo$S@t.com" | j .length)
+[ "$DELOK" = "200" ] && [ "$GONE" = "0" ] && pass "an org with no history deletes cleanly" || fail "delete: $DELOK, remaining=$GONE"
+A "$API/v1/admin/audit-log?limit=500" | grep -q 'org.delete' && pass "the deletion is in the audit log" || fail "org.delete not audited"
+
 # Relative to whatever is left, not an absolute: this asserted `75` on the assumption that
 # section 9 had drained the campaign to exactly zero, which coupled it to every earlier
 # section's arithmetic and broke the moment one of them spent differently.

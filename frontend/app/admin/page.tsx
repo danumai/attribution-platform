@@ -128,6 +128,7 @@ export default function Admin() {
     void act(() => api(path, { method: 'PATCH', body: JSON.stringify(body) }), ok);
   const post = (path: string, body: unknown, ok?: string) =>
     void act(() => api(path, { method: 'POST', body: JSON.stringify(body) }), ok);
+  const del = (path: string, ok?: string) => void act(() => api(path, { method: 'DELETE' }), ok);
 
   const filterScans = (campaignId: string) => {
     setCampaignFilter(campaignId);
@@ -144,7 +145,7 @@ export default function Admin() {
   const failed = !d.overview && Boolean(loadErr);
   const loading = !d.overview && !failed;
   const o = d.overview;
-  const shared = { d, loading, busy, patch, post, go: setTab, filterScans, filterLedger };
+  const shared = { d, loading, busy, patch, post, del, go: setTab, filterScans, filterLedger };
 
   // One control, two tabs — Audience and Scans are the same rows counted two ways, so a
   // campaign chosen on one must still be chosen on the other.
