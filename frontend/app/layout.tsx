@@ -8,9 +8,8 @@ const sans = Schibsted_Grotesk({
   variable: '--font-schibsted',
 });
 
-/* Figures are mono everywhere in this theme, so the stack has to resolve to the same
-   face on every OS — the system stack renders as SF Mono / Consolas / DejaVu and a
-   strip of numbers stops looking designed. Two weights, latin only. */
+// Figures are mono everywhere in this theme, so the stack has to resolve to the same face on every
+// OS — the system stack renders as SF Mono / Consolas / DejaVu.
 const mono = JetBrains_Mono({
   subsets: ['latin'],
   weight: ['400', '500'],

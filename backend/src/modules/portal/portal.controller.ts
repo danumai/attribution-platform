@@ -41,13 +41,9 @@ import { SessionClaims, newApiKey, newShortCode } from '../auth/tokens';
 @Controller('v1')
 @UseGuards(AuthGuard)
 export class PortalController {
-  // ---------- directory & partnerships ----------
 
-  // `ready` is what a promoter actually needs before committing a print run: a publisher with
-  // no destination registered redirects nobody, so every scan of that campaign dies at
-  // `no_destination`. Suspended publishers are hidden — partnering with one can never pay out.
-  // Unapproved ones too: an account nobody has vetted must not be one partnership away from
-  // receiving money.
+  // `ready` is what a promoter needs before committing a print run. Suspended and unapproved
+  // publishers are hidden: neither can ever pay out.
   @Get('publishers')
   async publishers() {
     const rows = await prisma.org.findMany({
@@ -82,17 +78,15 @@ export class PortalController {
     },
   ) {
     if (s.type !== 'promoter') throw new ForbiddenException('promoters only');
-    // The foreign key only proves the id names *an org*. Without this, a promoter could open a
-    // partnership against another promoter, an admin, or a publisher the directory deliberately
-    // hides — none of which can ever pay out, so every campaign built on it dies at the
-    // redirect with `no_destination` and the promoter has already printed the codes.
+    // The foreign key only proves the id names *an org*. Without this a promoter could partner
+    // with one that can never pay out, and every campaign on it dies at the redirect.
     const publisher = await prisma.org.findFirst({
       where: { id: b.publisher_org_id, type: 'publisher', suspended: false, approved: true },
       select: { id: true },
     });
     if (!publisher) throw new BadRequestException('no such publisher');
-    // No `current` row to resolve against — a new partnership takes the platform defaults for
-    // anything the promoter left out. Same rules the admin patch runs, from one definition.
+    // No `current` row to resolve against: a new partnership takes the platform defaults for
+    // anything left out, by the same rules the admin patch runs.
     const rates = validateRates(b);
     try {
       const created = await prisma.partnership.create({
@@ -100,8 +94,8 @@ export class PortalController {
           promoter_org_id: s.org_id,
           publisher_org_id: b.publisher_org_id,
           ...rates,
-          // Snapshotted, not read live at payout time: changing the platform default must
-          // never silently reprice a deal both parties already agreed to.
+          // Snapshotted, not read live at payout: changing the platform default must never
+          // silently reprice a deal both parties already agreed to.
           platform_fee_bps: PLATFORM_FEE_BPS,
         },
       });
@@ -132,21 +126,16 @@ export class PortalController {
       ...p,
       promoter_name: promoter.name,
       publisher_name: publisher.name,
-      // Read live off the publisher rather than snapshotted at agreement: the offer is the
-      // publisher's own and it may change it any day, and what the promoter needs to see is
-      // what a scanner gets *today* — the rates above are the only agreed numbers here.
+      // Read live off the publisher rather than snapshotted at agreement — the offer is the
+      // publisher's own to change, and the promoter needs to see what a scanner gets today.
       publisher_bonuses: allBonuses(publisher.bonuses),
     }));
   }
 
   @Post('partnerships/:id/accept')
   async accept(@Session() s: SessionClaims, @Param('id') id: string) {
-    // updateMany so the publisher-ownership check is part of the WHERE, not a second query.
-    //
-    // `status: 'pending'` is part of that WHERE for the same reason: an admin suspending a
-    // partnership is a control the publisher must not be able to undo, and with only two
-    // states this endpoint *was* the undo — one call put a suspended relationship straight
-    // back to `active`, and scans and payouts resumed against it.
+    // updateMany so the ownership check is in the WHERE, and `status: 'pending'` with it: with
+    // only two states this endpoint *was* the undo for an admin suspension.
     const updated = await prisma.partnership.updateMany({
       where: { id, publisher_org_id: s.org_id, status: 'pending' },
       data: { status: 'active' },
@@ -157,16 +146,9 @@ export class PortalController {
   }
 
   /**
-   * Ask to reprice a live partnership. Promoter side, and a request rather than a change.
-   *
-   * The coin rate is what the *publisher* is paid, so the promoter cannot simply set it — and
-   * the money must not stop while the two sides talk. The proposal lands in its own columns
-   * while payouts keep reading the agreed rates; `rates/accept` is the only thing that promotes
-   * it.
-   *
-   * `active` only: a pending partnership has no agreed price to renegotiate (the publisher has
-   * not accepted the first one), and a suspended one is an admin hold that new terms must not
-   * quietly work around.
+   * Ask to reprice a live partnership. A request, not a change: the coin rate is what the
+   * *publisher* is paid, and the money must not stop while the two sides talk, so the proposal
+   * lands in its own columns. `active` only — a suspended partnership is an admin hold.
    */
   @Patch('partnerships/:id/rates')
   async proposeRates(
@@ -179,7 +161,7 @@ export class PortalController {
     });
     if (!current) throw new NotFoundException('no active partnership with that id');
     // Resolved against the row, so the pair rule is judged on the post-accept numbers: moving
-    // only the coin rate has to clear the guest rate already in force.
+    // only the coin rate still has to clear the guest rate already in force.
     const { coin_rate, guest_rate, engagement_rate } = validateRates(b, current);
     if (
       coin_rate === current.coin_rate &&
@@ -187,9 +169,8 @@ export class PortalController {
       engagement_rate === current.engagement_rate
     )
       throw new BadRequestException('those are the rates already in force');
-    // Written as a set even when only one moved: the proposal columns are all-or-nothing in the
-    // database, and a publisher accepting must see every number it is agreeing to, not a delta
-    // it has to resolve against whatever the live rates happened to be when it clicked.
+    // Written as a set even when only one moved: the proposal columns are all-or-nothing, and a
+    // publisher accepting must see every number it is agreeing to, not a delta.
     const updated = await prisma.partnership.update({
       where: { id },
       data: {
@@ -230,10 +211,8 @@ export class PortalController {
       proposed_guest_rate: null,
       proposed_engagement_rate: null,
     };
-    // Compare-and-set on the proposal itself: if the promoter revised it between this
-    // publisher's read and its click, the click applied a price nobody is looking at. All three
-    // are in the WHERE for that reason — a revision that moved only the engagement rate is
-    // still a different proposal from the one on screen.
+    // Compare-and-set on the proposal itself: a revision between this publisher's read and its
+    // click would otherwise apply a price nobody is looking at.
     const updated = await prisma.partnership.updateMany({
       where: {
         id,
@@ -259,14 +238,11 @@ export class PortalController {
     return prisma.partnership.findUnique({ where: { id } });
   }
 
-  // ---------- campaigns ----------
 
   /**
-   * `mode` is fixed at creation and there is no endpoint to change it, deliberately. It selects
-   * which payout guarantee the campaign's redemptions live under, and those are partial unique
-   * indexes over rows that already exist — flipping a campaign to `engagement` after it has
-   * paid acquisitions would leave a run of rows sitting under a rule they were never checked
-   * against. Two campaigns is the honest way to run both, and they can share a partnership.
+   * `mode` is fixed at creation: it selects which payout guarantee the redemptions live under, and
+   * those are partial unique indexes over rows that already exist. Two campaigns is the honest way
+   * to run both, and they can share a partnership.
    */
   @Post('campaigns')
   async createCampaign(
@@ -282,9 +258,8 @@ export class PortalController {
       select: { id: true, publisher: { select: { bonuses: true } } },
     });
     if (!partnership) throw new BadRequestException('no active partnership with that id');
-    // Which of the publisher's own offers this campaign advertises. Checked against what that
-    // publisher grants for this mode, so a campaign cannot be created promising something
-    // nobody fulfils — the artwork is printed off this.
+    // Which of the publisher's own offers this campaign advertises, checked against what that
+    // publisher grants for this mode — the artwork is printed off this.
     const bonus_types = validateBonusTypes(
       b.bonus_types,
       campaignBonuses(partnership.publisher.bonuses, mode),
@@ -329,9 +304,8 @@ export class PortalController {
       engagement_rate: partnership.engagement_rate,
       promoter_name: partnership.promoter.name,
       publisher_name: partnership.publisher.name,
-      // What this campaign promises: the offers it picked, resolved against the publisher's
-      // list as it stands today. Both sides read the same line — the promoter to know what the
-      // artwork may say, the publisher to see what its own campaigns are advertising.
+      // What this campaign promises, resolved against the publisher's list as it stands today.
+      // Both sides read the same line.
       publisher_bonuses: campaignBonuses(partnership.publisher.bonuses, c.mode, c.bonus_types),
       budget: budgets.get(`campaign:${c.id}`) ?? 0,
     }));
@@ -365,9 +339,8 @@ export class PortalController {
     return c;
   }
 
-  // Demo funding: credits the campaign budget directly, with no payment behind it. Off in
-  // production (see ALLOW_SELF_FUNDING) — left on, any promoter mints the budget that pays
-  // publishers. Replace with a PSP checkout webhook that credits on `payment_intent.succeeded`.
+    // Demo funding: credits the budget with no payment behind it, so it is off in production —
+    // left on, any promoter mints the budget that pays publishers.
   @Post('campaigns/:id/fund')
   async fund(
     @Session() s: SessionClaims,
@@ -379,11 +352,8 @@ export class PortalController {
     await this.promoterCampaign(s.org_id, id);
     if (!Number.isInteger(b.coins) || b.coins < 1 || b.coins > 10_000_000)
       throw new BadRequestException('coins must be 1–10000000');
-    // Keyed on the caller's own key when it sends one, so a retried request — a double-clicked
-    // button, a proxy retry, an at-least-once job — collides on `UNIQUE (account, ref)` and
-    // credits nothing twice. Without a key the ref is still per-request, which is the old
-    // behaviour: a retry funds again. The PSP checkout that replaces this endpoint keys on the
-    // payment intent id, which is exactly the same shape.
+    // Keyed on the caller's own key when it sends one, so a retry collides on `UNIQUE (account,
+    // ref)`. The PSP checkout that replaces this keys on the payment intent, the same shape.
     const key = str(b.idempotency_key, 'idempotency_key', 64, false);
     await prisma
       .$transaction(async (tx) => {
@@ -392,15 +362,13 @@ export class PortalController {
         await ledger(tx, `campaign:${id}`, b.coins, ref);
       })
       .catch((e: any) => {
-        // Same key, same campaign: the first call already landed. Answering with the current
-        // budget is the honest reply — the caller asked for this credit and it is there.
+        // Same key, same campaign: the first call already landed, and the current budget is
+        // the honest reply.
         if (e.code === 'P2002' && key) return;
         throw e;
       });
-    // Money entered the system without a payment record; the ledger alone does not say who
-    // asked for it. This is also the admin's notification that it happened (see
-    // `GET /v1/admin/notifications`), so it carries the budget it landed on and not just the
-    // delta — "+5000" is a number an operator then has to go and look up.
+    // Money entered without a payment record, so the ledger alone does not say who asked for it.
+    // Also the admin's notification, which is why it carries the resulting budget.
     const budget = await balance(`campaign:${id}`);
     await audit(s.org_id, 'campaign.fund', `campaign:${id}`, { coins: b.coins, budget });
     return { budget };
@@ -413,13 +381,12 @@ export class PortalController {
     @Body() b: { name?: string; status?: string; bonus_types?: unknown },
   ) {
     const c = await this.promoterCampaign(s.org_id, id);
-    // Absent = leave unchanged, same shape as `PATCH orgs/me`, so a rename does not have to
-    // restate the status (and quietly reactivate an ended campaign) to change the name.
+    // Absent = leave unchanged, as in `PATCH orgs/me`, so a rename need not restate the status
+    // and quietly reactivate an ended campaign.
     const data: { name?: string; status?: string; bonus_types?: string[] } = {};
     if ('name' in b) data.name = str(b.name, 'name', 120)!;
-    // The reward is repickable, unlike `mode`: nothing was paid at these slugs and the
-    // publisher may add or withdraw an offer any day. What it cannot do is reprint a poster,
-    // so it is a deliberate change here rather than something that drifts on its own.
+    // The reward is repickable, unlike `mode`: nothing was paid at these slugs. What cannot be
+    // redone is the poster, so this is deliberate rather than something that drifts.
     if ('bonus_types' in b)
       data.bonus_types = validateBonusTypes(
         b.bonus_types,
@@ -432,8 +399,8 @@ export class PortalController {
     }
     if (!Object.keys(data).length) throw new BadRequestException('nothing to update');
     const updated = await prisma.campaign.update({ where: { id }, data });
-    // Audited for the same reason funding is: it is a tenant changing something the platform is
-    // answerable for, and the admin's inbox is built out of exactly those entries.
+    // Audited because it is a tenant changing something the platform is answerable for, and the
+    // admin's inbox is built out of exactly those entries.
     await audit(s.org_id, 'campaign.patch', `campaign:${id}`, data);
     return updated;
   }
@@ -457,20 +424,14 @@ export class PortalController {
       redemptions: reds._count,
       coins_granted: reds._sum.coins ?? 0,
       budget_remaining,
-      // What this campaign advertises: the offers the promoter picked out of what the
-      // publisher grants for this mode. A poster on an engagement campaign cannot promise the
-      // signup offer, and one selling coins does not also promise the free month.
+      // A poster on an engagement campaign cannot promise the signup offer, and one selling
+      // coins does not also promise the free month.
       publisher_bonuses: campaignBonuses(c.partnership.publisher.bonuses, c.mode, c.bonus_types),
     };
   }
 
-  /**
-   * Where this campaign's scans came from — the reason a promoter funds a second print run.
-   *
-   * Read-only for both sides, like `stats`. `ownedCampaign` is the whole authorisation story:
-   * it throws unless the session is one of the two orgs on the partnership, so the id can never
-   * read a stranger's traffic.
-   */
+  /** Where this campaign's scans came from. Read-only for both sides; `ownedCampaign` throws
+   *  unless the session is one of the two orgs on the partnership. */
   @Get('campaigns/:id/analytics')
   async analytics(
     @Session() s: SessionClaims,
@@ -481,7 +442,6 @@ export class PortalController {
     return scanAnalytics(id, +(days ?? 30));
   }
 
-  // ---------- QR codes ----------
 
   @Post('campaigns/:id/qr-codes')
   async createQr(
@@ -513,14 +473,13 @@ export class PortalController {
     return { ...qr, scan_url: scanUrl(BASE_URL, qr.code, await this.publisherSlug(id)) };
   }
 
-  // Promoters can kill their own code (lost/stolen print run) but cannot extend its life —
+  // Promoters can kill their own code (lost or stolen print run) but cannot extend its life —
   // loosening a limit is an admin override so it lands in the audit log.
   @Post('qr-codes/:id/void')
   async voidQr(@Session() s: SessionClaims, @Param('id') id: string) {
     const qr = await this.updateOwnQr(s.org_id, id, { voided: true });
-    // Killing a code is the one QR action worth an admin's attention — a print run just stopped
-    // working, and the support call about it arrives before anyone thinks to check a log.
-    // Issuing and restyling codes are routine and stay out of the inbox on purpose.
+    // Killing a code is the one QR action worth an admin's attention: a print run just stopped
+    // working, and the support call arrives before anyone checks a log.
     await audit(s.org_id, 'qr_code.void', `qr_code:${id}`, { code: qr?.code });
     return qr;
   }
@@ -555,18 +514,14 @@ export class PortalController {
       orderBy: { created_at: 'desc' },
       take: capped(limit),
     });
-    // One lookup for the whole page rather than one per code: every QR on a campaign points at
-    // the same publisher, so the slug is a property of the campaign as far as this list cares.
+    // One lookup for the page rather than one per code: every QR on a campaign points at the
+    // same publisher.
     const slug = await this.publisherSlug(id);
     return rows.map((q) => ({ ...q, scan_url: scanUrl(BASE_URL, q.code, slug) }));
   }
 
-  /**
-   * The publisher's App Clip slug for a campaign, or NULL when it has not registered one.
-   *
-   * Its own query because the QR code row knows nothing about the publisher — the join is
-   * campaign → partnership → publisher, three tables away from the thing being listed.
-   */
+  /** The publisher's App Clip slug for a campaign, or NULL. Its own query because the join is
+   *  campaign → partnership → publisher, three tables from the thing being listed. */
   private async publisherSlug(campaignId: string): Promise<string | null> {
     const c = await prisma.campaign.findUnique({
       where: { id: campaignId },
@@ -575,13 +530,9 @@ export class PortalController {
     return c?.partnership.publisher.slug ?? null;
   }
 
-  // ---------- publisher settings ----------
 
-  /**
-   * Both machine callers rotate their key here. A publisher's key earns fees on
-   * `/v1/attribution/*`; a promoter's mints transaction codes on `/v1/issue` — opposite ends
-   * of the same relationship, same credential, same one-call revocation.
-   */
+  /** Both machine callers rotate their key here: a publisher's earns fees on `/v1/attribution/*`,
+   *  a promoter's mints codes on `/v1/issue`. Same credential, same one-call revocation. */
   @Post('api-keys/rotate')
   async rotateKey(@Session() s: SessionClaims) {
     if (s.type === 'admin') throw new ForbiddenException('tenants only');
@@ -617,8 +568,7 @@ export class PortalController {
         approved: true,
       },
     });
-    // Every fee a publisher has earned lands in `publisher:{org_id}`; the admin portal could
-    // read it and the publisher could not. Same number, own tenant. `withdrawable` is the
+    // Every fee a publisher has earned lands in `publisher:{org_id}`. `withdrawable` is the
     // slice of it that has cleared the settlement window and is not already queued.
     return org.type === 'publisher'
       ? {
@@ -632,18 +582,12 @@ export class PortalController {
   }
 
   /**
-   * Where scans go, and what the publisher says it gives new users. Absent = leave unchanged;
-   * an explicit `""` or `null` clears the field — and for `bonuses`, an explicit `[]`, since the
-   * list is replaced wholesale rather than merged.
+   * Where scans go, and what the publisher says it gives new users. Absent = leave unchanged; an
+   * explicit `""`, `null` or `[]` clears the field. Publishers only — these are the fields the
+   * scan redirect reads off the *publisher* side of a partnership.
    *
-   * Publishers only: these are the fields the scan redirect reads off the *publisher* side of
-   * a partnership. A promoter setting them wrote columns that nothing ever reads.
-   *
-   * The three iOS fields are what turns on the App Clip carrier. `slug` and `ios_appclip_id`
-   * go together — a slug with no clip id registers a URL prefix nothing answers to, and a clip
-   * id with no slug has no prefix to be invoked at — so they are checked as a pair rather than
-   * left to fail silently at scan time, where the symptom is an attribution rate of zero and
-   * no error anywhere.
+   * `slug` and `ios_appclip_id` are checked as a pair: one without the other registers a prefix
+   * nothing answers to, and the symptom at scan time is zero attribution with no error anywhere.
    */
   @Patch('orgs/me')
   async patchOrg(
@@ -677,9 +621,8 @@ export class PortalController {
       bonuses: validateBonuses(b.bonuses),
     };
 
-    // The pair check. Read against what the org will hold *after* this patch, not against the
-    // body alone, so setting one field today and the other tomorrow works — and so clearing
-    // one of them is refused for the same reason setting one alone is.
+    // Checked against what the org will hold *after* this patch, not the body alone, so setting
+    // one field today and the other tomorrow works — and clearing one alone is refused too.
     const current = await prisma.org.findUniqueOrThrow({
       where: { id: s.org_id },
       select: { slug: true, ios_appclip_id: true },
@@ -692,13 +635,11 @@ export class PortalController {
       throw new BadRequestException(
         'slug and ios_appclip_id must be set together — one without the other registers an App Clip URL that nothing answers to',
       );
-    // Filter on whether the key was *sent*, not on the validated value: every validator
-    // returns null for a cleared field too, so filtering on the value made clearing impossible.
+    // Filter on whether the key was *sent*, not on the validated value: every validator returns
+    // null for a cleared field too, so filtering on the value made clearing impossible.
     const data = Object.fromEntries(Object.entries(fields).filter(([k]) => k in b));
-    // Where every scan on this publisher's codes lands. A promoter's whole print run follows
-    // these fields, so the platform is answerable for a change to them even though they are the
-    // publisher's own to make — and `slug` in particular is baked into printed QR codes, so
-    // changing it after a run is printed silently orphans every code already in the world.
+    // A promoter's whole print run follows these fields, and `slug` is baked into printed QR
+    // codes — changing it orphans every code already in the world.
     const updated = await prisma.org
       .update({
         where: { id: s.org_id },
@@ -718,32 +659,28 @@ export class PortalController {
         },
       })
       .catch((e: { code?: string }) => {
-        // UNIQUE on `slug`. A 409 rather than a 500: it is a name someone else took, which is
-        // the publisher's to resolve by picking another.
+        // UNIQUE on `slug`. A 409 rather than a 500: a name someone else took is the
+        // publisher's to resolve by picking another.
         if (e.code === 'P2002') throw new ConflictException('that slug is already taken');
         throw e;
       });
-    // After the write, like every other notification here: an entry for a change that was
-    // rejected is an inbox item about something that never happened.
+    // After the write: an entry for a change that was rejected is an inbox item about something
+    // that never happened.
     await audit(s.org_id, 'org.patch', `org:${s.org_id}`, data);
     return updated;
   }
 
-  // ---------- withdrawals (publisher money-out) ----------
 
-  /**
-   * Ask for earned fees to be paid out. A request, not a transfer: the ledger only moves when
-   * an admin pays it, and the amount is capped at what has cleared the settlement window —
-   * which is the platform's fraud-review clawback period, not a cashflow convenience.
-   */
+  /** Ask for earned fees to be paid out. A request, not a transfer: the ledger only moves when an
+   *  admin pays it, capped at what has cleared the clawback window. */
   @Post('withdrawals')
   async requestWithdrawal(@Session() s: SessionClaims, @Body() b: { coins: number }) {
     if (s.type !== 'publisher') throw new ForbiddenException('publishers only');
     if (!Number.isInteger(b.coins) || b.coins < 1 || b.coins > 10_000_000)
       throw new BadRequestException('coins must be 1–10000000');
     const created = await prisma.$transaction(async (tx) => {
-      // `withdrawable` locks the balance row, so two concurrent requests serialise here and
-      // the second is judged against a pool the first has already claimed from.
+      // `withdrawable` locks the balance row, so two concurrent requests serialise here and the
+      // second is judged against a pool the first has already claimed from.
       const available = await withdrawable(tx, s.org_id);
       if (b.coins > available)
         throw new BadRequestException(
@@ -751,8 +688,8 @@ export class PortalController {
         );
       return tx.withdrawal.create({ data: { publisher_org_id: s.org_id, coins: b.coins } });
     });
-    // Tenant actor, so it lands in the admin inbox — a payout request is exactly the kind of
-    // thing an operator must see before it goes stale.
+    // Tenant actor, so it lands in the admin inbox — a payout request must be seen before it
+    // goes stale.
     await audit(s.org_id, 'withdrawal.request', `withdrawal:${created.id}`, { coins: b.coins });
     return created;
   }
@@ -785,11 +722,9 @@ export class PortalController {
       orderBy: { created_at: 'desc' },
       take: capped(limit ?? '100'),
     });
-    // This is the endpoint the integration guide tells publishers to reconcile against, and it
-    // tells them to book revenue on `publisher_net` — which was only ever on the claim
-    // response. `coins` is the gross the promoter's budget was charged; a publisher summing it
-    // over-reports its own revenue by the platform's cut on every row. Recomputed from the
-    // snapshotted bps through the same `splitFee` the payout used, so the two cannot drift.
+    // The integration guide tells publishers to book revenue on `publisher_net`, and `coins` is the
+    // gross, so a publisher summing it over-reports by the platform's cut on every row. Recomputed
+    // through the same `splitFee` the payout used, so the two cannot drift.
     return rows.map(({ campaign, ...r }) => {
       const { net, cut } = splitFee(r.coins, campaign.partnership.platform_fee_bps);
       return {

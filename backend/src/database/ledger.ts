@@ -6,11 +6,10 @@ import { Tx, prisma } from './prisma';
 /**
  * Credit/debit an account inside an open transaction, keeping the balance in sync.
  *
- * Seed-then-update rather than `upsert`, and the reason is subtle: Postgres checks CHECK
- * constraints against the tuple an `INSERT ... ON CONFLICT DO UPDATE` *proposes*, before it
- * detects the conflict. So `create: { balance: -10 }` is tested as a standalone `-10` row and
- * rejected by `account_balances_non_negative_check` even when the account holds 100. Seeding
- * at 0 first means the floor is only ever checked against the value that actually lands.
+ * Seed-then-update rather than `upsert`: Postgres checks CHECK constraints against the tuple an
+ * `INSERT ... ON CONFLICT DO UPDATE` *proposes*, before it detects the conflict, so
+ * `create: { balance: -10 }` is rejected by the non-negative check even when the account holds
+ * 100. Seeding at 0 first means the floor is only checked against the value that lands.
  */
 export async function ledger(tx: Tx, account: string, amount: number, ref: string) {
   await tx.ledgerEntry.create({ data: { account, amount, ref } });
@@ -56,8 +55,8 @@ export async function payout(
   await ledger(tx, `campaign:${campaignId}`, -gross, ref);
   await ledger(tx, `publisher:${publisherId}`, net, ref);
   if (cut) await ledger(tx, 'platform:fees', cut, ref);
-  // The row is already locked by the caller's balance check, so this read is free of races —
-  // and a budget about to run dry is the promoter's live print run about to start bouncing.
+  // The row is already locked by the caller's balance check, so this read is free of races — and
+  // a budget about to run dry is a live print run about to start bouncing.
   const rows = await tx.$queryRaw<{ balance: number }[]>`
     SELECT balance FROM account_balances WHERE account = ${'campaign:' + campaignId}`;
   const remaining = rows[0]?.balance ?? 0;
@@ -78,18 +77,13 @@ export async function lockedBalance(tx: Tx, account: string): Promise<number> {
 
 /**
  * What a publisher may withdraw right now: its balance, minus earnings still inside the
- * settlement window, minus requests already queued for review.
+ * settlement window, minus requests already queued for review. Only credits are held, so an
+ * earlier withdrawal never extends the wait on what remains.
  *
- * The holdback is the clawback window — no coin earned less than SETTLEMENT_DELAY_DAYS ago can
- * leave while a fraud review runs. Only credits are held: an earlier withdrawal never extends
- * the wait on what remains.
- *
- * `lock` is the difference between the two callers, and it is not a micro-optimisation.
- * Deciding a request must serialise, so it takes the balance row FOR UPDATE and a second
- * concurrent request is judged against a pool the first already claimed from. *Rendering* the
- * number on a dashboard must not: `FOR UPDATE` is an exclusive row lock, and every attribution
- * payout to this publisher updates that same row — so a polled dashboard was blocking the
- * money path to display a figure nothing then spends against.
+ * `lock` is the difference between the two callers, and it is not a micro-optimisation. Deciding
+ * a request must serialise. *Rendering* the number must not: `FOR UPDATE` is an exclusive row
+ * lock that every payout to this publisher contends on, so a polled dashboard was blocking the
+ * money path to display a figure nothing spends against.
  */
 export async function withdrawable(
   tx: Tx,

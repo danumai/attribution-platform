@@ -10,15 +10,10 @@ import {
 import { BaseExceptionFilter } from '@nestjs/core';
 
 /**
- * Turns a driver-level error into the 4xx it actually is.
- *
- * Every route takes an id straight from the URL and every id column is `@db.Uuid`, so
- * `/v1/qr-codes/not-a-uuid/image` reaches Postgres as an invalid uuid literal and Nest's
- * default handler answers 500 for a plainly malformed request. Translating the driver's own
- * error codes once here covers every route, including the ones that do not exist yet.
- *
- * Only codes with an unambiguous HTTP meaning are mapped — an unanticipated database error is
- * a real fault and should stay a 500.
+ * Turns a driver-level error into the 4xx it actually is. Every route takes an id straight from
+ * the URL and every id column is `@db.Uuid`, so `/v1/qr-codes/not-a-uuid/image` reaches Postgres
+ * as an invalid uuid literal and Nest's default handler answers 500 for a plainly malformed
+ * request. Only codes with an unambiguous HTTP meaning are mapped.
  */
 @Catch()
 export class PrismaExceptionFilter extends BaseExceptionFilter {
@@ -33,8 +28,8 @@ export class PrismaExceptionFilter extends BaseExceptionFilter {
 
 function translate(e: any): HttpException | null {
   switch (e?.code) {
-    // Value rejected at the driver. P2023 ("Inconsistent column data") is what a malformed
-    // uuid on a normal query raises — the code this file exists for.
+    // P2023 ("Inconsistent column data") is what a malformed uuid on a normal query raises — the
+    // code this file exists for.
     case 'P2023':
     case 'P2007':
     case 'P2006':

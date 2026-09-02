@@ -2,10 +2,8 @@ import { BadRequestException } from '@nestjs/common';
 
 /**
  * The four numbers a partnership is priced on, validated in one place — a money rule with two
- * implementations is a money rule with two answers.
- *
- * `guest_rate <= coin_rate` is also a CHECK constraint in the database. That is the real
- * guarantee; this exists so the caller gets a message it can act on instead of a driver error.
+ * implementations is a money rule with two answers. `guest_rate <= coin_rate` is also a database
+ * CHECK; this exists so the caller gets a message it can act on instead of a driver error.
  */
 
 const DEFAULTS = { coin_rate: 50, grace_days: 7, engagement_rate: 20 };
@@ -25,11 +23,9 @@ export interface Rates {
 }
 
 /**
- * Resolve a patch against what is already there. Omit `current` to resolve against the platform
- * defaults instead, which is what creating a partnership does.
- *
- * Returns the whole post-patch set rather than the changed fields alone, so the caller writes
- * values that were checked *together* — the pair rule cannot be satisfied by either half.
+ * Resolve a patch against what is already there; omit `current` to resolve against the platform
+ * defaults, which is what creating a partnership does. Returns the whole post-patch set, so the
+ * caller writes values that were checked *together* — the pair rule cannot be half-satisfied.
  */
 export function validateRates(patch: Partial<Rates>, current?: Rates): Rates {
   const coin_rate =
@@ -45,9 +41,8 @@ export function validateRates(patch: Partial<Rates>, current?: Rates): Rates {
     patch.grace_days === undefined
       ? (current?.grace_days ?? DEFAULTS.grace_days)
       : int(patch.grace_days, 'grace_days', 0, 365);
-  // Not bounded against `coin_rate`, on purpose: a guest rate is a *part* of the coin rate,
-  // but a repeat purchase is a different thing being bought and may honestly cost more than a
-  // signup or a tenth of one.
+  // Not bounded against `coin_rate`, on purpose: a repeat purchase is a different thing being
+  // bought and may honestly cost more than a signup, or a tenth of one.
   const engagement_rate =
     patch.engagement_rate === undefined
       ? (current?.engagement_rate ?? DEFAULTS.engagement_rate)
@@ -58,10 +53,9 @@ export function validateRates(patch: Partial<Rates>, current?: Rates): Rates {
 }
 
 /**
- * Split a gross payout into the publisher's net and the platform's cut, in basis points.
- *
- * One place, because two call sites rounding differently is a ledger that fails to sum to zero.
- * `floor` on the cut so rounding always favours the publisher — the party being paid.
+ * Split a gross payout into the publisher's net and the platform's cut, in basis points. One
+ * place, because two call sites rounding differently is a ledger that fails to sum to zero.
+ * `floor` on the cut so rounding always favours the publisher.
  */
 export function splitFee(gross: number, bps: number): { net: number; cut: number } {
   const cut = Math.floor((gross * bps) / 10_000);

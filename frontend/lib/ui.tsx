@@ -1,11 +1,9 @@
 'use client';
 /**
- * The console primitives every signed-in surface shares: toasts, modal dialogs, the failed
- * load, and the figure strip.
- *
- * A module-level store so any page can call `toast.success(...)` or
- * `await confirmDialog(...)` without threading a context through props.
- * <UI /> is mounted once in the root layout and renders both.
+ * The console primitives every signed-in surface shares: toasts, modal dialogs, the failed load,
+ * and the figure strip. A module-level store, so any page can call `toast.success(...)` or
+ * `await confirmDialog(...)` without threading a context through props. <UI /> is mounted once
+ * in the root layout.
  */
 import { ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Spark } from '@/lib/chart';
@@ -39,9 +37,8 @@ type Kind = 'success' | 'error' | 'info';
 type Toast = { id: number; kind: Kind; text: string; leaving?: boolean };
 
 /**
- * One control in a dialog. `select` and `checks` need `options`; everything else is an
- * `<input>`. A `checks` field is a set of checkboxes and its value is the ticked options'
- * values joined by commas — dialog values are strings, and one field is one string.
+ * One control in a dialog. `select` and `checks` need `options`; everything else is an `<input>`.
+ * A `checks` value is the ticked options' values joined by commas — dialog values are strings.
  */
 type DialogField = {
   name: string;
@@ -64,8 +61,7 @@ type Dialog = {
    * present => the dialog carries a form; absent => it is a confirm.
    *
    * A function is re-read on every keystroke, which is what lets one field depend on another:
-   * the campaign dialog cannot know which rewards to offer until a partnership is picked, and
-   * asking twice in two dialogs to avoid that is worse than one that follows along.
+   * the campaign dialog cannot know which rewards to offer until a partnership is picked.
    */
   fields?: DialogField[] | ((vals: Record<string, string>) => DialogField[]);
   resolve: (v: Record<string, string> | boolean | null) => void;
@@ -116,11 +112,8 @@ export function confirmDialog(o: Omit<Dialog, 'resolve' | 'fields'>) {
 }
 
 /**
- * A form in a dialog. Resolves the field values, or null when cancelled.
- *
- * This exists so creating a thing stops being permanent page furniture. Both consoles used to
- * park a creation form under its own list — a "New campaign" panel on screen forever, below
- * every campaign you already had, whether or not you wanted one.
+ * A form in a dialog. Resolves the field values, or null when cancelled. This exists so creating
+ * a thing stops being permanent page furniture parked under its own list.
  */
 export function formDialog(o: Omit<Dialog, 'resolve'> & { fields: NonNullable<Dialog['fields']> }) {
   return new Promise<Record<string, string> | null>((res) => {
@@ -147,11 +140,9 @@ export function promptDialog(o: {
 }
 
 /**
- * What a failed load looks like.
- *
- * Both consoles derive "still loading" from the absence of data, so a *failed* load is
- * indistinguishable from one in flight once the toast expires. This replaces the skeleton
- * rather than sitting above it — the page is not loading, and must not claim to be.
+ * What a failed load looks like. Both consoles derive "still loading" from the absence of data,
+ * so a failed load is otherwise indistinguishable from one in flight once the toast expires.
+ * This replaces the skeleton rather than sitting above it.
  */
 export function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
@@ -166,12 +157,9 @@ export function LoadError({ message, onRetry }: { message: string; onRetry: () =
 }
 
 /**
- * One printed figure.
- *
- * `go` marks the section this number was counted from. The two optional halves are the rest
- * of the stat-tile contract: `delta` is the signed change against a named period, and
- * `spark` is the shape that change came out of — neither is ever invented, so a caller with
- * no history to compare against simply omits them.
+ * One printed figure. `go` marks the section this number was counted from; `delta` is the signed
+ * change against a named period and `spark` the shape it came out of. Neither is ever invented,
+ * so a caller with no history simply omits them.
  */
 export type Figure = {
   k: string;
@@ -183,11 +171,8 @@ export type Figure = {
 };
 
 /**
- * A run of figures printed as one strip.
- *
- * One definition, because four surfaces spelling out "a number" for themselves is four
- * vocabularies an operator reads side by side. The name is stamped above the value, which is
- * also what makes a strip scannable: the labels share a baseline and so do the figures.
+ * A run of figures printed as one strip. One definition, because four surfaces spelling out "a
+ * number" for themselves is four vocabularies an operator reads side by side.
  */
 export function Figures({
   items,
@@ -257,11 +242,8 @@ export function Figures({
 }
 
 /**
- * What a section with nothing in it looks like.
- *
- * Every empty state in the console used to be one sentence in a bordered box, with nothing to
- * do about it. A reader who has just arrived and has no campaigns is exactly the reader most in
- * need of a button, so the action is part of the primitive rather than an afterthought beside it.
+ * What a section with nothing in it looks like. Every empty state used to be one sentence in a
+ * bordered box with nothing to do about it.
  */
 export function Empty({
   title,
@@ -293,11 +275,8 @@ export function Empty({
 }
 
 /**
- * Stands in for a section while its data is in flight.
- *
- * One shape per thing being awaited. The console used to shimmer the same five bars whether a
- * table, a strip of figures or a form was arriving — which tells the reader nothing about what
- * is about to appear, and makes the swap land as a jump rather than a fill.
+ * Stands in for a section while its data is in flight — one shape per thing being awaited, rather
+ * than the same five shimmering bars whether a table, a strip or a chart is coming.
  */
 export function SkeletonCard({ lines = 5, className }: { lines?: number; className?: string }) {
   return (
@@ -361,10 +340,8 @@ export function SkeletonTable({
 }
 
 /**
- * A proportion, printed.
- *
- * `of` is the denominator the bar is drawn against. Pass it only when it is real — a meter with
- * an invented ceiling is worse than no meter, because it looks like a measurement.
+ * A proportion, printed. `of` is the denominator the bar is drawn against — pass it only when it
+ * is real, since a meter with an invented ceiling is worse than no meter.
  */
 export function Meter({
   value,
@@ -480,15 +457,13 @@ function Dialogs() {
 
   if (!d) return null;
 
-  // A field that only appears once another one is filled in was never seeded, so its own
-  // `value` is its default until somebody touches it. That is what makes "every offer this
-  // publisher grants, ticked" the starting state of a control that did not exist a keystroke ago.
+  // A field that only appears once another is filled was never seeded, so its own `value` is its
+  // default until somebody touches it.
   const fields = fieldsOf(d, vals);
   const valueOf = (f: DialogField) => {
     const v = vals[f.name] ?? f.value ?? '';
-    // A `checks` value only means anything against the options on screen. When those change
-    // under it — a different publisher was picked — a tick for an option that is gone is
-    // dropped rather than submitted, so a `required` field asks again instead of sending it.
+  // A `checks` value only means anything against the options on screen. When those change under
+  // it — a different publisher was picked — a tick for a vanished option has to go.
     return f.type === 'checks' && v
       ? v.split(',').filter((x) => f.options?.some((o) => o.value === x)).join(',')
       : v;
@@ -532,9 +507,8 @@ function Dialogs() {
             <div key={f.name}>
               {f.label && <label className={label} htmlFor={`dlg-${f.name}`}>{f.label}</label>}
               {f.type === 'checks' ? (
-                /* Checkboxes rather than a multi-select: picking two of five things out of a
-                   native multiple <select> means knowing to hold a modifier key, and this is
-                   the control a promoter uses once per campaign and never learns. */
+  // Checkboxes rather than a multi-select: picking two of five out of a native multiple <select>
+  // means knowing to hold a modifier key.
                 <div className="mt-1.5 grid gap-1.5 rounded-lg border border-line bg-sunk px-3.5 py-3">
                   {f.options?.length ? (
                     f.options.map((o) => (

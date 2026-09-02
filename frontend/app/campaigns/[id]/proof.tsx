@@ -4,12 +4,8 @@
 import { Style, isTransparent } from '@/lib/qr';
 import { presetProof } from '@/lib/tw';
 
-/* Transparency grid, sized to whatever it sits behind — a backdrop needs a coarser one than a
-   68px swatch, where 18px squares read as content rather than as "nothing here".
-
-   Deliberately not themed. The checker stands for transparency in a preview of a physical
-   printed artifact; darkening it would imply a dark substrate and make the Cutout preset look
-   scannable when printed on light stock it would not be. */
+// Transparency grid, sized to whatever it sits behind: a backdrop needs a coarser one than a 68px
+// swatch, where 18px squares read as content rather than as "nothing here".
 export const checker = (px: number) =>
   `repeating-conic-gradient(#eeeeee 0 25%, #fff 0 50%) 50%/${px}px ${px}px`;
 
@@ -60,9 +56,8 @@ export function EyeIcon({ kind, ball }: { kind: string; ball?: boolean }) {
 }
 
 /**
- * One 11x11 proof, pulled identically for every preset — same code, different plate — so the
- * only thing that varies between swatches is the thing the preset actually changes.
- * `F` marks the three finder zones, which are drawn as eyes rather than as modules.
+ * One 11x11 proof, pulled identically for every preset — same code, different plate — so the only
+ * thing that varies between swatches is the thing the preset actually changes.
  */
 const PROOF = [
   'FFF#..#.FFF',
@@ -118,9 +113,8 @@ function Finder({
 }
 
 /**
- * A printed proof of the preset, not a colour chip. Module shape, eye treatment, ink and frame
- * are the whole difference between one preset and the next, so the swatch prints all four at a
- * size where they are actually tellable apart.
+ * A printed proof of the preset, not a colour chip: module shape, eye treatment, ink and frame are
+ * the whole difference between one preset and the next.
  */
 export function PresetProof({ style, id }: { style: Style; id: string }) {
   const { shape = 'square', eyeFrame = 'square', eyeBall = 'square', gradient, frame } = style;

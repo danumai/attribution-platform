@@ -1,11 +1,6 @@
 /**
- * The shapes the API actually returns.
- *
- * Hand-written rather than generated, on purpose: this is the contract the console reads, not
- * the database schema, and every field here is one a page already renders.
- *
- * Nothing validates at runtime. That is the honest limit of this file: it makes the client
- * consistent with itself, and the e2e suite is what keeps it consistent with the server.
+ * The shapes the API actually returns. Hand-written rather than generated, on purpose: this is
+ * the contract the console reads, not the database schema.
  */
 import type { Style } from './qr';
 
@@ -19,9 +14,8 @@ export interface AuthResult {
 }
 
 /**
- * One offer a publisher grants out of its own pocket. `type` is the publisher's own slug —
- * `coins`, `subscription`, anything — because this platform never fulfils any of it; the
- * publisher's app is what reads `type`/`value`/`unit` and grants.
+ * One offer a publisher grants out of its own pocket. `type` is the publisher's own slug, because
+ * this platform never fulfils any of them.
  */
 export interface Bonus {
   type: string;
@@ -54,11 +48,8 @@ export interface Me {
   approved?: boolean;
   /** publisher only: everything ever earned — the ledger balance for this org */
   earnings?: number;
-  /**
-   * publisher only: the part of `earnings` that has cleared the settlement window and is not
-   * already reserved by a queued request. This is what a payout can be requested against;
-   * `earnings` is the headline number and is always the larger of the two.
-   */
+  /** publisher only: the part of `earnings` that has cleared the settlement window and is not
+   *  already reserved by a queued request */
   withdrawable?: number;
 }
 
@@ -137,8 +128,8 @@ export interface QrCode {
   voided: boolean;
   created_at: string;
   scan_url: string;
-  /** the promoter's own reference for the purchase this code was minted against — a PNR, an
-   * order number. NULL for every code designed in the portal; set only by `POST /v1/issue`. */
+  /** the promoter's own reference for the purchase this code was minted against. NULL for codes
+   *  designed in the portal; set only by `POST /v1/issue`. */
   issued_ref: string | null;
   /** admin listing only */
   campaign_name?: string;
@@ -167,7 +158,6 @@ export interface Redemption {
   publisher_name?: string;
 }
 
-/* ---------------- admin-only ---------------- */
 
 export interface AdminOrg {
   id: string;
@@ -227,11 +217,10 @@ export interface AdminScan {
   os: string | null;
   browser: string | null;
   device_type: string | null;
-  /**
-   * How the hand-off screen behaved — `held_ms` and `exit` (`tap` | `auto`), nothing about the
-   * device. `exit: 'auto'` on an iOS scan is the shape of an install nobody could attribute:
-   * the scanner never tapped, so the claim was never carried.
-   */
+    /**
+     * How the hand-off screen behaved — `held_ms` and `exit` (`tap` | `auto`), nothing about the
+     * device. `exit: 'auto'` on an iOS scan is the shape of an install nobody could attribute.
+     */
   client: Record<string, string | number | boolean> | null;
   consumed: boolean;
   qr_code: string;

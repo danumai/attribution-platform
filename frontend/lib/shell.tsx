@@ -1,10 +1,7 @@
 'use client';
 /**
- * The console shell every signed-in portal wears: a fixed left rail for navigation,
- * a header strip with the page title and its actions, and the section body.
- *
- * Sections are the caller's state (or links) — the shell only renders the rail and
- * reports which item was picked.
+ * The console shell every signed-in portal wears: a fixed left rail for navigation, a header strip
+ * with the page title and its actions, and the section body.
  */
 import { ReactNode, useState } from 'react';
 import Link from 'next/link';
@@ -46,8 +43,8 @@ function Icon({ name, className }: { name: keyof typeof ICONS; className?: strin
   );
 }
 
-/* One rail row. Each state prints its own hover ink rather than layering a second
-   hover rule over the first — two utilities on one property would race. */
+/** One rail row. Each state prints its own hover ink rather than layering a second hover rule over
+ *  the first — two utilities on one property would race. */
 const railRow =
   'my-px flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13.5px] ' +
   'font-medium no-underline';
@@ -176,8 +173,8 @@ export function Shell({
         <button
           className={cx(railItem('out'), 'border-t border-t-line-soft')}
           onClick={() => {
-            // Only the session. `localStorage.clear()` also wiped `api_key:<org>`, which the
-            // server stores as a hash and can never show again — signing out lost it forever.
+  // Only the session. `localStorage.clear()` also wiped `api_key:<org>`, which the server stores
+  // as a hash and can never show again.
             localStorage.removeItem('token');
             localStorage.removeItem('org');
             r.push('/login');

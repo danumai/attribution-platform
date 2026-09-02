@@ -3,9 +3,8 @@
  * for the decisions that *are* the product.
  *
  * It exists to catch the silent failure. A publisher who mistypes their `android_package`
- * generates no errors — every install just looks organic and nobody is paid. Refusals are
- * never persisted (`installs` and `redemptions` record only what succeeded), so the refusal
- * rate is invisible in the database by construction and has to be emitted here.
+ * generates no errors — every install just looks organic. Refusals are never persisted, so the
+ * refusal rate is invisible in the database by construction and has to be emitted here.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
@@ -17,8 +16,8 @@ const ctx = new AsyncLocalStorage<{ request_id: string }>();
 
 type Fields = Record<string, unknown>;
 
-/** One JSON object per line on stdout, which is what every log pipeline already ingests.
- *  Not a logging library: the whole feature is four lines, and `console` keeps stdout ordering. */
+/** One JSON object per line on stdout. Not a logging library: the whole feature is four lines,
+ *  and `console` keeps stdout ordering. */
 function emit(level: 'info' | 'warn' | 'error', event: string, fields: Fields = {}) {
   const line = {
     ts: new Date().toISOString(),
@@ -37,20 +36,18 @@ export const log = {
   error: (event: string, fields?: Fields) => emit('error', event, fields),
 };
 
-/* ---------------------------------------------------------------------------
- * Counters — Prometheus text format, rendered by hand.
- *
- * Per-process and reset by a restart, which is correct rather than a shortcut: Prometheus
- * scrapes each instance separately and `rate()` already accounts for counter resets.
- * ------------------------------------------------------------------------- */
+/**
+ * Counters — Prometheus text format, rendered by hand. Per-process and reset by a restart, which
+ * is correct rather than a shortcut: Prometheus scrapes each instance separately and `rate()`
+ * already accounts for counter resets.
+ */
 
 const counters = new Map<string, number>();
 
 /**
  * Label cardinality is the one way a metrics endpoint becomes an outage, so labels here are
- * closed sets only — a reason, a method, a status class. Anything unbounded (campaign id, user
- * ref, path with ids in it) belongs in the structured log above, where one line costs one line
- * rather than a permanent new time series.
+ * closed sets only. Anything unbounded (campaign id, user ref, path with ids in it) belongs in
+ * the structured log, where one line costs one line rather than a permanent time series.
  */
 export function count(name: string, labels: Record<string, string | number> = {}) {
   const key = Object.keys(labels).length
@@ -76,17 +73,14 @@ export function renderMetrics(): string {
   return out.join('\n') + '\n';
 }
 
-/* ------------------------------------------------------------------------- */
 
 /**
  * Assigns the request id and logs how every request ended.
  *
- * An inbound `X-Request-Id` is honoured so a trace started at the proxy or by a publisher's own
- * server survives into our logs — bounded and stripped, because it is attacker-controlled text
- * that lands in every log line the request produces.
- *
- * The id is echoed back on the response: when a publisher reports "this claim did not
- * attribute", that header is the whole investigation.
+ * An inbound `X-Request-Id` is honoured so a trace started at the proxy survives into our logs —
+ * bounded and stripped, because it is attacker-controlled text that lands in every log line. The
+ * id is echoed back: when a publisher reports "this claim did not attribute", that header is the
+ * whole investigation.
  */
 export function requestContext(req: Request, res: Response, next: NextFunction) {
   const inbound = req.headers['x-request-id'];
@@ -125,10 +119,9 @@ export function requestContext(req: Request, res: Response, next: NextFunction) 
 /**
  * Every attribution decision, paid or refused.
  *
- * `reason` is a closed set (`no_match`, `ambiguous`, `low_confidence`, `budget_exhausted`, …)
- * so it is safe as a label, and it is the series to alert on: a misconfigured store target
- * shows up as `no_match` going to 100% with no error rate to notice it by. Tenant ids go to
- * the log instead — as labels they would mint a time series per campaign forever.
+ * `reason` is a closed set, so it is safe as a label and it is the series to alert on: a
+ * misconfigured store target shows up as `no_match` going to 100% with no error rate to notice
+ * it by. Tenant ids go to the log — as labels they would mint a time series per campaign forever.
  */
 export function recordDecision(
   stage: 'first_open' | 'claim',

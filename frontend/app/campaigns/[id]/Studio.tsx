@@ -80,12 +80,10 @@ export function Studio({
 
   const set = (patch: Partial<Style>) => setStyle((s) => ({ ...s, ...patch }));
 
-  /**
-   * A preset is a whole plate, not a patch — every key it owns is replaced rather than merged,
-   * so picking a flat preset off a gradient one actually clears the gradient instead of leaving
-   * it printed underneath. The logo and the export size belong to the code, not the plate, so
-   * they survive the swap.
-   */
+/**
+ * A preset is a whole plate, not a patch — every key it owns is replaced rather than merged, so
+ * picking a flat preset off a gradient one actually clears the gradient.
+ */
   const applyPreset = (p: Style) =>
     setStyle((s) => ({
       ...DEFAULT_STYLE,

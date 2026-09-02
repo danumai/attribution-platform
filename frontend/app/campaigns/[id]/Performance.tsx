@@ -7,9 +7,8 @@ import { num } from '@/lib/fmt';
 import { card, cx, figure, muted, stampCaps } from '@/lib/tw';
 
 export function Performance({ stats, audience }: { stats: CampaignStats; audience: Analytics | null }) {
-  /* What was ever put in: everything granted out of it, plus everything still sitting there.
-     The stats endpoint gives both halves, which is what makes the burn-down a measurement
-     rather than a bar against an invented ceiling. */
+// What was ever put in: everything granted out of it, plus everything still sitting there. Both
+// halves come from the stats endpoint, which is what makes the burn-down honest.
   const funded = stats.coins_granted + stats.budget_remaining;
   // The daily shape behind the two counting figures, from the same window the Audience panel
   // below is showing — so a rising trace and a rising line are the same rise.

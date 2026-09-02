@@ -17,14 +17,14 @@ export class AuthGuard implements CanActivate {
     const token = (req.headers.authorization ?? '').replace(/^Bearer /, '');
     let claims: SessionClaims;
     try {
-      // Algorithm pinned, not inferred from the token's own header — the one input an
-      // attacker controls must never get to name the scheme it is checked under.
+      // Algorithm pinned, not inferred from the token's own header: the one input an attacker
+      // controls must never name the scheme it is checked under.
       claims = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as SessionClaims;
     } catch {
       throw new UnauthorizedException();
     }
-    // Instant revocation: suspending or offboarding a tenant must cut access now, not whenever
-    // its 12h JWT happens to expire. Costs one primary-key lookup per request.
+    // Instant revocation: suspending or offboarding a tenant must cut access now, not whenever its
+    // 12h JWT expires. Costs one primary-key lookup per request.
     const org = await prisma.org.findUnique({
       where: { id: claims.org_id },
       select: { type: true, suspended: true },

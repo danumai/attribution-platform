@@ -52,10 +52,8 @@ export default function Dashboard() {
     const o = getOrg();
     if (o?.type === 'admin') return void r.replace('/admin');
     setMe(o);
-    // Deep links from elsewhere in the console land on a section: /dashboard?s=campaigns.
-    // Read here rather than in a `useState` initialiser — the server prerender has no
-    // `location`, so an initialiser would render "overview" on the server and something else
-    // on the client, which is exactly the case a deep link hits.
+  // Deep links from elsewhere in the console land on a section: /dashboard?s=campaigns. Read here
+  // rather than in a `useState` initialiser, since the server prerender has no query string.
     const s = new URLSearchParams(location.search).get('s');
     if (s && isSection(s)) setSec(s);
     load();

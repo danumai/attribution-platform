@@ -1,10 +1,7 @@
 /**
- * Every setting the process reads, validated at import time so a bad one fails before the
- * first request rather than on the path that needs it.
- *
- * BASE_URL is the one that cannot be fixed after the fact: it is encoded into the QR image,
- * which then gets printed. A wrong value there is a reprint, not a redeploy — so production
- * refuses to boot without it rather than falling back to localhost.
+ * Every setting the process reads, validated at import time so a bad one fails before the first
+ * request. BASE_URL is the one that cannot be fixed after the fact — it is encoded into printed
+ * QR codes — so production refuses to boot without it rather than falling back to localhost.
  */
 const PROD = process.env.NODE_ENV === 'production';
 
@@ -26,10 +23,9 @@ const flag = (name: string, prodDefault: boolean) =>
   process.env[name] === undefined ? (PROD ? prodDefault : true) : process.env[name] === 'true';
 
 /**
- * Public origin of this API — encoded into every QR code as `${BASE_URL}/r/{code}`, or
- * `${BASE_URL}/c/{slug}/{code}` for a publisher with an App Clip. It is also the domain whose
- * `.well-known/apple-app-site-association` those clips are verified against, so changing it
- * invalidates every printed code AND every App Clip association at once.
+ * Public origin of this API — encoded into every QR code, and the domain whose
+ * `.well-known/apple-app-site-association` App Clips are verified against. Changing it
+ * invalidates every printed code and every App Clip association at once.
  */
 export const BASE_URL = required('BASE_URL', 'http://localhost:4000').replace(/\/+$/, '');
 
@@ -54,35 +50,25 @@ export const DATABASE_URL = required(
 );
 
 /**
- * How long a scan stays claimable.
- *
- * One window, because there is now one match path. Every carrier — Play's install referrer, an
- * App Clip's shared container, the pasteboard — hands back the exact claim id, so a match is
- * as sound on day 30 as in the first minute and the window is bounded by how long a real
- * install-then-open gap can be rather than by how fast a guess goes stale. Play retains the
- * referrer ~90 days.
+ * How long a scan stays claimable. One window, because every carrier hands back the exact claim
+ * id: a match is as sound on day 30 as in the first minute, so the bound is how long a real
+ * install-then-open gap can be. Play retains the referrer ~90 days.
  */
 export const REFERRER_WINDOW_DAYS = int('REFERRER_WINDOW_DAYS', 30, 1, 90);
 
 /**
- * How long a matched install stays convertible into a paid signup.
- *
- * The window above is measured scan → *first open*, not scan → signup, and that split is why
- * `installs` exists: an install lands minutes after a scan, a signup can land days later, and
- * the carrier is readable only at first open — an App Clip's container is migrated once, and
- * the pasteboard holds one thing at a time.
+ * How long a matched install stays convertible into a paid signup. The window above is scan →
+ * *first open*, not scan → signup, and that split is why `installs` exists: the carrier is
+ * readable only at first open, but a signup can land days later.
  */
 export const SIGNUP_WINDOW_DAYS = int('SIGNUP_WINDOW_DAYS', 30, 1, 180);
 
 /**
- * Which upstream hops may set `X-Forwarded-For`. Every per-IP control here — login throttling,
- * scan limits, the global ceiling — reads `req.ip`, and `req.ip` is whatever this says to
- * believe. Nothing derived from the address is stored any more; these are rate limits only.
+ * Which upstream hops may set `X-Forwarded-For`. Every per-IP control reads `req.ip`, and
+ * `req.ip` is whatever this says to believe.
  *
- * `true` means "trust the header from anyone", which lets a client name its own address: one
- * attacker becomes unlimited distinct IPs and every limit evaporates. Express accepts it
- * happily, so it is refused here. Name the real hops (`1` for one load balancer, or the proxy
- * subnet) — never the wildcard.
+ * `true` means "trust the header from anyone", so one attacker becomes unlimited distinct IPs
+ * and every limit evaporates. Express accepts it happily; it is refused here.
  */
 const rawTrustProxy = process.env.TRUST_PROXY ?? 'loopback';
 if (rawTrustProxy === 'true')
@@ -93,19 +79,15 @@ if (rawTrustProxy === 'true')
 export const TRUST_PROXY = /^\d+$/.test(rawTrustProxy) ? Number(rawTrustProxy) : rawTrustProxy;
 
 /**
- * Where the rate limiters count. Unset means "in this process", which is correct for exactly
- * one instance and is how the stack runs locally.
- *
- * This is the setting that gates horizontal scale: every per-IP control here is a security
- * control, so N replicas with in-process counters is N× every limit. The deploy has to enforce
- * that, since the process cannot see its own replica count — this is only the switch.
+ * Where the rate limiters count. Unset means "in this process", which is correct for exactly one
+ * instance. This is the setting that gates horizontal scale: every per-IP control here is a
+ * security control, so N replicas with in-process counters is N× every limit.
  */
 export const REDIS_URL = process.env.REDIS_URL ?? '';
 
 /**
  * Bearer token for `GET /metrics`. Unauthenticated it is free reconnaissance — request volumes,
- * route names, and the attribution refusal rates that describe how much this platform pays out.
- * Production serves the endpoint only when a token is set.
+ * route names, and the refusal rates that describe how much this platform pays out.
  */
 export const METRICS_TOKEN = process.env.METRICS_TOKEN ?? '';
 
@@ -117,42 +99,35 @@ if (PROD && METRICS_TOKEN && METRICS_TOKEN.length < 16)
 export const ENABLE_DOCS = flag('ENABLE_DOCS', false);
 
 /**
- * `POST /v1/campaigns/:id/fund` credits a campaign budget with no payment behind it — a promoter
- * can mint the budget that pays publishers real fees. It exists so the demo stack works without
- * a PSP and must stay off until checkout is wired up. Admins can still fund deliberately via
- * `campaigns/:id/adjust`, which is super-admin only and audited.
+ * `POST /v1/campaigns/:id/fund` credits a campaign budget with no payment behind it, so a
+ * promoter can mint the budget that pays publishers real fees. For the demo stack only; admins
+ * can still fund deliberately via `campaigns/:id/adjust`, which is audited.
  */
 export const ALLOW_SELF_FUNDING = flag('ALLOW_SELF_FUNDING', false);
 
 /**
- * Whether a publisher signup is usable immediately. In production a publisher must be approved
- * by an admin before it appears in the directory or can enter a partnership — "sign up, look
- * legitimate, receive money" must not be one unauthenticated flow.
+ * Whether a publisher signup is usable immediately. In production it must be approved by an admin
+ * first — "sign up, look legitimate, receive money" must not be one unauthenticated flow.
  */
 export const AUTO_APPROVE_PUBLISHERS = flag('AUTO_APPROVE_PUBLISHERS', false);
 
 /**
- * Basis points of every payout the platform keeps — the take rate. Snapshotted onto each
- * partnership at creation and never read live at payout time, so changing it here reprices only
- * future partnerships. 1000 = 10%; 0 is legal for a launch promotion.
+ * Basis points of every payout the platform keeps. Snapshotted onto each partnership at creation
+ * and never read live, so changing it reprices only future partnerships. 1000 = 10%.
  */
 export const PLATFORM_FEE_BPS = int('PLATFORM_FEE_BPS', 1000, 0, 10_000);
 
 /**
- * How long earned fees stay unwithdrawable — the platform's clawback window. Every fraud shape
- * the threat model accepts (self-scan, collusion, a disputed attribution) is bounded by "review
- * runs before real money leaves", and this is the number that makes that true. 0 disables it.
+ * How long earned fees stay unwithdrawable — the clawback window. Every fraud shape the threat
+ * model accepts is bounded by "review runs before real money leaves", and this is that bound.
  */
 export const SETTLEMENT_DELAY_DAYS = int('SETTLEMENT_DELAY_DAYS', 14, 0, 365);
 
 /**
  * HMAC secret shared with the payment provider's webhook. Unset, `POST /v1/payments/webhook`
  * answers 404 and money-in is impossible — the correct failure mode, since an unsigned funding
- * webhook mints budgets for whoever finds it.
- *
- * `.env.example` ships the dev value below so the e2e suite's signature assertions run on a
- * fresh clone. Shipping it to production would let anyone who reads this repo credit a budget,
- * so it is refused at boot there — the same treatment JWT_SECRET's default gets.
+ * webhook mints budgets for whoever finds it. The dev value below ships in `.env.example` so the
+ * e2e suite runs on a fresh clone, and is refused at boot in production.
  */
 const DEV_WEBHOOK_SECRET = 'dev-payment-webhook-secret-change-me';
 export const PAYMENT_WEBHOOK_SECRET = process.env.PAYMENT_WEBHOOK_SECRET ?? '';

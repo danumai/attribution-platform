@@ -29,8 +29,7 @@ import { AdminGuard, Session } from '../auth/auth.guard';
 import { SessionClaims, newApiKey } from '../auth/tokens';
 import { randomBytes } from 'node:crypto';
 
-// Super admin: reads everything across all orgs, and can act on anything.
-// No org scoping here — that is the whole point of the role.
+// Super admin: reads everything across all orgs and can act on anything. No org scoping here.
 @ApiTags('Admin')
 @ApiBearerAuth('session')
 @Controller('v1/admin')
@@ -38,7 +37,7 @@ import { randomBytes } from 'node:crypto';
 export class AdminController {
   @Get('overview')
   async overview() {
-    // One round trip for 27 aggregates. Twenty-seven Prisma `count`s would be twenty-seven queries.
+    // One round trip for 27 aggregates; twenty-seven Prisma `count`s would be 27 queries.
     const [o] = await prisma.$queryRaw<Record<string, number>[]>`
       SELECT
         (SELECT count(*)::int FROM orgs WHERE type='promoter')            AS promoters,
@@ -90,7 +89,7 @@ export class AdminController {
           WHERE a.acknowledged_at IS NULL AND ao.type <> 'admin')          AS open_notifications`;
     return {
       ...o,
-      // ledger is double-entry: every ref sums to zero, so the whole book must too
+      // double-entry: every ref sums to zero, so the whole book must too
       ledger_balanced: o.ledger_sum === 0,
       /** false means a cached balance disagrees with its entries — stop spending, reconcile. */
       balances_reconciled: o.drifted_accounts === 0,
@@ -127,7 +126,7 @@ export class AdminController {
       orderBy: { created_at: 'desc' },
     });
     // Campaigns reachable from either side of a partnership — not a relation Prisma can
-    // `_count`, since it spans two different foreign keys on the same table.
+    // `_count`, since it spans two foreign keys on the same table.
     const [coins, counts] = await Promise.all([
       balances(rows.filter((o) => o.type === 'publisher').map((o) => `publisher:${o.id}`)),
       prisma.$queryRaw<{ org_id: string; n: number; has_history: boolean }[]>`
@@ -192,8 +191,8 @@ export class AdminController {
       data: {
         ...(b.suspended === undefined ? {} : { suspended: b.suspended }),
         ...(b.approved === undefined ? {} : { approved: b.approved }),
-        // Bounded like every other free-text field crossing the boundary — unbounded, one
-        // PATCH bloats the row and every listing that renders it.
+        // Bounded like every other free-text field crossing the boundary: unbounded, one PATCH
+        // bloats the row and every listing that renders it.
         ...(b.name === undefined ? {} : { name: str(b.name, 'name', 120)! }),
         // Keyed on what was sent, so `""` clears a field instead of being ignored.
         ...Object.fromEntries(Object.entries(fields).filter(([k]) => k in b)),
@@ -219,9 +218,9 @@ export class AdminController {
     });
   }
 
-  // Support path: tenant lost its key, or the key leaked. Both tenant types hold one now —
-  // the publisher's earns fees on /v1/attribution/*, the promoter's mints codes on /v1/issue —
-  // so restricting this to publishers left a promoter with a leaked key unrecoverable.
+  // Support path: tenant lost its key, or it leaked. Both tenant types hold one — the
+  // publisher's earns fees on /v1/attribution/*, the promoter's mints codes on /v1/issue — so
+  // restricting this to publishers left a promoter with a leaked key unrecoverable.
   @Post('orgs/:id/rotate-key')
   async rotateKey(@Session() s: SessionClaims, @Param('id') id: string) {
     const api_key = newApiKey();
@@ -236,9 +235,8 @@ export class AdminController {
 
   /**
    * Issue a single-use password-reset token for a locked-out tenant. Shown once, expires in an
-   * hour, stored hashed. The admin relays it over a channel they trust; when an email sender
-   * exists it calls this and delivers the link itself. Audited — a reset token is an account
-   * takeover in the wrong hands, and "who issued it, for whom, when" is the whole defence.
+   * hour, stored hashed. Audited: a reset token is an account takeover in the wrong hands, and
+   * "who issued it, for whom, when" is the whole defence.
    */
   @Post('orgs/:id/reset-token')
   async resetToken(@Session() s: SessionClaims, @Param('id') id: string) {
@@ -292,11 +290,9 @@ export class AdminController {
   /**
    * The one deletion this system allows: an org that never traded.
    *
-   * Everything else is `offboard`. The ledger is append-only by database trigger, and its rows
-   * carry the org id inside an opaque `account` string rather than a foreign key — so removing
-   * a tenant that ever earned or spent would leave balances pointing at nothing, with no way
-   * to ever clean them up. A signup typo has none of that, and leaving it suspended forever is
-   * just permanent clutter in a directory promoters have to read.
+   * Everything else is `offboard`. The ledger is append-only by trigger and carries the org id
+   * inside an opaque `account` string rather than a foreign key, so removing a tenant that ever
+   * earned or spent would leave balances pointing at nothing. A signup typo has none of that.
    */
   @Delete('orgs/:id')
   async deleteOrg(@Session() s: SessionClaims, @Param('id') id: string) {
@@ -305,14 +301,13 @@ export class AdminController {
         where: { id },
         select: { id: true, name: true, type: true, email: true },
       });
-      // Admins are excluded the same way every other org route excludes them, and a missing
-      // org is the same 404 — neither tells a caller which of the two it hit.
+      // Admins are excluded the way every other org route excludes them, and a missing org is
+      // the same 404 — neither tells a caller which of the two it hit.
       if (!o || o.type === 'admin') throw new NotFoundException('org not found');
 
-      // Counted inside the transaction: checking outside it would let a partnership created
-      // mid-request survive the delete and orphan itself against a tenant that no longer
-      // exists. The FKs are ON DELETE RESTRICT and would catch three of these four anyway —
-      // `ledger_entries` is the one with no foreign key at all, so it needs the guard.
+      // Counted inside the transaction: checking outside would let a partnership created
+      // mid-request survive the delete. The FKs are ON DELETE RESTRICT and would catch three of
+      // these four anyway — `ledger_entries` has no foreign key at all, so it needs the guard.
       const [partnerships, payments, withdrawals, ledger_entries] = await Promise.all([
         tx.partnership.count({ where: { OR: [{ promoter_org_id: id }, { publisher_org_id: id }] } }),
         tx.payment.count({ where: { org_id: id } }),
@@ -330,8 +325,8 @@ export class AdminController {
       await tx.org.delete({ where: { id } });
       return o;
     });
-    // After the transaction, like `offboard`: the audit row outlives the org it names, which
-    // is the point — `org:{id}` is a string, not a foreign key.
+    // After the transaction, like `offboard`: the audit row outlives the org it names, because
+    // `org:{id}` is a string, not a foreign key.
     await audit(s.org_id, 'org.delete', `org:${id}`, {
       name: org.name,
       type: org.type,
@@ -373,12 +368,12 @@ export class AdminController {
     },
   ) {
     // `suspended` rather than `pending` is the pause lever: `pending` is the publisher's own
-    // inbox state and the publisher can accept its way out of it, which is exactly what made
-    // an admin suspension revertible by the org it was aimed at.
+    // inbox state and it can accept its way out of one, which made an admin suspension
+    // revertible by the org it was aimed at.
     if (b.status !== undefined && !['pending', 'active', 'suspended'].includes(b.status))
       throw new BadRequestException('status must be pending|active|suspended');
-    // Admin-only, unlike the four negotiated rates: the take rate is the platform's own side
-    // of the deal, and neither counterparty may set it.
+    // Admin-only, unlike the four negotiated rates: the take rate is the platform's own side of
+    // the deal, and neither counterparty may set it.
     if (
       b.platform_fee_bps !== undefined &&
       (!Number.isInteger(b.platform_fee_bps) || b.platform_fee_bps < 0 || b.platform_fee_bps > 10_000)
@@ -387,16 +382,14 @@ export class AdminController {
 
     const current = await prisma.partnership.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('partnership not found');
-    // Resolved against the existing row, so the pair rule is checked on the post-patch values
-    // — raising only `guest_rate` has to be judged against the `coin_rate` already stored.
+    // Resolved against the existing row, so the pair rule is checked on post-patch values —
+    // raising only `guest_rate` is judged against the `coin_rate` already stored.
     const rates = validateRates(b, current);
 
-    // An open proposal is cleared by any rate override, and that is the whole point: without
-    // it an admin override is revertible by the party it was aimed at. Promoter proposes 80,
-    // admin overrides to 30, publisher clicks accept on the proposal still sitting in its
-    // inbox — `decideRates` compare-and-sets on the `proposed_*` columns alone, so it passes,
-    // and 80 is back in force. Same shape as the `status: 'pending'` guard on `accept`: an
-    // admin control must not be undoable by a tenant.
+    // An open proposal is cleared by any rate override, or the override is revertible by the
+    // party it was aimed at: promoter proposes 80, admin overrides to 30, publisher accepts the
+    // proposal still in its inbox — `decideRates` compare-and-sets on the `proposed_*` columns
+    // alone, so it passes and 80 is back in force.
     const repriced =
       rates.coin_rate !== current.coin_rate ||
       rates.guest_rate !== current.guest_rate ||
@@ -418,7 +411,7 @@ export class AdminController {
     });
     await audit(s.org_id, 'partnership.patch', `partnership:${id}`, {
       ...b,
-      // The proposal did not merely go stale, it was discarded — and the publisher is about to
+      // The proposal did not merely go stale, it was discarded, and the publisher is about to
       // find an empty inbox where its pending price was.
       proposal_cleared: repriced && current.proposed_coin_rate !== null,
     });
@@ -498,8 +491,8 @@ export class AdminController {
     return { ...campaign, status: 'ended', codes_voided };
   }
 
-  // Per-code override of the default expiry/single-use rules — e.g. a permanent code on
-  // store signage. Every change is audited because it loosens a money control.
+  // Per-code override of the default expiry/single-use rules — e.g. a permanent code on store
+  // signage. Audited because it loosens a money control.
   @Patch('qr-codes/:id')
   async patchQr(
     @Session() s: SessionClaims,
@@ -515,7 +508,7 @@ export class AdminController {
       (!Number.isInteger(b.max_uses) || b.max_uses < 1)
     )
       throw new BadRequestException('max_uses must be a positive integer or null');
-    // `null` here means "clear the limit"; `undefined` (absent) is what leaves a field alone.
+    // `null` clears the limit; `undefined` (absent) leaves the field alone.
     const updated = await prisma.qrCode.updateMany({
       where: { id },
       data: {
@@ -534,11 +527,8 @@ export class AdminController {
   /**
    * The admin's inbox: everything a *tenant* did that nobody here has acknowledged yet.
    *
-   * Not a second table — the actor is the whole rule: an audit entry with a tenant behind it is
-   * something the platform did not do itself, so it stays here until acknowledged. Every tenant
-   * action audited from now on arrives here for free.
-   *
-   * The audit log stays the record; this is only its unread end.
+   * Not a second table — the actor is the whole rule, so every tenant action audited from now on
+   * arrives here for free. The audit log stays the record; this is only its unread end.
    */
   @Get('notifications')
   async notifications(@Query('limit') limit?: string) {
@@ -562,8 +552,8 @@ export class AdminController {
     if (b.ids !== undefined && (!Array.isArray(b.ids) || b.ids.some((i) => typeof i !== 'string')))
       throw new BadRequestException('ids must be an array of strings');
     const { count } = await prisma.auditLog.updateMany({
-      // Acknowledging is not a way to reach into admin's own entries or to re-date one already
-      // handled: the same slice the inbox reads is the only slice this can touch.
+      // Acknowledging must not reach into admin's own entries or re-date one already handled:
+      // the same slice the inbox reads is the only slice this can touch.
       where: {
         acknowledged_at: null,
         actor: { type: { not: 'admin' } },
@@ -588,8 +578,8 @@ export class AdminController {
     }));
   }
 
-  // Manual budget adjustment (goodwill credit, or clawing back a mis-funded campaign).
-  // Negative amounts allowed, but never below zero — the ledger stays truthful either way.
+  // Manual budget adjustment (goodwill credit, or clawing back a mis-funded campaign). Negative
+  // amounts allowed, but never below zero.
   @Post('campaigns/:id/adjust')
   async adjust(
     @Session() s: SessionClaims,
@@ -600,9 +590,9 @@ export class AdminController {
       throw new BadRequestException('coins must be a non-zero integer within ±10000000');
     const campaign = await prisma.campaign.findUnique({ where: { id }, select: { id: true } });
     if (!campaign) throw new NotFoundException('campaign not found');
-    // A goodwill credit is a hand-driven money-in path, which makes a double-submitted form the
-    // likeliest way this endpoint ever pays twice. With a key the retry collides on
-    // `UNIQUE (account, ref)` instead; see the note on the portal's `fund`.
+    // A goodwill credit is a hand-driven money-in path, so a double-submitted form is the
+    // likeliest way this ever pays twice. With a key the retry collides on `UNIQUE (account,
+    // ref)` instead; see the note on the portal's `fund`.
     const key = str(b.idempotency_key, 'idempotency_key', 64, false);
     await prisma
       .$transaction(async (tx: Tx) => {
@@ -620,8 +610,8 @@ export class AdminController {
     return { budget: await balance(`campaign:${id}`), reason: b.reason ?? null };
   }
 
-  // Where scans come from, on what, when — platform-wide, or narrowed to one campaign.
-  // Same function the promoter's own campaign page calls, so the two never disagree.
+  // Where scans come from, on what, when — platform-wide or narrowed to one campaign. Same
+  // function the promoter's own campaign page calls, so the two never disagree.
   @Get('analytics')
   async analytics(@Query('campaign_id') campaignId?: string, @Query('days') days?: string) {
     return scanAnalytics(campaignId || null, +(days ?? 30));
@@ -644,14 +634,13 @@ export class AdminController {
         os: true,
         browser: true,
         device_type: true,
-        // How the hand-off screen behaved: how long it was held, and whether the scanner
-        // tapped through or the bail-out fired. `exit: 'auto'` on an iOS scan is the shape of
-        // an install that could never be attributed — nobody tapped, so nothing was carried.
+        // How the hand-off screen behaved. `exit: 'auto'` on an iOS scan is the shape of an
+        // install that could never be attributed — nobody tapped, so nothing was carried.
         client: true,
         consumed: true,
         qr_code: { select: { code: true } },
-        // Plural since a boarding-pass scan by somebody with no app yet pays twice — once as
-        // an acquisition, once as the purchase it also was.
+        // Plural: a boarding-pass scan by somebody with no app yet pays twice — once as an
+        // acquisition, once as the purchase it also was.
         redemptions: { select: { coins: true, match_method: true, kind: true } },
         campaign: {
           select: {
@@ -686,13 +675,13 @@ export class AdminController {
       promoter_name: s.campaign.partnership.promoter.name,
       publisher_name: s.campaign.partnership.publisher.name,
       redeemed: s.redemptions.length > 0,
-      // Summed, not first: this column is "what this scan cost the campaign budget", and a
-      // scan that was both an acquisition and a purchase cost it both.
+      // Summed, not first: this column is what the scan cost the campaign budget, and a scan
+      // that was both an acquisition and a purchase cost it both.
       coins: s.redemptions.length
         ? s.redemptions.reduce((n, r) => n + r.coins, 0)
         : null,
-      // which carrier brought the claim back: referrer | appclip | pasteboard | code. A
-      // publisher whose App Clip is misconfigured shows up here as a column of `pasteboard`.
+      // referrer | appclip | pasteboard | code. A publisher whose App Clip is misconfigured
+      // shows up here as a column of `pasteboard`.
       match_method: s.redemptions.map((r) => r.match_method).join('+') || null,
       kind: s.redemptions.map((r) => r.kind).join('+') || null,
     }));
@@ -734,10 +723,9 @@ export class AdminController {
         max_uses: true,
         uses: true,
         voided: true,
-        // The promoter's own reference for the transaction this code was minted against — a
-        // PNR, an order number. NULL for every code designed in the portal; set only on the
-        // machine-issued ones from `/v1/issue`. Surfaced so a support search can find one code
-        // by the reference the *promoter* actually holds, not our opaque one.
+        // The promoter's own reference for the transaction this code was minted against — a PNR,
+        // an order number. NULL for portal-designed codes, set only on machine-issued ones, so a
+        // support search can find a code by the reference the promoter actually holds.
         issued_ref: true,
         campaign: {
           select: {
@@ -759,7 +747,6 @@ export class AdminController {
     }));
   }
 
-  // ---------- withdrawals (publisher money-out, reviewed here) ----------
 
   @Get('withdrawals')
   async withdrawals(@Query('status') status?: string, @Query('limit') limit?: string) {
@@ -777,10 +764,9 @@ export class AdminController {
   }
 
   /**
-   * Pay a withdrawal: the review happened, real money is leaving. The ledger debits the
-   * publisher and credits `external:payouts` under `withdrawal:{id}` — one ref, replay-safe,
-   * and the account-balance floor guarantees a publisher can never be paid below zero even if
-   * a clawback landed between request and approval.
+   * Pay a withdrawal: the review happened, real money is leaving. Debits the publisher and
+   * credits `external:payouts` under `withdrawal:{id}` — one ref, replay-safe, and the balance
+   * floor guarantees a publisher is never paid below zero even if a clawback landed in between.
    */
   @Post('withdrawals/:id/pay')
   async payWithdrawal(
@@ -790,7 +776,7 @@ export class AdminController {
   ) {
     const note = str(b.note, 'note', 300, false);
     const paid = await prisma.$transaction(async (tx) => {
-      // Status is flipped by the same UPDATE that tests it — two admins clicking pay at once
+      // Status is flipped by the same UPDATE that tests it, so two admins clicking pay at once
       // move the money once.
       const taken = await tx.withdrawal.updateMany({
         where: { id, status: 'requested' },

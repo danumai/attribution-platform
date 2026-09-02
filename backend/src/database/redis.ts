@@ -1,12 +1,8 @@
 /**
  * The shared rate-limit counter store, and the only thing this deployment uses Redis for.
  *
- * Optional by design: unset, the process keeps its in-process limiter, which is correct for a
- * single instance. Set, every replica counts against the same window — the prerequisite for
- * running more than one.
- *
- * Nothing here is a cache: no read path falls back to Redis, so losing it costs throttling
- * accuracy and nothing else — no correctness, no money, no data.
+ * Optional by design: unset, the process keeps its in-process limiter, correct for a single
+ * instance. Nothing here is a cache — losing it costs throttling accuracy and nothing else.
  */
 import Redis from 'ioredis';
 import { REDIS_URL } from '../config';
@@ -26,8 +22,8 @@ export function getRedis(): Redis | null {
     // Capped backoff: a reconnect storm against a recovering Redis turns a blip into an outage.
     retryStrategy: (times) => Math.min(times * 200, 5_000),
   });
-  // An unlistened 'error' event takes the process down, and a rate limiter must never be able
-  // to kill the API it protects.
+  // An unlistened 'error' event takes the process down, and a rate limiter must never be able to
+  // kill the API it protects.
   client.on('error', (e) => log.warn('redis.error', { error: e.message }));
   client.on('ready', () => log.info('redis.ready'));
   return client;

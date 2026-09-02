@@ -16,14 +16,8 @@ export function org(): {
 }
 
 /**
- * One fetch wrapper for the whole console.
- *
- * `T` is an assertion, not a validation — nothing checks the body against the shape asked for.
- * The alternative is a schema library on ~25 call sites to catch what the e2e suite already
- * catches against the real server. What the generic buys is that the console stays consistent
- * *with itself*: a field renamed in `lib/types.ts` fails the build instead of rendering blank.
- *
- * Callers that genuinely ignore the body leave `T` as `void`.
+ * One fetch wrapper for the whole console. `T` is an assertion, not a validation — nothing checks
+ * the body against the shape asked for.
  */
 export async function api<T = void>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API}${path}`, {

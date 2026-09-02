@@ -55,9 +55,8 @@ export function Scans({ d, loading, campaignPicker }: Props) {
           { h: 'OS', sort: (x) => x.os ?? '', get: (x) => x.os ?? '—' },
           { h: 'Browser', sort: (x) => x.browser ?? '', get: (x) => x.browser ?? '—' },
           { h: 'Lang', sort: (x) => x.language ?? '', get: (x) => x.language ?? '—' },
-          // Whether the scanner tapped through the hand-off screen. On an iPhone with no App
-          // Clip that tap IS the attribution — it is what writes the claim to the clipboard —
-          // so a column of `auto` here is the honest explanation of a low iOS match rate.
+// Whether the scanner tapped through the hand-off screen. On an iPhone with no App Clip that tap
+// IS the attribution — it is what writes the claim to the clipboard.
           {
             h: 'Hand-off',
             sort: (x) => String(x.client?.exit ?? ''),

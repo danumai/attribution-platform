@@ -1,10 +1,7 @@
 /**
- * Scan breakdowns, shared by the admin console and the promoter's own campaign page.
- *
- * One function, two callers, because the numbers must agree: a promoter comparing their
- * campaign page against what support reads off the admin console should never see two answers.
- * Scoping is the caller's job — the admin passes no campaign (or any campaign), the portal
- * passes only a campaign it has already proved the session owns.
+ * Scan breakdowns, shared by the admin console and the promoter's own campaign page — one
+ * function, two callers, because the numbers must agree. Scoping is the caller's job: the admin
+ * passes no campaign, the portal passes one it has already proved the session owns.
  */
 import { prisma } from './prisma';
 
@@ -23,9 +20,9 @@ interface ScanAnalytics {
     /** how many scans the CDN resolved a country for; 0 means geo is simply not wired up */
     geo_known: number;
     /**
-     * How many iPhone scanners tapped Continue on the hand-off screen rather than letting the
-     * bail-out fire. That tap is what carries the claim to the clipboard, so on publishers with
-     * no App Clip this is the honest ceiling on how many iOS installs can ever be attributed.
+     * How many iPhone scanners tapped Continue rather than letting the bail-out fire. That tap
+     * carries the claim to the clipboard, so on publishers with no App Clip this is the ceiling
+     * on how many iOS installs can ever be attributed.
      */
     handoff_tapped: number;
     conversion_rate: number;
@@ -42,19 +39,15 @@ const DIMENSIONS: Record<string, string> = {
   browser: `coalesce(browser, 'unknown')`,
   language: `coalesce(language, 'unknown')`,
   platform: `platform`,
-  // 'direct' is the interesting bucket here: no referer is what a real camera scan looks like.
+  // 'direct' is the interesting bucket: no referer is what a real camera scan looks like.
   referer_host: `coalesce(referer_host, 'direct')`,
 
-  // There were four more here — screen, timezone, theme and network class — and they were the
-  // most interesting panels on the dashboard. They are gone with the fingerprint they were a
-  // by-product of: Apple names browser and device configuration explicitly as data that may not
-  // be derived to identify a device, and a reporting label does not change what was collected.
+  // Screen, timezone, theme and network class were here and were the most interesting panels.
+  // They went with the fingerprint they were a by-product of — Apple names browser and device
+  // configuration explicitly as data that may not be derived to identify a device.
   //
-  // What is left is either read off request headers every server sees (geo, UA, language) or
-  // about this platform's own artifacts (which code, which campaign, when).
-  //
-  // How the hand-off screen was left, which is about the page rather than the phone. On a
-  // publisher with no App Clip, `auto` is an install that could never be attributed.
+  // How the hand-off screen was left is about the page rather than the phone. On a publisher with
+  // no App Clip, `auto` is an install that could never be attributed.
   handoff: `coalesce(client->>'exit', 'skipped')`,
   qr_code: `coalesce(code, 'unknown')`,
   campaign: `campaign_name`,
@@ -76,16 +69,13 @@ const dimensionSql = Object.entries(DIMENSIONS)
   .join(' UNION ALL ');
 
 /**
- * Every breakdown in one round trip.
+ * Every breakdown in one round trip. Each `GROUP BY` could be its own query; as one `UNION ALL`
+ * over a single CTE the window of scans is scanned once and reused. The dimension names are
+ * interpolated as plain SQL because they come from the constant map above — the only
+ * caller-supplied values are the two bound parameters.
  *
- * Every `GROUP BY` here could be its own query; as one `UNION ALL` over a single CTE the
- * window of scans is scanned once and reused, and the whole panel is one network hop. The
- * dimension names are interpolated as plain SQL because they come from the constant map above
- * — the only caller-supplied values are the two parameters, which stay bound.
- *
- * Timestamps bucket in the database's timezone (UTC in every deployment here), so "hour" is
- * UTC, not the scanner's local clock. Local hour would need a per-scan offset we do not
- * collect; UTC at least compares honestly across a campaign.
+ * Timestamps bucket in the database's timezone (UTC everywhere here), so "hour" is UTC rather
+ * than the scanner's local clock, which would need a per-scan offset we do not collect.
  */
 export async function scanAnalytics(campaignId: string | null, days = 30): Promise<ScanAnalytics> {
   const window = Math.min(Math.max(Math.trunc(days) || 30, 1), 365);
@@ -119,10 +109,9 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
   );
 
   const totalsPromise = prisma.$queryRawUnsafe<Record<string, number>[]>(
-    // Same fan-out hazard as above, and here it would have double-counted the scan total
-    // itself. `conversions` counts scans that paid at least once — a scan that produced both a
-    // signup and a purchase reward is still one converted scan — while `coins` sums both,
-    // because the campaign budget really did pay for both.
+    // `conversions` counts scans that paid at least once — a scan that produced both a signup and
+    // a purchase reward is still one converted scan — while `coins` sums both, because the
+    // campaign budget really did pay for both.
     `SELECT count(*)::int                                        AS scans,
             count(*) FILTER (WHERE r.n > 0)::int                 AS conversions,
             coalesce(sum(r.coins), 0)::int                       AS coins,

@@ -45,10 +45,8 @@ export default function ActivityBoard() {
     POOL.slice(0, VISIBLE).map((e, i) => ({ ...e, id: i })),
   );
 
-  /* The scan the reader just performed on the pass above. This is the payoff for dragging
-     the phone onto the code — the row that posts is theirs, by name. Unlike the ambient
-     ticker it runs under reduced motion too: it is a result the reader asked for, not
-     decoration. */
+// The scan the reader just performed on the pass above — the payoff for dragging the phone onto
+// the code is that the row which posts is theirs, by name.
   useEffect(() => {
     const post = () =>
       setEvents((prev) => [{ ...OWN_SCAN, id: Date.now() }, ...prev].slice(0, VISIBLE));
@@ -82,10 +80,8 @@ export default function ActivityBoard() {
       </p>
       <ul className={lp.boardRows} aria-hidden="true">
         {events.map((e) => (
-          /* Only rows that actually posted animate. The first VISIBLE are the board's
-             initial state and arrive with the board itself; ids beyond that are the ones
-             the interval prepended, and each is a fresh element, so the keyframe runs
-             once on mount rather than replaying down the list. */
+// Only rows that actually posted animate. The first VISIBLE are the board's initial state and
+// arrive with it; ids beyond that are the ones the reader caused.
           <li className={lp.cx(lp.boardRow, e.id >= VISIBLE && 'lp-board-post')} key={e.id}>
             <span className={lp.tier(e.tier)}>{e.tier}</span>
             <span className={lp.boardMeta}>

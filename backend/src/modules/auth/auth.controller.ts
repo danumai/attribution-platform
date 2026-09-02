@@ -66,9 +66,8 @@ export class AuthController {
     // Shape check only — the address is proven by nothing here, so it stays a display field.
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       throw new BadRequestException('email must be a valid address');
-    // Through `str` like every other field: a non-string password reached `.length` as
-    // `undefined` (so the minimum silently passed) and then threw inside `byteLength` as a 500.
-    // The cap here is generous on purpose — the real ceiling is the byte check below.
+    // Through `str` like every other field: a non-string password reached `.length` as `undefined`
+    // (so the minimum silently passed) and then threw inside `byteLength` as a 500.
     const password = str(b.password, 'password', 200)!;
     if (password.length < 8) throw new BadRequestException('password min 8 chars');
     if (Buffer.byteLength(password) > MAX_PASSWORD)
@@ -78,14 +77,13 @@ export class AuthController {
     const ios_app_id = validateIosAppId(b.ios_app_id);
     const bonuses = validateBonuses(b.bonuses);
     const deeplink_url = validateDeeplinkUrl(b.deeplink_url);
-    // Both tenant types get one now, because both have a server that calls this platform.
-    // A publisher's key answers "is this attributable" and earns fees; a promoter's mints a
-    // transaction code per purchase on `/v1/issue` and spends them. Minting one unconditionally
-    // is also what keeps the two paths symmetric — a promoter that later runs an engagement
-    // campaign does not have to discover that its account was created without a credential.
+    // Both tenant types get one: a publisher's key answers "is this attributable" and earns fees,
+    // a promoter's mints a transaction code per purchase on `/v1/issue`. Minting unconditionally
+    // keeps the two symmetric — a promoter that later runs an engagement campaign does not have
+    // to discover its account was created without a credential.
     const apiKey = newApiKey();
-    // Approval gates the *publisher* side only — publishers receive money, so in production a
-    // human looks first. Promoters pay in and gate themselves with their own budget.
+    // Approval gates the *publisher* side only — publishers receive money. Promoters pay in and
+    // gate themselves with their own budget.
     const approved = b.type === 'promoter' || AUTO_APPROVE_PUBLISHERS;
     let org;
     try {
@@ -120,10 +118,8 @@ export class AuthController {
   }
 
   /**
-   * Complete an admin-issued password reset. The token arrives out of band (an admin generated
-   * it via `POST /v1/admin/orgs/:id/reset-token` and relayed it over a channel they trust);
-   * this endpoint is deliberately mailer-free — when an email sender exists, it calls the same
-   * admin issuance and delivers the link itself.
+   * Complete an admin-issued password reset. The token arrives out of band, via
+   * `POST /v1/admin/orgs/:id/reset-token`; this endpoint is deliberately mailer-free.
    */
   @Post('reset')
   async reset(@Req() req: Request, @Body() b: { token: string; password: string }) {
@@ -150,25 +146,22 @@ export class AuthController {
 
   @Post('login')
   async login(@Req() req: Request, @Body() b: { email: string; password: string }) {
-    // Coerced rather than validated: a non-string email or password is just a credential that
-    // cannot match, and answering 400 here would tell a prober something 401 does not.
+    // Coerced rather than validated: a non-string credential simply cannot match, and a 400 here
+    // would tell a prober something 401 does not.
     const email = typeof b.email === 'string' ? b.email.toLowerCase() : '';
     const password = typeof b.password === 'string' ? b.password : '';
-    // Two buckets: per-IP stops credential stuffing across many accounts, per-account stops
-    // a distributed brute force against one account.
-    // The account key is sliced because it is attacker-controlled and becomes a *retained* map
-    // key: a body full of 1mb emails is otherwise a megabyte of resident memory per request
-    // until the sweep runs. 254 is the address ceiling `signup` enforces, so no real login
-    // is ever truncated into somebody else's bucket.
+    // Two buckets: per-IP stops credential stuffing across many accounts, per-account stops a
+    // distributed brute force against one. The account key is sliced because it is
+    // attacker-controlled and becomes a *retained* map key — 254 is the address ceiling `signup`
+    // enforces, so no real login is truncated into somebody else's bucket.
     if (
       (await rateLimited(`login-ip:${clientIp(req)}`, 20)) ||
       (await rateLimited(`login-acct:${email.slice(0, 254)}`, 10))
     )
       throw new UnauthorizedException('too many attempts, try again shortly');
     const org = await prisma.org.findUnique({ where: { email } });
-    // Hash even when the account does not exist. Otherwise an unknown email returns in
-    // microseconds and a known one takes bcrypt's ~100ms, which is a reliable oracle for
-    // enumerating exactly which addresses are registered on this platform.
+    // Hash even when the account does not exist, or an unknown email returns in microseconds
+    // against bcrypt's ~100ms — a reliable oracle for which addresses are registered.
     const ok = await bcrypt.compare(password, org?.password_hash ?? DUMMY_HASH);
     if (!org || !ok) throw new UnauthorizedException('invalid credentials');
     if (org.suspended) throw new UnauthorizedException('account suspended');

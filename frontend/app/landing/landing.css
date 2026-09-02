@@ -1,21 +1,9 @@
-/* Landing motion only.
- *
- * Every static rule this file used to carry now lives as Tailwind utilities in
- * lib/lp.ts. What is left is the part the utility layer cannot reach:
- *
- *   - @keyframes definitions
- *   - @property, and the counter trick that animates a printed integer
- *   - `animation-timeline: view()/scroll()` ranges staggered per :nth-of-type
- *
- * The `lp-*` class names in the TSX exist for these selectors and nothing else.
- *
- * Motion here is additive to a page that is already fully legible without it.
- * Nothing below hides content by default. */
+/* Landing motion only. Every static rule this file used to carry now lives as Tailwind utilities
+   in lib/lp.ts; what is left is the part the utility layer cannot express — @keyframes, @property
+   and `animation-timeline: view()` ranges. */
 
 @media (prefers-reduced-motion: no-preference) {
-  /* --- the arrival sequence ---
-     The hero settles, its three facts land, the headline is struck line by line,
-     and the proof panel resolves last. */
+/* --- the arrival sequence --- */
 
   .lp .lp-pass,
   .lp .lp-board {
@@ -61,12 +49,8 @@
   .lp .lp-stub-fields .lp-field:nth-child(3) { animation-delay: 1.06s; }
   .lp .lp-stub-fields .lp-field:nth-child(4) { animation-delay: 1.16s; }
 
-  /* --- the recurring validation loop ---
-     On while the pass is on screen AND the reader has not taken the controls: once someone
-     has dragged the scanner onto the code themselves, ScanStub drops `data-run` for good.
-     A demo that keeps playing over you after you have started operating the thing is noise.
-     The attribute sits on the stage rather than the card because the phone is the card's
-     sibling and has to see the same state. */
+/* --- the recurring validation loop ---
+   On while the pass is on screen AND the reader has not taken the controls. */
   .lp-stage[data-run] .lp-scan {
     animation: lp-sweep 5.2s cubic-bezier(0.45, 0, 0.2, 1) 1.6s infinite;
   }
@@ -93,9 +77,7 @@
   @keyframes lp-flip-a { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
   @keyframes lp-flip-b { 0%, 45% { opacity: 0; } 46%, 100% { opacity: 1; } }
 
-  /* The camera is switched on, and stays on: a viewfinder with nothing moving in it is a
-     picture of a phone. The line is the element's own top border, so the whole sweep is one
-     transform on one compositor layer. It speeds up when the code is under it. */
+/* The line is the element's own top border, so the whole sweep is one transform on one element. */
   .lp .lp-phone-scan { animation: lp-viewfinder 2.8s var(--ease-drift) infinite; }
   .lp .lp-phone[data-over] .lp-phone-scan { animation-duration: 0.8s; animation-timing-function: linear; }
   @keyframes lp-viewfinder {
@@ -104,15 +86,9 @@
     100% { transform: translateY(100%); opacity: 0; }
   }
 
-  /* --- the reward landing on the screen ---
-     The flip is held back 0.52s and takes 0.55s, so the back face is not actually facing the
-     reader until ~0.9s. Everything here starts after that: a check that pops with a ring
-     going off behind it, then the caption, the amount and the button arriving in reading
-     order. Animating any of it earlier would play the whole reveal into the back of a phone.
-
-     `both` on a keyframe that only defines `from` means these sit at their natural, resolved
-     state whenever the animation is not running — which is what reduced motion, and the
-     whole block this lives in, falls back to. */
+/* --- the reward landing on the screen ---
+   The flip is held back 0.52s and takes 0.55s, so the back face is not facing the reader until
+   ~0.9s; everything on it is timed off that. */
   .lp-stage[data-scanned] .lp-phone-face-back > * {
     animation: lp-reward 0.46s cubic-bezier(0.34, 1.5, 0.64, 1) both;
   }
@@ -124,8 +100,7 @@
     from { opacity: 0; transform: translateY(5px) scale(0.8); }
   }
 
-  /* The ring is the sound the check makes. Last rule wins over the stagger above, which is
-     why it sits here rather than with the others. */
+/* Last rule wins over the stagger above, which is why it sits here rather than with the others. */
   .lp-stage[data-scanned] .lp-phone-burst {
     animation: lp-burst 0.75s var(--ease-out) 0.92s both;
   }
@@ -134,28 +109,17 @@
     100% { opacity: 0; transform: scale(2.4); }
   }
 
-  /* And it breathes, until someone picks it up. Gated on the same `data-run` as the rest of
-     the ambient loop, which ScanStub drops for good on the first grab — an idle animation is
-     higher in the cascade than the inline transform the drag writes, so it has to be gone
-     before the drag starts, not merely paused. */
+/* Gated on the same `data-run` as the rest of the ambient loop, which ScanStub drops for good on
+   the first grab. */
   .lp-stage[data-run] .lp-phone-body { animation: lp-phone-idle 7s ease-in-out infinite; }
   @keyframes lp-phone-idle {
     0%, 100% { transform: translateZ(4px) rotateY(-11deg) rotateX(4deg); }
     50% { transform: translateZ(14px) rotateY(-2deg) rotateX(-1deg); }
   }
 
-  /* --- the posting board ---
-     A row does not appear in a slot that was already there; it opens one, and the rows
-     below are pushed down. That push is the whole difference between a feed that is
-     posting and a screenshot whose top line keeps changing.
-
-     `height` rather than a transform because there is no transform that opens space, and
-     `interpolate-size` is what makes the `auto` end value interpolable — the same
-     mechanism the questions at the bottom of this file already rely on. Where it is
-     unsupported the row simply fades in at full height, which is the pre-existing
-     behaviour plus a fade. `overflow: hidden` keeps the content from spilling while the
-     row is shorter than its text; the fade is held back to the second half so the space
-     opens before anything is legible in it. */
+/* --- the posting board ---
+   A row does not appear in a slot that was already there; it opens one, and the rows below are
+   pushed down. */
   .lp .lp-board-post {
     interpolate-size: allow-keywords;
     overflow: hidden;
@@ -166,35 +130,24 @@
     52% { opacity: 0; }
   }
 
-  /* --- the settlement ---
-     The ledger figure ticks over the instant a payment lands on it. Keyed on its own value
-     in Settlement.tsx, so React remounts it and the animation replays — the movement is
-     there to make sure the reader's eye is on the number that just changed, since that
-     change IS the point of the whole panel.
-
-     The crossings and the grace bar are transitions rather than keyframes and live further
-     down this file: they are driven by React phase state, not by a timeline. */
+/* --- the settlement ---
+   The ledger figure ticks over the instant a payment lands on it. Keyed on its own value in
+   Settlement.tsx, so React remounts it and the animation replays. */
   .lp .lp-settle-fig { animation: lp-fig-tick 0.4s var(--ease-out) both; }
   @keyframes lp-fig-tick {
     from { opacity: 0; transform: translateY(-5px); }
   }
 
-  /* --- the sector rail ---
-     Two identical tracks laid end to end; translating both by exactly one track width
-     puts the second where the first started, so the loop has no seam. The trailing gap
-     lives in the track's own padding rather than on the flex parent — a parent `gap`
-     would sit outside the translated distance and show up as a jump every cycle.
-
-     Infinite, so it is gated on `[data-run]` (Proof.tsx sets it from an
-     IntersectionObserver) rather than burning frames while off screen. `linear` because
-     the reader's eye tracks it continuously: any easing reads as the rail stalling. */
+/* --- the sector rail ---
+   Two identical tracks laid end to end; translating both by exactly one track width puts the
+   second where the first started, so the loop has no seam. */
   .lp-marquee[data-run] .lp-marquee-track {
     animation: lp-marquee 42s linear infinite;
   }
   @keyframes lp-marquee { to { transform: translateX(-100%); } }
 
-  /* Pause under the cursor so a name can actually be read. Gated on a real pointer —
-     on touch this would latch paused after the tap that scrolled past it. */
+/* Pause under the cursor so a name can be read. Gated on a real pointer — on touch this would
+   latch paused after the tap that scrolled past it. */
   @media (hover: hover) and (pointer: fine) {
     .lp-marquee:hover .lp-marquee-track { animation-play-state: paused; }
   }
@@ -209,7 +162,7 @@
   }
 }
 
-/* --- scroll-linked moves: only where the scroll itself is the mechanism --- */
+/* --- scroll-linked moves --- */
 
 @supports (animation-timeline: scroll()) {
   @media (prefers-reduced-motion: no-preference) {
@@ -220,8 +173,8 @@
     }
     @keyframes lp-feed { to { transform: scaleX(1); } }
 
-    /* The nav already carries its tint and blur as utilities. What scroll adds is the
-       separation: it lifts off the page once the reader has left the top. */
+/* What scroll adds is the separation: the nav lifts off the page once the reader has left the
+   top. */
     .lp .lp-nav {
       animation: lp-nav-set var(--ease-drift) both;
       animation-timeline: scroll(root block);
@@ -231,12 +184,8 @@
       to { box-shadow: var(--shadow-contact); }
     }
 
-    /* The hero pass needs BOTH its entrance (lp-press-land, above) and this
-       parallax drift. Both use the `animation` shorthand, and this selector is
-       more specific than `.lp .lp-pass`, so declaring it separately would reset
-       animation-name and silently drop the entrance in any browser supporting
-       animation-timeline: scroll(). List both animations here instead, so this
-       rule is the single source of truth for the hero pass. */
+/* The hero pass needs BOTH its entrance (lp-press-land, above) and this parallax drift. Both use
+   the `animation` shorthand, and this selector is the more specific of the two. */
     .lp .lp-hero .lp-pass {
       animation: lp-press-land 0.78s var(--ease-out) both, lp-parallax-pass var(--ease-drift) both;
       animation-timeline: auto, scroll(root block);
@@ -263,8 +212,7 @@
     .lp .lp-leg:nth-child(3) { animation-range: entry 13% entry 63%; }
     .lp .lp-leg:nth-child(4) { animation-range: entry 17% entry 67%; }
 
-    /* the journey diagram's waypoints light up one by one, on the same stagger as
-       the coupon strip below them so the two read as one motion. */
+/* the journey diagram's waypoints light up on the same stagger as the coupon strip below them */
     @keyframes lp-journey-dot-active {
       to { border-color: var(--color-accent-text); background: var(--color-accent-text); transform: scale(1.15); }
     }
@@ -325,10 +273,8 @@
     }
     @keyframes lp-fill { from { transform: scaleX(0); } }
 
-    /* The guest meter has two segments, and the order they draw in IS the argument: the
-       paid fifth first, then the hatched remainder that is held rather than spent. Drawing
-       them together would read as one bar reaching 50 coins, which is the opposite of what
-       the card says. Specificity has to beat `.lp .lp-meter i` above, hence the element. */
+/* The guest meter has two segments, and the order they draw in IS the argument: the paid fifth
+   first, then the hatched remainder that is held rather than spent. */
     .lp .lp-meter i.lp-meter-held { animation-range: entry 44% entry 88%; }
 
     /* and their figures count up to meet the meters */
@@ -363,14 +309,11 @@
     .lp .lp-metric:nth-child(3) { animation-range: entry 13% entry 63%; }
     .lp .lp-metric:nth-child(4) { animation-range: entry 17% entry 67%; }
 
-    /* `--fig` is what the counter's ::after paints itself with, and it is inherited —
-       so the default belongs on this container, not on `.lp-num`. Declaring it there
-       would sit closer than the fare cards' own `--fig` and silently repaint their two
-       figures ink. */
+/* `--fig` is what the counter's ::after paints itself with, and it is inherited — so the default
+   belongs on this container, not on `.lp-num`. */
     .lp .lp-metrics { --fig: var(--color-ink); }
 
-    /* the comparison lands row by row: seven rows at once is a wall, seven rows on a
-       stagger is seven comparisons */
+/* seven rows at once is a wall; seven rows on a stagger is seven comparisons */
     .lp-compare .lp-compare-row {
       animation: lp-enter-rise linear both;
       animation-timeline: view();
@@ -395,29 +338,19 @@
     .lp-faq .lp-faq-item:nth-child(5) { animation-range: entry 14% entry 54%; }
     .lp-faq .lp-faq-item:nth-child(6) { animation-range: entry 17% entry 57%; }
 
-    /* generic section entrance: fade + rise, reused everywhere a card or class
-       block scrolls into place — the same idiom .lp-leg already uses */
+/* generic section entrance: fade + rise, reused wherever a card or class block scrolls in */
     .lp .lp-enter {
       animation: lp-enter-rise linear both;
       animation-timeline: view();
       animation-range: entry 5% entry 55%;
     }
-    /* No blur on the way in. It read as depth on the old mid-grey canvas; over pastel
-       limestone the same three pixels just read as a smudge, and the source never
-       blurs anything. Opacity and offset carry the entrance on their own. */
+/* No blur on the way in: over pastel limestone the same three pixels read as a smudge. */
     @keyframes lp-enter-rise {
       from { opacity: 0; transform: translateY(18px); }
     }
 
-    /* The eyebrow's leading rule is the one ornament that repeats at every section, so it
-       is the cheapest place on the page to spend motion: it is struck out from the label
-       rather than being there already. `scaleX` from a left origin, so the label beside it
-       does not reflow.
-
-       `cover`, not `entry`: an `entry` range is measured against the element's own height,
-       and this element is one pixel tall — the whole range would elapse in a single pixel
-       of scroll and the rule would simply be drawn. `cover` is measured against the
-       viewport, so a thin element still gets a real span to draw over. */
+/* The eyebrow's leading rule repeats at every section, so it is the cheapest place on the page to
+   spend motion. */
     .lp .lp-eyebrow::before {
       transform-origin: left;
       animation: lp-rule-draw linear both;
@@ -429,37 +362,19 @@
 }
 
 /* --- pointer-level polish ---
-   Two effects used to live here and both are deliberately gone.
+   The cursor-following accent spotlight on cards and its siblings are deliberately gone. */
 
-   The cursor-following accent spotlight on cards ([data-spot], fed by Spotlight.tsx)
-   and the white gleam sweeping the primary button (.lp-btn::after) were the page's two
-   clearest "generic premium SaaS" signatures. On a mid-grey canvas with a pigment
-   accent neither reads as polish — coloured light over warm grey reads as a smudge, and
-   a white gleam reads as a plastic web button.
-
-   The structural motion below and above this comment stays: it earns its place by
-   showing how the product works rather than by making surfaces glisten. */
-
-/* The coins' resting fan. Static geometry, so it sits outside every motion gate: with no
-   `view()` support and no animation at all, five coins still read as five coins on a track
-   rather than as one disc with four hidden behind it. */
+/* The coins' resting fan. Static geometry, so it sits outside every motion gate: with no `view()`
+   support and no animation at all, five coins still read as five coins. */
 .lp .lp-settle-disc { left: calc(var(--i) * 19px); }
 
 /* --- the pass, and the thing that scans it ---
-   Deliberately outside the reduced-motion gate. The two phone faces have to sit back to back
-   whether or not anything moves, or they stack and both render at once; and a drag has to
-   keep working for someone who has asked for less motion, because it is a control, not an
-   effect. The global opt-out in globals.css neuters the durations below on its own, which
-   leaves the interaction intact and the animation gone — which is the point of the setting.
-
-   The tilt itself is not here: ScanStub writes a transform straight onto the card from its
-   pointermove handler, and gates it on a fine pointer in JS. A custom property would have
-   been tidier to read, but every field, code cell and status line inside the card inherits
-   it and gets a style recalc on each frame of the move. */
+   Deliberately outside the reduced-motion gate: the two phone faces have to sit back to back
+   whether or not anything moves. */
 
 .lp .lp-stub {
-  /* 140ms is short enough that the card tracks the cursor instead of trailing it, long
-     enough to smooth the jitter between two frames. A longer curve here reads as lag. */
+/* 140ms is short enough that the card tracks the cursor instead of trailing it, long enough to
+   smooth the jitter between two frames. */
   transition: transform 0.14s var(--ease-out);
 }
 
@@ -468,45 +383,36 @@
 .lp .lp-code[data-armed] { border-color: var(--color-accent-text); }
 .lp .lp-code[data-armed] .lp-code-ring { opacity: 1; }
 
-/* The scanner is split in two: the button positions, the chassis inside it tips. That is
-   what buys the 3D — perspective on the button, preserve-3d on the chassis, the screen
-   flipping inside that — and it keeps the button's box unrotated, so the drop test stays a
-   plain rect comparison. 700px over a 116px object is a short lens: enough foreshortening
-   that a tip reads as a tip, not enough to caricature it. */
+/* The scanner is split in two: the button positions, the chassis inside it tips. That is what buys
+   the 3D — perspective on the button, preserve-3d on the chassis. */
 .lp .lp-phone { perspective: 700px; }
 
 .lp .lp-phone-body {
   transform-style: preserve-3d;
-  /* Not square to the page. A phone left on a card sits at an angle, and the resting tilt is
-     also where the chassis returns to on a miss — the stylesheet holds the home pose so JS
-     only has to clear the inline transform. */
+/* The resting tilt is also where the chassis returns to on a miss, so the stylesheet holds it. */
   transform: rotateY(-8deg) rotateX(3deg);
 }
 
-/* Springs home from wherever it was dropped. A drag release is the one place bounce
-   belongs: it is the overshoot a real object has when you let go of it. */
+/* Springs home from wherever it was dropped: the overshoot a real object has when you let go. */
 .lp .lp-phone,
 .lp .lp-phone-body {
   transition: transform 0.52s cubic-bezier(0.34, 1.4, 0.64, 1), box-shadow 0.24s var(--ease-out);
 }
 
 /* A hair proud of the glass, so tipping the chassis drifts the highlight across the screen
-   instead of carrying it rigidly along. That parallax is most of what sells the slab. */
+   instead of carrying it rigidly along. */
 .lp .lp-phone-gloss { transform: translateZ(2px); }
 
-/* Held: the frame loop in ScanStub owns `transform` on both elements outright, so neither
-   may be transitioned here — two curves on one property is what makes a drag feel like it is
-   swimming. The shadow is still transitioned, and it is doing real work: a lifted object
-   throws a longer, softer shadow, and that is most of what tells you it has left the
-   surface. */
+/* Held: the frame loop in ScanStub owns `transform` on both elements outright, so neither may be
+   transitioned here — two curves on one property is what makes a drag feel laggy. */
 .lp .lp-phone[data-held] {
   transition: box-shadow 0.24s var(--ease-out);
   box-shadow: 0 34px 58px -22px rgb(17 17 17 / 0.5);
 }
 .lp .lp-phone[data-held] .lp-phone-body { transition: none; }
 
-/* Dropped on the code: it settles rather than springs. Bounce is right for a thing let go of
-   in mid-air and wrong for a thing being placed against something. */
+/* Dropped on the code: it settles rather than springs. Bounce is wrong for a thing being placed
+   against something. */
 .lp .lp-phone[data-pinned],
 .lp .lp-phone[data-pinned] .lp-phone-body {
   transition: transform 0.3s var(--ease-out), box-shadow 0.24s var(--ease-out);
@@ -520,24 +426,19 @@
 .lp .lp-phone-face { backface-visibility: hidden; }
 .lp .lp-phone-face-back { transform: rotateY(180deg); }
 
-/* --- the viewfinder finding something ---
-   The reticle closes down onto the code the way a camera racks focus, the code resolves
-   inside it, and the sweep goes from an idle white line to a fast accent one. All four are
-   the same state — the phone is over the plate — read from the one attribute. */
+/* --- the viewfinder finding something --- */
 .lp .lp-phone-reticle,
 .lp .lp-phone-peek,
 .lp .lp-phone-cap { transition: opacity 0.22s var(--ease-out), color 0.22s var(--ease-out), transform 0.3s var(--ease-out); }
-/* The frame opens out and hands the viewfinder to the code itself, full width and crisp.
-   Both at once was a pink halo around a 40px thumbnail: at this size the brackets and the
-   code are competing for the same 50 pixels, and neither wins. */
+/* The frame opens out and hands the viewfinder to the code itself. Both at once was a pink halo
+   around a 40px thumbnail. */
 .lp .lp-phone[data-over] .lp-phone-reticle { color: var(--color-accent); opacity: 0; transform: scale(1.3); }
 .lp .lp-phone[data-over] .lp-phone-peek { opacity: 1; }
 .lp .lp-phone[data-over] .lp-phone-cap { color: var(--color-accent); }
 .lp .lp-phone[data-over] .lp-phone-scan { border-color: var(--color-accent); }
 
 /* --- the hint carries the state ---
-   The reader is watching the phone, not the status line down in the card, so the chip under
-   it is where "you can drop this now" and "that worked" have to be said. */
+   The reader is watching the phone, not the status line down in the card. */
 .lp .lp-phone-hint {
   transition: background-color 0.18s var(--ease-out), border-color 0.18s var(--ease-out),
     color 0.18s var(--ease-out);
@@ -554,10 +455,7 @@
 }
 
 /* --- a scan the reader performed ---
-   One shot, not the loop: the sweep runs down the code once and the ring stays, because
-   this code is now actually redeemed rather than being demonstrated. The status and the
-   phone are held back until the sweep has cleared the plate — the result should land after
-   the read, the way it does on a real scanner. */
+   One shot, not the loop: the sweep runs down the code once and the ring stays. */
 
 .lp-stage[data-scanned] .lp-scan {
   animation: lp-sweep-once 0.95s cubic-bezier(0.45, 0, 0.2, 1) both;
@@ -585,35 +483,23 @@
   transition-delay: 0.52s;
 }
 
-/* The empty state of the two bars that draw across this page — the reading progress in the
-   nav and the grace window below. It has to be `transform`, and it has to be here: the
-   `scale-x-0` utility these used to carry compiles to the `scale` property in Tailwind v4,
-   and `scale` composes WITH `transform` rather than being overridden by it, so an animation
-   setting `transform: scaleX(1)` was landing on `scale: 0 1` and multiplying out to nothing.
-   Both bars were permanently invisible. */
+/* The empty state of the two bars that draw across this page. It has to be `transform`, not the
+   `scale` property Tailwind's `scale-x-0` compiles to, which the animations would multiply. */
 .lp .lp-nav-progress { transform: scaleX(0); }
 
 /* --- the settlement's two payments ---
-   Driven by React phase state rather than a timeline, so these are transitions: each one
-   fires when Settlement.tsx flips the attribute, and the phase clock in that file is the
-   single place the timing is written down.
-
-   The lane is the full width of the rail and is what travels; the token rides at its left
-   edge, so `100% - 2.75rem` (the token's own width) is the crossing distance, one constant
-   for both payments. */
+   Driven by React phase state rather than a timeline, so these are transitions. */
 .lp .lp-settle-lane { transition: transform 0.8s var(--ease-out); }
 .lp .lp-settle-lane[data-sent] { transform: translateX(calc(100% - 2.75rem)); }
 
-/* The grace window, drawn as the thing it is: a bar crossing the rail under the held
-   payment, at exactly the rate the wait is actually running. Linear, because a wait does not
-   ease — and any curve here would read as the release being imminent long before it is. */
+/* The grace window, drawn at exactly the rate the wait is actually running. Linear, because an
+   eased bar would misreport elapsed time. */
 .lp .lp-settle-grace {
   transform: scaleX(0);
   transition: transform 1.95s linear, opacity 0.4s var(--ease-out);
 }
 .lp .lp-settle-grace[data-run] { transform: scaleX(1); }
-/* The window closed. Fading it out rather than winding it back: a bar that empties reads as
-   the wait restarting, which is the opposite of what just happened. */
+/* Fading it out rather than winding it back: a bar that empties reads as the wait restarting. */
 .lp .lp-settle-grace[data-done] { opacity: 0; }
 
 /* held → released is a colour change on both the token and its caption, so they turn over
@@ -626,8 +512,7 @@
 .lp .lp-settle-tag[data-on] { color: var(--color-ok); }
 
 /* --- the budget planner's sliders ---
-   Native <input type="range">; only the track and thumb need drawing, and both are
-   pseudo-elements no utility can reach. --pct comes from the component. */
+   Track and thumb are pseudo-elements no utility can reach. */
 
 .lp .lp-range {
   --track: 6px;
@@ -636,8 +521,8 @@
 }
 .lp .lp-range:focus-visible { outline: none; }
 
-/* Vendor track/thumb pseudo-elements cannot share a selector list — one engine not
-   recognising the other's pseudo-element drops the whole rule. Hence the duplication. */
+/* Vendor track/thumb pseudo-elements cannot share a selector list — one engine not recognising
+   the other's drops the whole rule. Hence the duplication. */
 .lp .lp-range::-webkit-slider-runnable-track {
   height: var(--track);
   border-radius: 999px;
@@ -679,10 +564,8 @@
 }
 .lp .lp-range:active::-webkit-slider-thumb { transform: scale(1.18); box-shadow: var(--shadow-contact); }
 .lp .lp-range:active::-moz-range-thumb { transform: scale(1.18); box-shadow: var(--shadow-contact); }
-/* The track suppresses the native outline, so this box-shadow is the slider's ONLY
-   focus indicator — it cannot be a tinted halo. A 24% wash of the pastel accent
-   measured under 1.5:1 against the track. Ink, offset by a canvas-coloured gap, is
-   the same ring :focus-visible draws everywhere else in the system. */
+/* The track suppresses the native outline, so this box-shadow is the slider's ONLY focus
+   indicator — it cannot be a tinted halo. */
 .lp .lp-range:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-ink);
 }
@@ -691,9 +574,8 @@
 }
 
 /* --- the questions ---
-   <details> is the whole component. Where ::details-content exists the browser
-   animates the open/close for us; where it does not, the panel simply appears —
-   which is the same content, just without the easing. */
+   <details> is the whole component; where ::details-content exists the browser animates the
+   open/close for us. */
 
 .lp-faq details[open] > summary .lp-faq-mark {
   transform: rotate(45deg);

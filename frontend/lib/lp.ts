@@ -1,13 +1,9 @@
 /**
- * Landing-page utility strings.
+ * Landing-page utility strings: an editorial layer over `lib/tw.ts` rather than a second design
+ * system — the same tokens, set at the top of the type scale instead of the bottom.
  *
- * An *editorial layer* over `lib/tw.ts` rather than a second design system: the same tokens and
- * primitives, set at the top of the type scale instead of the bottom, plus the few landing-only
- * compositions (the hero grid, the posting board, the coupon strip).
- *
- * The `lp-*` class names that remain in the TSX are motion hooks only — landing.css owns the
- * entrance sequence and the scroll-linked moves, because @keyframes, @property and
- * `animation-timeline: view()` ranges staggered by :nth-of-type cannot be spelled as utilities.
+ * The `lp-*` class names in the TSX are motion hooks only; landing.css owns the entrance
+ * sequence and the scroll-linked moves, which cannot be spelled as utilities.
  */
 import { btnBase, btnBox, cx, inkAccent, inkGhost } from '@/lib/tw';
 
@@ -50,9 +46,8 @@ export const mark =
 
 const lpPad = `${btnBox} px-5 py-2.5 text-sm font-semibold`;
 
-/* No sheen and no glow. A gleam sweeping across the primary action reads as a shiny web
-   button, which is the register this theme is deliberately not in — the button earns its
-   emphasis from being the only madder fill on the page. */
+/* No sheen and no glow: a gleam sweeping across the primary action reads as a shiny web button,
+   which is the register this theme is deliberately not in. */
 export const btn = cx(btnBase, lpPad, inkAccent, 'active:translate-y-px');
 export const btnGhost = cx(btnBase, lpPad, inkGhost, 'active:translate-y-px');
 export const btnLg = 'px-6 py-3.25 text-[15px]';
@@ -61,19 +56,15 @@ export const btnLg = 'px-6 py-3.25 text-[15px]';
 
 export const hero = 'lp-hero relative isolate pt-16 pb-4 max-[720px]:pt-9';
 
-/** A single faint value shift behind the hero, not a coloured wash.
- *
- *  Three tinted radial glows was the loudest generic-SaaS signature on the page, and on a
- *  mid-grey canvas coloured light does not read as atmosphere — it reads as a smudge. Depth
- *  here comes from value, the same way it does on every other surface in the system. Being
- *  a static gradient, it also no longer needs a client component to gate an infinite
- *  animation while off screen. */
+/** A single faint value shift behind the hero, not a coloured wash. Depth here comes from value,
+ *  the same way it does on every other surface in the system — and a static gradient needs no
+ *  client component to gate an animation while off screen. */
 export const heroWash =
   'pointer-events-none absolute inset-[-120px_-10%_auto_-10%] -z-1 h-[640px] ' +
   'bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--color-card)_70%,transparent),transparent_72%)]';
 
-/** The hero is a two-column composition, not a bordered card. The card is the proof panel on
- *  the right; wrapping the argument in one too made the whole viewport a single object. */
+/** The hero is a two-column composition, not a bordered card: wrapping the argument in one too
+ *  made the whole viewport a single object. */
 export const pass =
   'lp-pass grid grid-cols-[minmax(0,1fr)_400px] items-center gap-14 ' +
   'max-[1000px]:grid-cols-[minmax(0,1fr)] max-[1000px]:gap-9';
@@ -96,25 +87,19 @@ export const ctaNote = 'lp-cta-note mt-4 text-[13px] text-mut';
 
 /* ---- the proof panel: one code, and what happens to it ---- */
 
-/** The pass is a printed card, so it is given a card's geometry: a perspective parent it
- *  tilts inside, and room around it for the scanner to be dragged. `data-run` and
- *  `data-scanned` both live here rather than on the card, because the phone is a sibling of
- *  the card and has to see the scanned state too. */
+/** A perspective parent the pass tilts inside, with room around it for the scanner to be
+ *  dragged. `data-run` and `data-scanned` live here rather than on the card, because the phone
+ *  is a sibling of the card and has to see the scanned state too. */
 export const stubStage =
   'lp-stage relative [perspective:1400px] ' +
   'max-[1000px]:mx-auto max-[1000px]:w-full max-[1000px]:max-w-[420px]';
 
 export const stub = cx('lp-stub flex flex-col gap-5 p-7', passShell);
 
-/* ---- the scanner ----
-   The one control on this page that operates the product instead of describing it: drag it
-   onto the code and a scan actually resolves — the plate sweeps, the status flips, and a
-   redemption posts to the board below. It is a <button>, so the same thing happens on Enter
-   for anyone who is not dragging anything. */
+/* ---- the scanner ---- */
 
-/** The button is the hitbox and nothing else: it only ever translates, so its box stays a
- *  clean measurement for the drop test. Everything that tips in 3D hangs off the chassis
- *  inside it. */
+/** The button is the hitbox and nothing else: it only ever translates, so its box stays a clean
+ *  measurement for the drop test. Everything that tips in 3D hangs off the chassis inside it. */
 export const phone = cx(
   'lp-phone absolute -top-9 -right-8 z-2 w-[116px] rounded-[22px]',
   'cursor-grab touch-none select-none active:cursor-grabbing',
@@ -124,23 +109,15 @@ export const phone = cx(
   'max-[480px]:-top-6 max-[480px]:-right-2 max-[480px]:w-[92px]',
 );
 
-/** The chassis. The only dark object on a paper-coloured page, which is most of what makes
- *  it read as a device sitting on the card rather than a shape printed into it. */
 export const phoneBody =
   'lp-phone-body relative block rounded-[22px] bg-[#17181a] p-[3.5px] ' +
   'shadow-[0_0_0_1px_rgb(0_0_0/0.55),0_1px_0_rgb(255_255_255/0.2)_inset]';
 
-/** Power and volume. Two slivers on the edges — at this size the eye reads "there are keys
- *  on the side of that", not their shape. */
 export const phoneKey = 'absolute w-[2px] rounded-full bg-[#34363a]';
 
-/** Two faces on one plate — the camera, and where the scan actually sends you.
- *
- *  No `overflow: hidden` here, deliberately, and it is not an oversight to tidy up: a
- *  non-visible overflow forces `transform-style: flat`, which collapses the 3D context the
- *  flip lives in and takes `backface-visibility` with it — the symptom is the front face
- *  showing through the back, mirrored, instead of the store listing. Nothing needs the clip:
- *  each face rounds its own corners, and the viewfinder sweep stops inside the screen. */
+/** Two faces on one plate. No `overflow: hidden` here, deliberately: a non-visible overflow
+ *  forces `transform-style: flat`, which collapses the 3D context the flip lives in and takes
+ *  `backface-visibility` with it — the front face then shows through the back, mirrored. */
 export const phoneScreen =
   'lp-phone-screen relative block aspect-9/19 rounded-[18.5px] bg-[#0a0b0d]';
 export const phoneFace = 'lp-phone-face absolute inset-0 grid place-items-center rounded-[18.5px]';
@@ -149,10 +126,7 @@ export const phoneFaceBack = cx(
   'lp-phone-face-back content-center gap-1.5 bg-card px-2 text-center',
 );
 
-/* ---- the viewfinder ----
-   A camera that is switched on: an island with a lens in it, a reticle that closes when the
-   code is under it, the code itself resolving in the frame, and a sweep that never stops. A
-   still rectangle would be a picture of a phone. */
+/* ---- the viewfinder ---- */
 
 export const phoneIsland =
   'absolute top-[5px] left-1/2 z-1 flex h-[8px] w-[27px] -translate-x-1/2 items-center ' +
@@ -170,21 +144,14 @@ export const phonePeek =
  *  the screen needs no clip. */
 export const phoneVfScan =
   'lp-phone-scan pointer-events-none absolute inset-x-[7px] top-[14%] h-[56%] border-t border-white/45 opacity-0';
-/** The one line of text inside the device, so it is set to be read rather than to suggest
- *  that a phone has writing on it: bigger, heavier, and near-white on black. */
 export const phoneCap =
   'lp-phone-cap absolute inset-x-0 bottom-[9px] font-mono text-[9px] font-semibold uppercase ' +
   'tracking-[0.1em] text-white/85';
-/** glass, a hair proud of the screen, so tipping the chassis drifts the highlight across it */
 export const phoneGloss =
   'lp-phone-gloss pointer-events-none absolute inset-0 rounded-[22px] ' +
   'bg-[linear-gradient(118deg,rgb(255_255_255/0.20),transparent_26%,transparent_66%,rgb(255_255_255/0.09))]';
 
-/* ---- the payoff screen ----
-   What the scan was for. The phone turns over onto the reward the reader just earned, and it
-   is the same 10 coins the guest-tier row posts to the board below a beat later — the two
-   halves of the demo are reporting one event, not two. Everything here is drawn statically
-   and animated in by landing.css; with motion off it is simply the screen, already resolved. */
+/* ---- the payoff screen ---- */
 
 export const phoneBurst =
   'lp-phone-burst pointer-events-none absolute top-[27%] size-7 rounded-full border-2 border-accent opacity-0';
@@ -198,9 +165,8 @@ export const phoneGet =
   'mt-0.5 rounded-full bg-ink px-2.5 py-[3px] text-[7px] font-semibold uppercase tracking-[0.1em] text-card';
 
 /** A chip, not bare text, and an opaque one: this is dragged over a field of black squares,
- *  where grey-on-translucent is unreadable. It also carries the state — neutral, accent the
- *  moment the code is under the phone, settled green once it has been redeemed — because the
- *  reader is looking at the phone, not at the status line down in the card. */
+ *  where grey-on-translucent is unreadable. It carries the state too, because the reader is
+ *  looking at the phone rather than at the status line down in the card. */
 export const phoneHint =
   'lp-phone-hint pointer-events-none absolute top-full left-1/2 mt-2.5 -translate-x-1/2 ' +
   'whitespace-nowrap rounded-full border border-line bg-card px-3 py-1.5 ' +
@@ -214,7 +180,6 @@ export const scanSweep =
   'lp-scan absolute inset-x-0 top-0 h-[44%] border-b-2 border-accent-text opacity-0 ' +
   'bg-[linear-gradient(to_bottom,transparent,color-mix(in_srgb,var(--color-accent)_14%,transparent)_74%,color-mix(in_srgb,var(--color-accent)_30%,transparent))]';
 
-/** the plate takes the reader's ring the instant the sweep clears the code */
 export const codeRing =
   'lp-code-ring absolute inset-0 rounded-xl opacity-0 shadow-[0_0_0_2px_var(--color-accent-text)_inset]';
 
@@ -260,11 +225,9 @@ export const tier = (t: 'guest' | 'verified') => (t === 'guest' ? tierGuest : ti
 
 export const section = 'pt-28 max-[720px]:pt-20';
 
-/* `lp-enter` gives every section head the same scroll-in the cards below it already have —
-   without it the headings snapped in while their own content rose, which read as two pages. */
+/* `lp-enter` gives every section head the same scroll-in the cards below it already have. */
 export const sectionHead = 'lp-enter mb-10 max-w-[62ch]';
 
-/** a small labelled rule leading into the heading — structure, not decoration */
 export const eyebrow =
   "lp-eyebrow mb-4 flex items-center gap-2.5 text-[12.5px] font-semibold tracking-[0.01em] text-accent-text " +
   "before:h-px before:w-7 before:bg-accent before:content-['']";
@@ -301,9 +264,8 @@ export const journeyTrigger = 'mt-5 [&>span]:text-[11px]';
  */
 export const modalDialog =
   'm-auto w-[min(720px,calc(100vw-48px))] bg-transparent p-0 text-ink ' +
-  /* The same entrance the console's dialogs use — a dialog that appears with no motion
-     reads as a page swap rather than something opening on top of what you were reading.
-     `open:` is what scopes it to the shown state; the browser owns everything else. */
+/* The same entrance the console's dialogs use — a dialog that appears with no motion reads as a
+   page swap rather than something opening on top of what you were reading. */
   'open:animate-modal-in backdrop:animate-fade ' +
   'backdrop:bg-[color-mix(in_srgb,var(--color-ink)_45%,transparent)]';
 export const modal = 'relative w-full px-7 pt-8.5 pb-7';
@@ -327,7 +289,6 @@ export const leg =
   'max-[1000px]:[&:nth-child(odd)]:border-l-0 ' +
   'max-[720px]:[&+&]:border-l-0 max-[720px]:[&+&]:border-t max-[720px]:[&+&]:border-t-line';
 
-/** the step number, set as a figure rather than a coupon serial */
 export const legNo =
   'grid size-7 place-items-center rounded-lg bg-accent-soft font-mono text-[12px] font-semibold text-accent-text';
 export const legTitle = 'mt-4 mb-2.5 text-[17px] font-semibold tracking-[-0.02em] text-ink';
@@ -335,7 +296,6 @@ export const legBody = 'text-[15px] leading-[1.6] text-ink-soft';
 export const legMeta =
   'mt-4 inline-block rounded-md border border-line-soft bg-card-alt px-2 py-1 font-mono text-[11.5px] text-mut';
 
-/** a code chip sitting inside a sentence — no margin, so it does not break the line rhythm */
 export const codeInline =
   'rounded-md border border-line-soft bg-card-alt px-1.5 py-0.5 font-mono text-[12.5px] text-ink-soft';
 
@@ -361,9 +321,8 @@ export const fareAmount =
 export const fareMeter =
   'lp-meter mt-4 mb-5 flex h-1.5 overflow-hidden rounded-full bg-sunk [&_i]:h-full [&_i]:shrink-0 [&_i]:origin-left [&_i]:rounded-full';
 
-/** The 40 coins the guest rate holds back. Hatched rather than filled, and drawn after the
- *  paid fifth (see landing.css) — "held, not lost" is the section's argument, and this is the
- *  only place on the page it is shown rather than asserted. */
+/** The 40 coins the guest rate holds back. Hatched rather than filled, and drawn after the paid
+ *  fifth (see landing.css): "held, not lost" is the section's argument. */
 export const meterHeld =
   'lp-meter-held w-4/5 bg-[repeating-linear-gradient(-45deg,var(--color-warn-line)_0_3px,transparent_3px_6px)]';
 
@@ -371,12 +330,7 @@ export const fareBody = 'text-[15px] leading-[1.62] text-ink-soft [&+p]:mt-3';
 
 export const fareFoot = 'mt-auto border-t border-line-soft pt-5 text-[12.5px] text-mut';
 
-/* ---- the settlement ----
-   The two fare cards state what a guest rate is; this shows it happening. One 50-coin signup
-   as the two payments it actually is, a lane each: the 10 crosses on confirmation, the 40
-   waits out a grace window drawn as a filling bar and follows on verification. Both ledger
-   figures move when a payment lands, because a transfer where nothing changes is not a
-   transfer. Timer-driven from Settlement.tsx — see there for why not `view()`. */
+/* ---- the settlement ---- */
 
 export const settle =
   'lp-settle mt-5 grid grid-cols-[minmax(0,150px)_minmax(0,1fr)_minmax(0,150px)] items-center gap-6 ' +
@@ -401,16 +355,14 @@ export const settleLanes =
   'grid gap-4 max-[720px]:col-span-full max-[720px]:row-start-2 max-[720px]:my-1';
 export const settleRow = 'grid gap-1.5';
 
-/** The rail is a filled track rather than a hairline, because the grace window has to be
- *  drawn running *inside* it. That wait was previously 2.1 seconds of nothing happening,
- *  which is indistinguishable from a broken animation. */
+/** A filled track rather than a hairline, because the grace window is drawn running *inside* it
+ *  — that wait was otherwise 2.1 seconds indistinguishable from a broken animation. */
 export const settleRail = 'lp-settle-rail relative h-6 rounded-full bg-sunk';
 export const settleGrace =
   'lp-settle-grace absolute inset-0 origin-left rounded-full bg-warn-line';
 
-/** The lane is the full width of the rail and is the thing that travels; the token rides
- *  inside it at the left, so the crossing distance is `100% - token` — one constant, both
- *  payments. */
+/** The lane is the full width of the rail and is the thing that travels; the token rides inside
+ *  it at the left, so the crossing distance is `100% - token` — one constant, both payments. */
 export const settleLane = 'lp-settle-lane absolute inset-0';
 export const settleToken = (paid: boolean) =>
   cx(
@@ -421,8 +373,6 @@ export const settleToken = (paid: boolean) =>
       : 'border-warn-line bg-[repeating-linear-gradient(-45deg,var(--color-warn-line)_0_3px,var(--color-warn-soft)_3px_6px)] text-warn',
   );
 
-/** what the payment above is waiting on — two or three words, because the lane is doing the
- *  explaining and this is only the caption on it */
 export const settleTag = 'lp-settle-tag text-stamp-caps uppercase text-mut';
 
 export const settleNote =
@@ -447,12 +397,10 @@ export const plannerLabel =
 /** native range input; the track fill and thumb are drawn in landing.css off `--pct` */
 export const range = 'lp-range w-full cursor-grab appearance-none bg-transparent active:cursor-grabbing';
 
-/* Four figures, so 2×2 rather than a single row — at 1160px a four-across row of 34px
-   figures leaves each caption two words wide and they all wrap. */
+/* 2×2 rather than a single row: at 1160px a four-across row leaves each caption two words wide. */
 export const plannerOut =
   'grid grid-cols-2 gap-x-6 gap-y-7 px-8 py-8 max-[1000px]:grid-cols-1 max-[720px]:px-6 max-[720px]:py-7';
 
-/** the ROI line: the same budget, priced the way the rest of the market prices it */
 export const plannerVs =
   'col-span-full grid gap-1.5 border-t border-line-soft pt-6 ' +
   '[&_b]:font-mono [&_b]:text-[15px] [&_b]:font-semibold [&_b]:text-ink [&_b]:tabular-nums';
@@ -465,9 +413,7 @@ export const plannerCap = 'text-[13px] leading-[1.45] text-mut';
 export const plannerNote =
   'col-span-full border-t border-line-soft px-8 py-5 text-[12.5px] leading-[1.6] text-mut max-[720px]:px-6';
 
-/* ---- the scale band ----
-   Four figures under the hero. The numbers count up off `view()` using the same
-   `lp-num` machinery the fare cards already use — no second counter. */
+/* ---- the scale band ---- */
 
 export const metrics =
   'lp-metrics mt-16 grid grid-cols-4 overflow-hidden rounded-2xl border border-line bg-card shadow-contact ' +
@@ -498,7 +444,6 @@ export const compareHead = cx(
   compareGrid,
   'border-b border-line bg-card-alt py-3.5 text-stamp-caps uppercase text-mut',
 );
-/** our column is the only one that carries the accent, in the head and in every row */
 export const compareMine = 'font-semibold text-accent-text';
 
 export const compareRow = cx(
@@ -510,7 +455,6 @@ export const compareRow = cx(
 export const compareTerm = 'text-[14.5px] font-semibold tracking-[-0.015em] text-ink max-[860px]:col-span-full max-[860px]:mb-2';
 export const compareCell = 'text-[14px] leading-[1.5] text-ink-soft';
 export const compareCellMine = 'text-[14px] leading-[1.5] font-medium text-ink';
-/** the measure's own label, shown only once the grid collapses to two columns */
 export const compareWho = 'hidden text-stamp-caps uppercase text-mut max-[860px]:mb-1 max-[860px]:block';
 
 /* ---- social proof ---- */
@@ -519,7 +463,6 @@ export const compareWho = 'hidden text-stamp-caps uppercase text-mut max-[860px]
 export const marquee =
   'lp-marquee relative flex overflow-hidden py-1 ' +
   '[mask-image:linear-gradient(to_right,transparent,#000_9%,#000_91%,transparent)]';
-/** one of the two identical tracks; the pair is what makes the loop seamless */
 export const marqueeTrack = 'lp-marquee-track flex shrink-0 items-center gap-14 pr-14';
 export const marqueeItem =
   'text-[17px] font-semibold whitespace-nowrap tracking-[-0.02em] text-mut/80';
@@ -551,7 +494,6 @@ export const faqQ =
   'transition-colors duration-200 hover:bg-card-alt [&::-webkit-details-marker]:hidden ' +
   'max-[720px]:px-5 max-[720px]:py-5 max-[720px]:text-[15px]';
 
-/** the plus rotates into a minus as the panel opens — one mark, two states */
 export const faqMark =
   'lp-faq-mark mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text ' +
   'transition-[transform,background-color] duration-300 [&_svg]:size-3.5';
@@ -598,7 +540,6 @@ export const ruleVal =
 
 export const close = 'pt-28 max-[720px]:pt-20';
 
-/** the closing band: one surface, the argument's last line and its two doors */
 export const closePass = cx(
   passShell,
   'grid grid-cols-[minmax(0,1fr)_300px] overflow-hidden max-[1000px]:grid-cols-[minmax(0,1fr)]',
@@ -614,5 +555,4 @@ export const foot =
   'text-[12.5px] text-mut max-[480px]:justify-start ' +
   '[&_a]:font-medium [&_a]:text-ink-soft [&_a]:no-underline hover:[&_a]:text-accent-text';
 
-/** visually hidden, still read aloud */
 export const srOnly = 'absolute size-px overflow-hidden p-0 whitespace-nowrap [clip-path:inset(50%)]';

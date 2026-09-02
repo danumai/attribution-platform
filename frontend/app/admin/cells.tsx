@@ -17,20 +17,13 @@ import {
 export const pill = (s: string) => <span className={pillFor(s)}>{s}</span>;
 
 // Fallback only: scans recorded before the signal columns existed have nothing but their UA.
-// ponytail: crude UA bucketing. New scans carry `device_type` from the server instead.
+// ponytail: crude UA bucketing. New scans carry `device_type` from the server.
 export const device = (ua: string) =>
   !ua ? '—' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobile/.test(ua) ? 'Mobile' : 'Desktop';
 
 /**
- * How the hand-off screen behaved on one scan, as a single hover.
- *
- * Two facts, and the shortness is deliberate: this used to carry a dozen values describing the
- * handset itself, which is device fingerprinting whatever it is labelled. What is left is about
- * the *page* — how long it was held and how it was left — and it is read once, when somebody is
- * asking why a scan never attributed.
- *
- * `exit: auto` on an iPhone is the answer to that question: nobody tapped Continue, so nothing
- * was carried, so the install was organic as far as anyone can honestly say.
+ * How the hand-off screen behaved on one scan: how long it was held and how it was left. Nothing
+ * about the device — this used to carry a dozen values describing the handset.
  */
 export const handoff = (x: AdminScan) => {
   const rows = Object.entries(x.client ?? {}).filter(([, v]) => v !== null && v !== undefined);
@@ -40,11 +33,8 @@ export const handoff = (x: AdminScan) => {
 };
 
 /**
- * What an audit row records, shared by the Audit log and its unread end in Notifications.
- *
- * Shared because the two tabs read the same table: a notification that drifted into showing a
- * different `detail` shape from the permanent record would make the two disagree about what
- * happened, which is the one thing an audit trail may never do.
+ * What an audit row records, shared by the Audit log and its unread end in Notifications: the two
+ * tabs read the same table.
  */
 export const auditCols: Col<AuditEntry>[] = [
   { h: 'Action', sort: (x) => x.action, get: (x) => <code>{x.action}</code> },
@@ -61,11 +51,8 @@ export const counts = (items: [string, number | undefined][]): Figure[] =>
   items.map(([k, v]) => ({ k, v: num(v ?? 0) }));
 
 /**
- * The two row controls, bound to the page's `busy` flag once per section.
- *
- * Curried rather than taking `busy` per call so the call sites read as the action they are —
- * `link('Suspend', …)` — and a section cannot forget to disable one while a mutation is in
- * flight, which is what double-submits a payout.
+ * The two row controls, bound to the page's `busy` flag once per section. Curried rather than
+ * taking `busy` per call, so the call sites read as the action they are.
  */
 export function rowControls(busy: boolean) {
   return {
@@ -85,11 +72,8 @@ export function rowControls(busy: boolean) {
 }
 
 /**
- * Whether the platform's coins still sum to zero.
- *
- * It leads the Overview and it opens the Ledger, because those are the two places an
- * operator looks before authorising anything, and an integrity check that is only on one of
- * them is a check the other page silently claims to have passed.
+ * Whether the platform's coins still sum to zero. It leads the Overview and opens the Ledger,
+ * because those are the two places an operator looks before authorising anything.
  */
 export function LedgerHealth({ ok, sum, onOpen }: { ok: boolean; sum: number; onOpen?: () => void }) {
   return (

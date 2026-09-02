@@ -6,10 +6,9 @@ import { prisma } from './prisma';
 const PROD = process.env.NODE_ENV === 'production';
 
 /**
- * Accounts come from env, never from signup. Development re-asserts the demo logins on every
- * boot so the stack is always usable; in production that is a backdoor — a redeploy would reset
- * the admin password to whatever is in env and un-suspend the account. So production bootstraps
- * the admin once, if absent, and never touches the demo tenants.
+ * Accounts come from env, never from signup. Development re-asserts the demo logins on every boot;
+ * in production that is a backdoor, since a redeploy would reset the admin password and un-suspend
+ * the account. So production bootstraps the admin once, if absent, and never touches the tenants.
  */
 export async function seedAccounts() {
   const e = process.env;
@@ -38,8 +37,8 @@ async function seedOrg(
   landingUrl?: string,
   overwrite = true,
 ) {
-  // Raw upsert rather than prisma.upsert: read-then-write would let two replicas booting at
-  // once collide on the unique email, and `xmax = 0` is how Postgres reports insert-vs-update.
+  // Raw upsert rather than prisma.upsert: read-then-write would let two replicas booting at once
+  // collide on the unique email, and `xmax = 0` is how Postgres reports insert-vs-update.
   // `approved: true`: seeded accounts are the operator's own demo tenants, not signups to vet.
   const rows = await prisma.$queryRaw<{ created: boolean }[]>`
     INSERT INTO orgs (name, type, email, password_hash, api_key_hash, landing_url, approved)

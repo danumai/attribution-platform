@@ -3,13 +3,8 @@ import { useEffect, useRef } from 'react';
 import * as lp from '@/lib/lp';
 
 /**
- * Native <dialog>, like every other modal in this codebase (see `Dialogs` in lib/ui.tsx).
- *
- * This used to be a div scrim with a hand-rolled Esc listener and manual focus save/restore,
- * on the reasoning that a focus trap was overkill for "two interactive elements". That stopped
- * being true when the body became a <video controls>: tabbing past its controls walked out
- * into the page behind, which was neither inert nor scroll-locked. `showModal()` gives the
- * trap, Esc, the backdrop and page inertness for free, and deletes both effects.
+ * Native <dialog>, like every other modal here (see `Dialogs` in lib/ui.tsx): the browser owns the
+ * focus trap, Esc, inertness of the page behind, and the scrim.
  */
 export default function JourneyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);

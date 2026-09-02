@@ -8,8 +8,8 @@ import type { SectionProps } from '../types';
 type Props = Pick<SectionProps, 'd' | 'loading' | 'busy' | 'post'>;
 
 /**
- * The unread end of the audit log. Same rows, same shape — what makes this a separate tab is
- * that leaving it is an action: a budget the platform did not fund itself is news exactly once.
+ * The unread end of the audit log — same rows, same shape. What makes it a separate tab is that
+ * leaving it is an action.
  */
 export function Notifications({ d, loading, busy, post }: Props) {
   const { link } = rowControls(busy);

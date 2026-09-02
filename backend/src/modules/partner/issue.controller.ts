@@ -2,14 +2,12 @@
  * The Issuance API: server-to-server, called by the *promoter's* own backend when a ticket is
  * paid for or a receipt prints.
  *
- * What comes back is one single-use code, and that code is the entire proof a purchase
- * happened — the only system that can know is the one that took the money. "One reward per
- * code" is therefore "one reward per purchase", minted by a party with no incentive to invent
- * them: the promoter pays for every code redeemed, out of its own budget.
+ * What comes back is one single-use code, and that code is the entire proof a purchase happened
+ * — the only system that can know is the one that took the money. Minted by a party with no
+ * incentive to invent them: the promoter pays for every code redeemed, out of its own budget.
  *
- * Its own controller rather than a method on the promoter portal: that one is
- * session-authenticated and built for a human designing artwork. This is a machine call on a
- * different credential, at booking volume, and its answer must be idempotent.
+ * Its own controller because the portal is session-authenticated and built for a human; this is
+ * a machine call on a different credential, at booking volume, and must be idempotent.
  */
 import {
   BadRequestException,
@@ -34,12 +32,10 @@ import { orgFromKey } from './api-key';
 @Controller('v1/issue')
 export class IssueController {
   /**
-   * Mint one code against one transaction.
-   *
-   * Idempotent on `issued_ref`, because a booking webhook is exactly the kind of caller that
-   * fires twice — and two codes for one ticket is the promoter paying twice for one purchase.
-   * The UNIQUE index is the guarantee; this handler only turns the collision into the original
-   * answer.
+   * Mint one code against one transaction. Idempotent on `issued_ref`, because a booking webhook
+   * is exactly the kind of caller that fires twice — and two codes for one ticket is the promoter
+   * paying twice. The UNIQUE index is the guarantee; this only turns the collision into the
+   * original answer.
    */
   @Post()
   async issue(
@@ -61,11 +57,9 @@ export class IssueController {
       throw new BadRequestException('expires_in_days must be an integer 1–3650');
 
     // Ownership is inside the WHERE, so another tenant's campaign is a 404 rather than a
-    // permission error — an existence oracle across tenants is itself a leak.
-    //
-    // `mode` too: a transaction code minted against an acquisition campaign scans fine, pays an
-    // acquisition fee once, then silently never pays a purchase reward. Refusing here is the
-    // only place that mistake is still cheap.
+    // permission error — an existence oracle across tenants is itself a leak. `mode` too: a code
+    // minted against an acquisition campaign scans fine, pays an acquisition fee once, then
+    // silently never pays a purchase reward.
     const campaign = await prisma.campaign.findFirst({
       where: {
         id: campaign_id,
@@ -83,9 +77,8 @@ export class IssueController {
       throw new NotFoundException('no active engagement campaign with that id');
     const slug = campaign.partnership.publisher.slug;
 
-    // `max_uses: 1` is the whole single-use guarantee, and it is claimed by the same atomic
-    // conditional UPDATE every printed code already goes through at `/r/:code`. Nothing new
-    // guards this path — it is the existing one, asked for one use instead of unlimited.
+    // `max_uses: 1` is the whole single-use guarantee, claimed by the same atomic conditional
+    // UPDATE every printed code already goes through at `/r/:code`.
     try {
       const qr = await prisma.qrCode.create({
         data: {
@@ -100,9 +93,8 @@ export class IssueController {
       return { ...qr, issued_ref, scan_url: scanUrl(BASE_URL, qr.code, slug), replay: false };
     } catch (e: any) {
       if (e.code !== 'P2002') throw e;
-      // Same campaign, same transaction reference: the first call already minted it. Returning
-      // that code is the honest answer; a 409 would make correctly-issued codes look like
-      // something to reconcile by hand.
+        // Same campaign, same transaction reference: the first call already minted it. A 409
+        // would make correctly-issued codes look like something to reconcile by hand.
       const prior = await prisma.qrCode.findFirstOrThrow({
         where: { campaign_id, issued_ref },
         select: { id: true, code: true, expires_at: true },
@@ -112,14 +104,12 @@ export class IssueController {
   }
 
   /**
-   * What happened to the code minted against one transaction.
+   * What happened to the code minted against one transaction. The reconciliation call: a booking
+   * system holds a PNR, not our uuid, and re-POSTing `/v1/issue` replays the code but says
+   * nothing about whether it was scanned, voided or already paid for.
    *
-   * The reconciliation call: a booking system holds a PNR, not our uuid, and the support
-   * question is always "the customer says their code does not work". Re-POSTing `/v1/issue`
-   * replays the code but says nothing about whether it was scanned, voided or already paid for.
-   *
-   * Query parameters rather than a path, because `issued_ref` is the promoter's own string —
-   * an order number with a `/` in it would silently address a different route.
+   * Query parameters rather than a path, because an `issued_ref` with a `/` in it would silently
+   * address a different route.
    */
   @Get()
   async status(
@@ -133,17 +123,12 @@ export class IssueController {
 
   /**
    * Kill the code for a transaction that stopped being one — a refund, a cancelled ticket, a
-   * chargeback.
+   * chargeback. Without it the promoter pays for a purchase that was reversed.
    *
-   * Without this the promoter pays for a purchase that was reversed: the boarding pass is
-   * already printed, the code is still payable, and the traveller can still scan it. The
-   * portal's void is a human clicking a row by its uuid on a session; a refund is a webhook
-   * that knows only the PNR, so it needs the reference and the key it already has.
-   *
-   * Idempotent, and deliberately not audited: a refund is routine at booking volume and would
-   * bury the admin's notification inbox, unlike the portal's void, which means a print run just
-   * stopped working. Voiding is also NOT a clawback — a code already redeemed has been paid for
-   * and stays paid; `redeemed: true` in the answer is how the caller learns that.
+   * The portal's void is a human clicking a row by uuid on a session; a refund is a webhook that
+   * knows only the PNR. Idempotent, and deliberately not audited — a refund is routine at booking
+   * volume and would bury the admin's inbox. Not a clawback either: a code already redeemed has
+   * been paid for and stays paid, which is what `redeemed: true` in the answer says.
    */
   @Post('void')
   async void(
@@ -159,8 +144,8 @@ export class IssueController {
 
   /**
    * One ownership-scoped lookup for both reads above. Campaign `mode` and `status` are
-   * deliberately not filtered on the way `issue` filters them: a promoter must be able to see
-   * and kill a code on a campaign it has since paused, which is exactly when a refund arrives.
+   * deliberately not filtered the way `issue` filters them: a promoter must be able to kill a
+   * code on a campaign it has since paused, which is exactly when a refund arrives.
    */
   private async find(promoterId: string, campaignId: string, ref: string) {
     const campaign_id = str(campaignId, 'campaign_id', 36)!;
@@ -181,7 +166,7 @@ export class IssueController {
           select: { partnership: { select: { publisher: { select: { slug: true } } } } },
         },
         // At most one: `UNIQUE (qr_code_id) WHERE kind = 'engagement'`, and acquisition rows
-        // carry a NULL `qr_code_id`, so nothing else can appear here.
+        // carry a NULL `qr_code_id`.
         redemptions: { select: { id: true }, take: 1 },
       },
     });

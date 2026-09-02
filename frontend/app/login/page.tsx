@@ -89,9 +89,8 @@ function Login() {
   );
   const [f, setF] = useState({
     name: '',
-    // Seeded from .env on backend boot, so a demo signs in straight away — but `NEXT_PUBLIC_*`
-    // is inlined into JS served to every anonymous visitor, so a production build must not
-    // carry working credentials in its bundle. Dev only, and the check is compile-time.
+// Seeded from .env on backend boot so a demo signs in straight away — but `NEXT_PUBLIC_*` is
+// inlined into JS served to every anonymous visitor.
     email: DEMO ? (process.env.NEXT_PUBLIC_DEMO_EMAIL ?? '') : '',
     password: DEMO ? (process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? '') : '',
     type: (q.get('type') === 'publisher' ? 'publisher' : 'promoter') as Role,
@@ -316,11 +315,8 @@ function Login() {
 }
 
 /**
- * The one screen in this product whose content cannot be recovered.
- *
- * The server stores only a hash of this key and can never print it again, so a reader who clicks
- * past it has permanently lost the credential their backend needs. It used to be a code block
- * and a Continue button. It is now a handoff: copy it, or download it, and say that you have it.
+ * The one screen in this product whose content cannot be recovered. The server stores only a hash
+ * of this key and can never print it again.
  */
 function ApiKeyHandoff({ apiKey, onDone }: { apiKey: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);

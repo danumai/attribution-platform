@@ -1,10 +1,9 @@
 /**
  * Money in — the production replacement for ALLOW_SELF_FUNDING.
  *
- * The shape is PSP-agnostic on purpose: `checkout` records what the promoter intends to buy
- * and hands back a `payment_id`; the PSP of choice (Stripe, SSLCommerz, bKash — whatever the
- * market needs) carries that id in its metadata and its webhook adapter POSTs the result to
- * `webhook`, signed. Swapping processors is an adapter, not a schema change.
+ * PSP-agnostic on purpose: `checkout` records what the promoter intends to buy and hands back a
+ * `payment_id`; the PSP carries that id in its metadata and its webhook adapter POSTs the result
+ * to `webhook`, signed. Swapping processors is an adapter, not a schema change.
  *
  * Two guarantees, both database-enforced:
  *   - a webhook redelivered N times credits once — `status` is flipped by the same UPDATE that
@@ -43,9 +42,8 @@ import { SessionClaims } from '../auth/tokens';
 export class PaymentsController {
   /**
    * Step one of funding: record what the promoter is buying before any money moves. The PSP
-   * checkout is created against this row's id, so the webhook that follows names exactly one
-   * intended funding — an unsolicited "payment succeeded" for an id we never minted is a 404,
-   * not a credit.
+   * checkout is created against this row's id, so an unsolicited "payment succeeded" for an id we
+   * never minted is a 404, not a credit.
    */
   @Post('checkout')
   @ApiBearerAuth('session')
@@ -63,8 +61,8 @@ export class PaymentsController {
       select: { id: true, status: true },
     });
     if (!campaign) throw new NotFoundException('campaign not found');
-    // Funding an ended campaign is a mistake worth catching before the card is charged;
-    // a paused one is fine — topping up mid-pause is a normal way to prepare a relaunch.
+    // Funding an ended campaign is a mistake worth catching before the card is charged; a paused
+    // one is fine — topping up mid-pause is a normal way to prepare a relaunch.
     if (campaign.status === 'ended')
       throw new BadRequestException('campaign has ended — create a new one to fund');
 
@@ -94,9 +92,9 @@ export class PaymentsController {
   }
 
   /**
-   * The PSP's server calling back. Authentication is the HMAC signature over the raw body —
-   * there is no session and no API key here, and with no secret configured the endpoint does
-   * not exist: an unsigned funding webhook is a mint for whoever finds the URL.
+   * The PSP's server calling back. Authentication is the HMAC signature over the raw body, and
+   * with no secret configured the endpoint does not exist: an unsigned funding webhook is a mint
+   * for whoever finds the URL.
    */
   @Post('webhook')
   @HttpCode(200)
@@ -134,9 +132,9 @@ export class PaymentsController {
     }
 
     const credited = await prisma.$transaction(async (tx) => {
-      // The idempotency gate: flipped by the same UPDATE that tests it, so ten redeliveries
-      // reach the ledger once. The partial unique index on provider_ref additionally stops
-      // one PSP charge completing a *different* payment row.
+      // The idempotency gate: flipped by the same UPDATE that tests it, so ten redeliveries reach
+      // the ledger once. The partial unique index on provider_ref additionally stops one PSP
+      // charge completing a *different* payment row.
       const taken = await tx.payment.updateMany({
         where: { id: payment_id, status: 'pending' },
         data: { status: 'completed', provider_ref, completed_at: new Date() },
@@ -155,8 +153,8 @@ export class PaymentsController {
         coins: payment.coins,
         provider_ref,
       });
-      // Actor is the tenant whose money arrived, so it lands in the admin inbox the same way
-      // self-funding always has — money entering the system is always news.
+      // Actor is the tenant whose money arrived, so it lands in the admin inbox — money entering
+      // the system is always news.
       await audit(payment.org_id, 'campaign.fund', `campaign:${payment.campaign_id}`, {
         coins: payment.coins,
         payment_id,

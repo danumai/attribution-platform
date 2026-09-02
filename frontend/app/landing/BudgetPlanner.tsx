@@ -2,10 +2,8 @@
 import { useState } from 'react';
 import * as lp from '@/lib/lp';
 
-/* The one thing a pay-per-signup page can't say in prose: what a given budget actually buys.
- * Two sliders, three figures. The figures don't animate — the reader is dragging them, and a
- * number that eases into place while you're steering it reads as lag, not polish. What moves
- * is the track fill, which is the direct echo of the drag. */
+// The one thing a pay-per-signup page cannot say in prose: what a given budget actually buys. Two
+// sliders, three figures, and the figures do not animate.
 
 const GUEST_SHARE = 0.2; // the default guest rate is a fifth of the full rate
 

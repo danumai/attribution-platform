@@ -2,16 +2,10 @@
 import { useInView } from './useInView';
 import * as lp from '@/lib/lp';
 
-/* Social proof, without inventing any.
- *
- * The rail lists the *kinds* of app a scan can land in rather than borrowed brand marks —
- * it makes the same "this is who it is for" point, and it is true today. Swap SECTORS for
- * real partner logos once there are partners to name; the marquee does not care whether
- * its children are text or <img>.
- *
- * QUOTES below are TEMPLATES. Replace the text and the attribution with real, permissioned
- * customer quotes before this page is public, or delete the block. Shipping invented
- * testimonials under invented names is fabricated evidence, not placeholder copy. */
+/**
+ * Social proof, without inventing any: the rail lists the *kinds* of app a scan can land in rather
+ * than borrowed brand marks.
+ */
 
 const SECTORS = [
   'Travel apps',

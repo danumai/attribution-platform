@@ -1,13 +1,9 @@
 import * as lp from '@/lib/lp';
 
-/* What a promoter is actually choosing between.
- *
- * Rows arrive on a stagger off `view()` — the same idiom the money-controls list uses,
- * so the two sections read as one page rather than two. Nothing here is decorative: the
- * stagger is what makes a seven-row table land as seven comparisons instead of a wall.
- *
- * Claims about the other two columns are deliberately about their *pricing model*, not
- * about any named competitor's conduct. */
+/**
+ * What a promoter is actually choosing between. Rows arrive on a stagger off `view()` — the same
+ * idiom the money-controls list uses.
+ */
 
 const COLS = ['This platform', 'CPI network', 'Affiliate link'];
 

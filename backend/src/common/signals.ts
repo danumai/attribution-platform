@@ -1,13 +1,9 @@
 /**
- * What a scan tells us about its context, taken from request headers alone.
- *
- * A QR code carries no data about whoever scanned it — everything below comes from the one HTTP
- * request the redirect hop sees. That is also the ceiling: no name, email, phone or precise
- * location, and nothing the store listing hands back.
+ * What a scan tells us about its context, taken from request headers alone — no name, email,
+ * phone or precise location, and nothing the store listing hands back.
  *
  * Separate from `attribution.ts` on purpose: that file's signals feed *matching* and must stay
- * coarse and stable, since a scan and a first-open have to agree on them. Everything here is
- * reporting only, so it can be as fine-grained as the headers allow and can change shape freely.
+ * coarse and stable. Everything here is reporting only and can change shape freely.
  */
 import { Request } from 'express';
 import { Prisma } from '../generated/prisma/client';
@@ -32,19 +28,12 @@ const head = (req: Request, name: string): string => {
 };
 
 /**
- * Geo comes from the edge, not from a bundled IP database.
+ * Geo comes from the edge, not from a bundled IP database: Cloudflare, Vercel and friends
+ * already resolve the client address into a header, which costs no dependency, no 60MB database
+ * and no refresh cron. The trade is NULL geo locally and behind any proxy that omits them.
  *
- * Cloudflare, Vercel and friends already resolve the client address into a header, which costs
- * no dependency, no 60MB database and no refresh cron. The trade is NULL geo in local
- * development and behind any proxy that does not add these, so every consumer treats it as
- * optional.
- *
- * Off a CDN this stays NULL and the admin's scan rows fall back to inferring a region from the
- * handset's time zone or locale — marked as inferred there, and deliberately never written
- * here, since neither is evidence of where the phone actually stood.
- *
- * ponytail: edge headers only. Add MaxMind GeoLite2 + a refresh job if geo is ever needed
- * off a CDN, or if city-level accuracy has to be guaranteed rather than best-effort.
+ * ponytail: edge headers only. Add MaxMind GeoLite2 + a refresh job if geo is ever needed off a
+ * CDN, or if city-level accuracy has to be guaranteed rather than best-effort.
  */
 function geo(req: Request): { country: string | null; city: string | null } {
   // Netlify ships the whole answer as one base64 JSON header instead of a header per field.
@@ -97,11 +86,9 @@ function language(req: Request): string | null {
 }
 
 /**
- * Host only, never the path.
- *
- * A camera scan sends no Referer, so a populated one means the "scan" was a click on a page —
- * an aggregator reposted the code, or someone is replaying the URL. The host answers that; the
- * path and query would only pull someone else's page state into our database.
+ * Host only, never the path. A camera scan sends no Referer, so a populated one means the "scan"
+ * was a click on a page. The host answers that; the path and query would only pull someone
+ * else's page state into our database.
  */
 function refererHost(req: Request): string | null {
   const raw = head(req, 'referer');
@@ -115,9 +102,8 @@ function refererHost(req: Request): string | null {
 
 /**
  * UA parsing, ordered most-specific first: every in-app browser also claims Safari or Chrome,
- * and Edge/Opera/Samsung all claim Chrome, so a naive `includes('Chrome')` swallows six real
- * answers into one wrong one. The in-app rows are what pay for this function — "came through
- * Instagram's webview" is a channel a Chrome/Safari split can never give.
+ * and Edge/Opera/Samsung all claim Chrome, so a naive `includes('Chrome')` swallows six answers
+ * into one wrong one. The in-app rows are what pay for this function.
  */
 const BROWSERS: [RegExp, string][] = [
   [/Instagram/i, 'Instagram'],
@@ -154,9 +140,9 @@ const first = (table: [RegExp, string][], ua: string) =>
   table.find(([re]) => re.test(ua))?.[1] ?? null;
 
 /**
- * Client hints beat the UA string where they exist: Chrome has been freezing the UA for years,
- * so `sec-ch-ua-mobile` is the only trustworthy mobile answer on recent Chrome/Android. They
- * are absent on Safari and Firefox, hence the UA fallback rather than a replacement.
+ * Client hints beat the UA string where they exist — Chrome has frozen its UA for years, so
+ * `sec-ch-ua-mobile` is the only trustworthy mobile answer there. Absent on Safari and Firefox,
+ * hence the UA fallback rather than a replacement.
  */
 function deviceType(req: Request, ua: string, os: string | null): string {
   // Named tablets first, and only these: an Android tablet answers the mobile hint with ?0,
@@ -168,32 +154,26 @@ function deviceType(req: Request, ua: string, os: string | null): string {
   // ?0 means "not a phone", which on a phone OS means a tablet rather than a desktop.
   if (hint === '?0') return os === 'Android' || os === 'iOS' ? 'tablet' : 'desktop';
 
-  // No hints (Safari, Firefox): fall back to the UA. Android phones say "Mobile" and Android
-  // tablets omit it — but only trust that where Chrome has not already frozen the UA, which is
-  // why this sits below the hint rather than above it.
+  // No hints (Safari, Firefox): fall back to the UA. Android phones say "Mobile" and tablets omit
+  // it — trusted only below the hint, since Chrome has frozen the UA.
   if (os === 'Android' && !/Mobile/i.test(ua)) return 'tablet';
   if (/Mobi|iPhone|iPod|Android/i.test(ua)) return 'mobile';
   return 'desktop';
 }
 
-/* ---------------------------------------------------------------------------
+/**
  * The second source: what the hand-off screen reports about itself.
  *
- * Two keys, and the shortness is the point. This function used to collect a dozen — viewport,
- * colour depth, touch points, advertised memory, network class, `navigator.platform` — which
- * is a fingerprint kit however it is labelled, and Apple names browser and device
- * configuration explicitly as data that may not be derived to identify a device. It went with
- * the matcher that consumed its siblings.
- *
- * What is left describes the *page*, not the phone: how long it was held and how it was left.
- * Nothing here narrows down who is holding the device, and nothing here is ever compared
- * against anything an app reports.
- * ------------------------------------------------------------------------- */
+ * Two keys, and the shortness is the point. This used to collect a dozen — viewport, colour
+ * depth, touch points, memory, network class — which is a fingerprint kit however it is
+ * labelled. What is left describes the *page*, not the phone, and is never compared against
+ * anything an app reports.
+ */
 
 /**
- * A bounded integer, or absence. It arrives from a phone, so it is not trusted. The empty
- * check is load-bearing: `Number('')` is `0`, so an absent key would otherwise land as a real
- * in-range zero — "held for no time" rather than "was never asked".
+ * A bounded integer, or absence. The empty check is load-bearing: `Number('')` is `0`, so an
+ * absent key would otherwise land as a real in-range zero — "held for no time" rather than
+ * "was never asked".
  */
 const int = (raw: unknown, lo: number, hi: number): number | null => {
   const v = String(raw ?? '').trim();
@@ -202,10 +182,9 @@ const int = (raw: unknown, lo: number, hi: number): number | null => {
 };
 
 /**
- * What the hand-off screen cost, as a bag of facts about the screen itself.
- *
- * Returns NULL rather than an object of nulls: an empty bag would read as "measured nothing"
- * when the truth is "was never asked" — the screen is skipped entirely for Android and desktop.
+ * What the hand-off screen cost. Returns NULL rather than an object of nulls: an empty bag would
+ * read as "measured nothing" when the truth is "was never asked" — the screen is skipped
+ * entirely for Android and desktop.
  */
 export function clientSignals(q: Record<string, unknown>): Prisma.InputJsonObject | null {
   const bag: Record<string, string | number> = {};

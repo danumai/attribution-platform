@@ -14,21 +14,19 @@ import { closeRedis } from './database/redis';
 import { seedAccounts } from './database/seed';
 
 async function bootstrap() {
-  // Schema is owned by `prisma migrate deploy`, which runs before this process starts
-  // (Dockerfile CMD / the `db:deploy` script) — never by the app at boot.
+  // Schema is owned by `prisma migrate deploy`, which runs before this process starts — never by
+  // the app at boot.
   await seedAccounts();
 
-  // `bodyParser: false` because this file mounts its own below. Nest registers its default
-  // during `listen()`, i.e. *after* every `app.use` here — leaving it on put a second parser
-  // behind the first and made the rate limiter's position accidental.
+  // `bodyParser: false` because this file mounts its own below. Nest registers its default during
+  // `listen()`, i.e. after every `app.use` here, which made the rate limiter's position accidental.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   // req.ip must reflect the real client, or per-IP rate limits collapse to one bucket
   app.getHttpAdapter().getInstance().set('trust proxy', TRUST_PROXY);
 
-  // Mounted before securityHeaders: that middleware's `default-src 'none'` CSP would block
-  // Swagger UI's own JS/CSS, and Express never reaches later middleware for a route this has
-  // already answered. Which is also why it is off by default in production — unauthenticated
-  // `/docs` enumerates every route and sits ahead of the rate limiter.
+  // Mounted before securityHeaders: that middleware's `default-src 'none'` would block Swagger
+  // UI's own assets, and Express never reaches later middleware for a route this has answered.
+  // Also why it is off by default in production — `/docs` sits ahead of the rate limiter.
   if (ENABLE_DOCS) {
     const swaggerDoc = SwaggerModule.createDocument(
       app,
@@ -49,8 +47,8 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, swaggerDoc);
   }
 
-  // Turns a driver-level error (a malformed uuid in the URL, most often) into the 4xx it
-  // actually is, instead of an unhandled 500. See prisma-filter.ts.
+  // Turns a driver-level error (usually a malformed uuid in the URL) into the 4xx it actually is
+  // rather than an unhandled 500. See prisma-filter.ts.
   app.useGlobalFilters(new PrismaExceptionFilter(app.get(HttpAdapterHost).httpAdapter));
 
   // First, so every log line and every 429 below already carries a request id.
@@ -58,11 +56,8 @@ async function bootstrap() {
 
   /**
    * Scrape target. Mounted here rather than on a controller so it sits ahead of the global rate
-   * limiter — a throttled scrape blinds the monitoring exactly when traffic is interesting —
-   * and outside the CSP `securityHeaders` sets for JSON routes.
-   *
-   * Token-gated: the series it exposes include the attribution refusal rates, which describe
-   * this platform's payout behaviour to anyone who asks.
+   * limiter — a throttled scrape blinds monitoring when traffic is interesting — and outside the
+   * CSP `securityHeaders` sets. Token-gated: the series expose this platform's payout behaviour.
    */
   app.use('/metrics', (req: Request, res: Response, next: NextFunction) => {
     if (req.method !== 'GET') return next();
@@ -78,8 +73,8 @@ async function bootstrap() {
   });
 
   app.use(securityHeaders);
-  // Before the body parser: a flood should be turned away without first buying it 1mb of
-  // JSON parsing per request.
+  // Before the body parser: a flood should be turned away without first buying it 1mb of JSON
+  // parsing per request.
   app.use(globalRateLimit);
   // `verify` stashes the raw bytes for the payment webhook's HMAC check — a signature is over
   // what was sent, and re-serialising the parsed body is not that.
@@ -107,12 +102,12 @@ async function bootstrap() {
       detail: 'REDIS_URL unset — per-IP limits are per-instance. Safe for exactly one replica.',
     });
 
-  // The ledger's integrity checks on a clock instead of a dashboard load — drift means
-  // something is spending against a wrong number, and it must not wait to be noticed.
+  // The ledger's integrity checks on a clock rather than a dashboard load: drift means something
+  // is spending against a wrong number.
   startReconciliation();
 
-  // Drain in-flight requests before the process dies: a redeploy mid-transaction would
-  // otherwise leave a scan use claimed with no redemption written against it.
+  // Drain in-flight requests before the process dies, or a redeploy mid-transaction leaves a scan
+  // use claimed with no redemption written against it.
   for (const sig of ['SIGTERM', 'SIGINT'] as const)
     process.once(sig, async () => {
       log.info('server.draining', { signal: sig });

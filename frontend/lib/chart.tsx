@@ -1,23 +1,7 @@
 'use client';
 /**
- * The console's charts, drawn by hand in SVG.
- *
- * No charting dependency: every plot here is a time series or a ranking of at most two series
- * against one axis — a path string and a scale, not a hundred kilobytes of runtime that would
- * then have to be argued out of its own colours, fonts and tooltips.
- *
- * The rules the drawing follows, so a second chart cannot drift from the first:
- *   · one axis, always. Two measures of different scale are two charts, never two scales.
- *   · thin marks on a recessive grid: 2px lines, solid hairline gridlines one step off
- *     the surface, bars capped at 24px so the band keeps its air.
- *   · marks carry the series colour; text never does. Identity reaches the reader through
- *     the legend key beside the label, so it survives being read in greyscale.
- *   · the hover layer ships with the chart, and every value it shows is also reachable
- *     without a pointer — arrow keys move the same crosshair, and the table view under
- *     each plot is the whole series in text.
- *
- * Sizes are real pixels measured off the container, not a scaled `viewBox`: a non-uniform
- * scale turns a 2px stroke into 3px on one axis and an end-dot into an ellipse.
+ * The console's charts, drawn by hand in SVG. No charting dependency: every plot here is a time
+ * series or a ranking of at most two series against one axis, which is a path and some ticks.
  */
 import { useEffect, useId, useRef, useState } from 'react';
 import { compact, num } from './fmt';
@@ -45,11 +29,8 @@ function useWidth<T extends HTMLElement>() {
 }
 
 /**
- * A clean ceiling and the lines under it: steps of 1, 2 or 5 × 10^k.
- *
- * An axis topped at the data's own maximum prints ticks like 37 and 74 — numbers about this
- * dataset rather than a scale. The step never falls below 1: everything here is a count of
- * things that happened, and 0.5 scans is not a quantity.
+ * A clean ceiling and the lines under it: steps of 1, 2 or 5 × 10^k. An axis topped at the data's
+ * own maximum prints ticks like 37 and 74 — numbers about this dataset rather than about scale.
  */
 export function ticks(max: number, count = 4) {
   if (max <= 0) return { top: 1, lines: [0, 1] };
@@ -96,15 +77,15 @@ export function Chart({
   const plotH = height - PAD.t - PAD.b;
   const { top, lines } = ticks(Math.max(...series.flatMap((s) => s.values), 0));
 
-  // A line is plotted on the points, a bar inside a band — so one of them has a slot width
-  // and the other does not, and every x below comes from whichever this is.
+// A line is plotted on the points, a bar inside a band, so one has a slot width and the other
+// does not.
   const band = plotW / Math.max(n, 1);
   const x = (i: number) =>
     kind === 'bar' ? PAD.l + band * (i + 0.5) : PAD.l + (n > 1 ? (plotW * i) / (n - 1) : plotW / 2);
   const y = (v: number) => PAD.t + plotH - (v / top) * plotH;
 
-  // Thin the ticks to what can be read rather than to a fixed count: a 30-day window on a
-  // wide card can print eight dates, and the same window in a half-width panel cannot.
+// Thin the ticks to what can be read rather than to a fixed count: the same 30-day window fits
+// eight dates on a wide card and three in a half-width panel.
   const step = Math.max(1, Math.ceil(n / Math.max(Math.floor(plotW / 58), 1)));
 
   const move = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -237,8 +218,8 @@ export function Chart({
 
             {kind === 'bar'
               ? series[0].values.map((v, i) => {
-                  // Capped, never filling its slot: the band's leftover is the air that keeps
-                  // a run of columns from reading as one solid block.
+// Capped, never filling its slot: the band's leftover is the air that keeps a run of columns from
+// reading as one solid block.
                   const bw = Math.max(Math.min(band - 2, 24), 1);
                   const h = (v / top) * plotH;
                   return (
@@ -431,10 +412,8 @@ export function Chart({
 }
 
 /**
- * The twelve-point trace on a stat tile.
- *
- * Deliberately unlabelled and unhoverable: it carries shape, not values — the figure it sits
- * under is the value. Fixed geometry, so no measurement and no scaled strokes.
+ * The twelve-point trace on a stat tile. Deliberately unlabelled and unhoverable: it carries
+ * shape, not values — the figure it sits under is the value.
  */
 export function Spark({
   values,
@@ -448,8 +427,8 @@ export function Spark({
   const id = useId();
   const v = values.slice(-12);
   if (v.length < 2) return null;
-  // Wider and shorter than it was. A trace is read for its slope, and slope is a ratio of
-  // the two dimensions — at 64×18 a flat week and a doubling week looked nearly alike.
+// A trace is read for its slope, and slope is a ratio of the two dimensions — at 64×18 a flat
+// week and a doubling week looked nearly alike.
   const [W, H] = [72, 20];
   const top = Math.max(...v, 1);
   const px = (i: number) => (W * i) / (v.length - 1);

@@ -1,12 +1,7 @@
 'use client';
 /**
  * The scan-audience panel, rendered identically in the admin console and on a promoter's own
- * campaign page. One component because the two must agree: a promoter reading their campaign
- * and support reading the admin console are looking at the same query, so they should be
- * looking at the same layout too.
- *
- * Flat surfaces and a single motion event, per the console shell rules — a bar list is a
- * ranking, and animating fourteen of them at once would be the page moving, not a bar growing.
+ * campaign page. One component because the two must agree.
  */
 import { ReactNode, useMemo, useState } from 'react';
 import { change, num } from './fmt';
@@ -14,11 +9,10 @@ import { Chart } from './chart';
 import { Figures } from './ui';
 import { card, cx, muted, sectionHead, select as selectField, stampCaps } from './tw';
 
-/** The two inks every plot in the console is drawn in. Validated as a pair: ΔE 23.9 under
- *  deuteranopia, 28.6 in normal vision, both clear of the surface at better than 3:1. */
-/* accent-text, not accent: the fill is 2.5:1 on the dark canvas and a line drawn
-   in it disappears. A chart stroke is a graphic on a surface, so it takes the text
-   variant like every other mark on a surface does. */
+// The two inks every plot in the console is drawn in. Validated as a pair: ΔE 23.9 under
+// deuteranopia, 28.6 in normal vision.
+// accent-text, not accent: the fill is 2.5:1 on the dark canvas and a line drawn in it
+// disappears. A chart stroke is a graphic on a surface, so it takes the text ink.
 export const INK = { scans: 'var(--color-accent-text)', signups: 'var(--color-ok)' };
 
 export interface Bucket {
@@ -63,8 +57,8 @@ function labelFor(dim: string, key: string): string {
   }
   if (dim === 'weekday') return WEEKDAYS[+key] ?? key;
   if (dim === 'hour') return `${key}:00`;
-  // An axis of thirty `2026-08-06`s is a wall. The year is the same on every tick in any
-  // window this product offers, so it is the part that goes.
+// An axis of thirty `2026-08-06`s is a wall, and the year is the same on every tick in any
+// window this product offers.
   if (dim === 'day') {
     const d = new Date(`${key}T00:00:00Z`);
     return Number.isNaN(+d)
@@ -134,12 +128,8 @@ function BarList({
 }
 
 /**
- * A time series, with its gaps put back.
- *
- * The server only returns buckets it counted something in, so a quiet Tuesday is absent
- * entirely. Plotted as-is it does not flatten the line, it *removes* it — the x-axis silently
- * compresses and a dip reads as a plateau. Expanded against the slots it should have had, a
- * zero is drawn as a zero.
+ * A time series, with its gaps put back. The server only returns buckets it counted something in,
+ * so a quiet Tuesday is absent entirely and plotted as-is it does not read as quiet.
  */
 function fill(rows: Bucket[], keys: string[]): Bucket[] {
   const by = new Map(rows.map((r) => [r.key, r]));
@@ -165,13 +155,8 @@ export function dailySeries(data: Analytics | null) {
 }
 
 /**
- * One dimension of the scan data, plotted.
- *
- * `scans` and `conversions` are both counts of scans, so they share one axis and belong on
- * one plot — a second scale here would invent a correlation the data does not contain.
- * The daily window carries both as lines; the clock and calendar panels carry scans as
- * columns and hand the conversion count to the hover readout, because forty-eight bars in
- * a half-width panel is a texture rather than a comparison.
+ * One dimension of the scan data, plotted. `scans` and `conversions` are both counts of scans, so
+ * they share one axis and belong on one plot.
  */
 function Series({
   dim,
@@ -219,10 +204,8 @@ function Series({
 }
 
 /**
- * The daily plot on its own, for a surface that is not the full audience panel.
- *
- * A number says where traffic is; only a line says which way it is going. Same component,
- * query and window as the Audience tab, so the two cannot disagree about a day.
+ * The daily plot on its own, for a surface that is not the full audience panel: a number says
+ * where traffic is, only a line says which way it is going.
  */
 export function ScanTrend({ data, className }: { data: Analytics | null; className?: string }) {
   const days = data?.days ?? 30;
@@ -280,21 +263,19 @@ export function Audience({
   const d = data?.dims ?? {};
   const t = data?.totals;
 
-  // Geo arrives from the CDN in front of the app. Locally there is no CDN, so an empty map is
-  // the expected state rather than a fault — say which it is instead of showing a blank panel.
+// Geo arrives from the CDN in front of the app. Locally there is no CDN, so an empty map is the
+// expected state rather than a fault.
   const geoOff = Boolean(t && t.scans > 0 && t.geo_known === 0);
 
-  // The hand-off screen only appears on an iPhone scan into a registered App Store listing, and
-  // only when the publisher has no App Clip. Saying what share tapped through turns this from a
-  // panel of "skipped" into the coverage number behind iOS attribution.
+// The hand-off screen only appears on an iPhone scan into a registered App Store listing, and
+// only when the publisher has no App Clip.
   const tappedPct = t?.scans ? Math.round((t.handoff_tapped / t.scans) * 100) : 0;
   const handoffNote = t?.scans
     ? `${num(t.handoff_tapped)} of ${num(t.scans)} scans · ${tappedPct}%`
     : undefined;
 
-  // The daily series, expanded to every slot in the window, is what the two headline tiles
-  // get their shape and their change from. Half the window against the other half is the only
-  // comparison this data can honestly make — the server returns one window, not two.
+// The daily series, expanded to every slot in the window, is what the two headline tiles get
+// their shape and their change from.
   const half = Math.max(Math.floor((data?.days ?? 30) / 2), 1);
   const dayList = useMemo(() => dayKeys(data?.days ?? 30), [data?.days]);
   const daily = useMemo(() => fill(d.day ?? [], dayList), [d.day, dayList]);

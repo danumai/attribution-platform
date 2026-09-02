@@ -1,12 +1,6 @@
 /**
- * Every creation and repricing on this page, as a dialog.
- *
- * These used to be forms parked permanently under their own lists, on screen whether or not
- * anyone wanted to create anything. A creation form is a moment, not furniture.
- *
- * Plain functions rather than components: each one is `await a dialog, validate, then call the
- * API`, and none of it renders. Taking the data it needs as arguments also keeps the branching
- * money rules in `editCampaign` readable on their own, away from a thousand lines of markup.
+ * Every creation and repricing on this page, as a dialog — these used to be forms parked
+ * permanently under their own lists, on screen whether or not anyone wanted one.
  */
 import { api } from '@/lib/api';
 import { formDialog, toast } from '@/lib/ui';
@@ -15,9 +9,8 @@ import type { Bonus, Campaign, Me, Partnership, PublisherOption } from '@/lib/ty
 import type { Act } from './types';
 
 /**
- * The publisher's offers a campaign of this kind may promise. `both` counts for either, which
- * is the publisher's own way of saying "whatever the claim was". The API checks the same list
- * on the way in — this is so the promoter never gets to tick something that will be refused.
+ * The publisher's offers a campaign of this kind may promise. `both` counts for either, which is
+ * the publisher's own way of saying "whatever the claim was".
  */
 const offersFor = (partnerships: Partnership[], partnershipId?: string, mode?: string): Bonus[] =>
   (partnerships.find((p) => p.id === partnershipId)?.publisher_bonuses ?? []).filter(
@@ -57,8 +50,8 @@ export async function newPartnership(publishers: PublisherOption[], act: Act) {
     ],
   });
   if (!v) return;
-  // Worth knowing before a print run, not after: this publisher's scans go nowhere until it
-  // registers a destination. Partnering is still fine — printing codes is not.
+    // Worth knowing before a print run: this publisher's scans go nowhere until it registers a
+    // destination. Partnering is still fine.
   if (!publishers.find((p) => p.id === v.publisher_org_id)?.ready)
     toast.info('That publisher has no app or web fallback registered yet, so scans cannot be delivered until it does.');
   await act(
@@ -79,8 +72,7 @@ export async function newPartnership(publishers: PublisherOption[], act: Act) {
 
 /**
  * Ask to be paid. Capped at `withdrawable` rather than `earnings`: fees inside the settlement
- * window are earned but not yet payable, and a request for more than that is refused by the
- * API anyway — better to say so before the publisher types a number.
+ * window are earned but not yet payable.
  */
 export async function requestPayout(profile: Me | null, act: Act) {
   const available = profile?.withdrawable ?? 0;
@@ -111,8 +103,8 @@ export async function requestPayout(profile: Me | null, act: Act) {
 }
 
 /**
- * Repricing, from the table where the rates actually live. Both tiers here, unlike the
- * campaign dialog: this is the agreement itself, not one campaign spending against it.
+ * Repricing, from the table where the rates actually live. Both tiers here, unlike the campaign
+ * dialog: this is the agreement itself, not one campaign spending against it.
  */
 export async function proposeRates(p: Partnership, act: Act) {
   const v = await formDialog({
@@ -167,9 +159,8 @@ export async function newCampaign(activePartnerships: Partnership[], act: Act) {
       'A campaign spends against one active partnership, at that partnership’s rates. What it ' +
       'promises the user is the publisher’s own offer — pick which of them this campaign runs.',
     confirmText: 'Create campaign',
-    // A function, because the reward cannot be listed until the other two answers are in: the
-    // offers belong to the publisher on the partnership, and a signup offer is not what a
-    // repeat purchase earns. It follows the picks rather than being asked in a second dialog.
+  // A function, because the reward cannot be listed until the other two answers are in: the
+  // offers belong to the publisher on the partnership.
     fields: (cur) => {
       const offers = offersFor(activePartnerships, cur.partnership_id, cur.mode);
       return [
@@ -200,8 +191,8 @@ export async function newCampaign(activePartnerships: Partnership[], act: Act) {
           name: 'bonus_types',
           label: 'The reward this campaign promises',
           type: 'checks',
-          // Everything the publisher grants for this kind of campaign, ticked. Narrowing it is
-          // the decision; promising all of it is what a campaign always used to mean.
+  // Everything the publisher grants for this kind of campaign, ticked. Narrowing it is the
+  // decision; promising all of it is what a campaign always used to mean.
           value: offers.map((o) => o.type).join(','),
           required: offers.length > 0,
           options: offers.map((o) => ({
@@ -241,10 +232,8 @@ export async function newCampaign(activePartnerships: Partnership[], act: Act) {
     })) as { id: string };
     if (!coins)
       return toast.info(`Campaign "${v.name}" created — every scan is refused until you fund it.`);
-    // The campaign already exists by now, so a refused top-up must not read as "creation
-    // failed": deployments with self-funding off fund through checkout or an admin adjustment,
-    // and the promoter has to be told which of the two happened. Reported here rather than
-    // through `act`'s success line for the same reason — that line cannot know.
+    // The campaign already exists by now, so a refused top-up must not read as "creation failed":
+    // deployments with self-funding off fund through checkout or an admin instead.
     try {
       await api(`/v1/campaigns/${c.id}/fund`, {
         method: 'POST',
@@ -260,19 +249,12 @@ export async function newCampaign(activePartnerships: Partnership[], act: Act) {
 }
 
 /**
- * Everything a promoter owns on a running campaign, in one dialog.
- *
- * Three different kinds of change, which is why it fans out into three calls rather than one:
- * the name and the status are the campaign's own and land immediately; the budget is money and
- * goes through funding; the rate is the *publisher's* price and can only be proposed.
- *
- * `ended` is a status option and not a button of its own because it is the one status a
- * campaign does not come back from — worth the extra click.
+ * Everything a promoter owns on a running campaign, in one dialog. Three different kinds of
+ * change, which is why it fans out into three calls rather than one.
  */
 export async function editCampaign(c: Campaign, partnerships: Partnership[], act: Act) {
   const p = partnerships.find((x) => x.id === c.partnership_id);
-  // Fixed options here, unlike the create dialog: the publisher and the mode are both settled,
-  // so the only open question is which of that publisher's offers this campaign still promises.
+  // Fixed options here, unlike the create dialog: the publisher and the mode are both settled.
   const offers = offersFor(partnerships, c.partnership_id, c.mode);
   const reward = (c.bonus_types.length ? c.bonus_types : offers.map((o) => o.type)).join(',');
   const v = await formDialog({
@@ -332,8 +314,8 @@ export async function editCampaign(c: Campaign, partnerships: Partnership[], act
   });
   if (!v) return;
 
-  // The rate the top-up is priced at is the one in force, not the one being proposed: an
-  // unaccepted proposal pays nobody, so budgeting at it would fund the wrong number.
+  // The top-up is priced at the rate in force, not the one being proposed: an unaccepted proposal
+  // pays nobody.
   const target = v.covers?.trim() ? Math.ceil(+v.covers * c.coin_rate) : Math.round(+v.budget);
   const topUp = target - c.budget;
   const rate = Math.round(+v.coin_rate);
@@ -371,9 +353,8 @@ export async function editCampaign(c: Campaign, partnerships: Partnership[], act
     if (topUp > 0)
       await api(`/v1/campaigns/${c.id}/fund`, {
         method: 'POST',
-        // Keyed on where the budget was *and* where it is going, so a double-click funds once
-        // while a genuine second top-up to the same target — after scans have spent some of
-        // it — is a different key and still lands.
+    // Keyed on where the budget was *and* where it is going, so a double-click funds once while a
+    // genuine second top-up to the same target still goes through.
         body: JSON.stringify({ coins: topUp, idempotency_key: `edit:${c.budget}:${target}` }),
       });
     if (rate !== c.coin_rate && p)

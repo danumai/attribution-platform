@@ -1,11 +1,8 @@
 /**
  * Operational alerts: the findings that must reach a human, pushed instead of waiting to be
- * noticed on a dashboard.
- *
- * The observability layer already *records* everything — the admin overview computes ledger
- * drift, the metrics count refusal rates — but a number on a page nobody has open is not an
- * alert. This is the push half: structured `error` log always (every pipeline can route on
- * it), plus a Slack-compatible `{ text }` POST when ALERT_WEBHOOK_URL is set.
+ * noticed on a dashboard. The observability layer already records everything, but a number on a
+ * page nobody has open is not an alert. Structured `error` log always, plus a Slack-compatible
+ * `{ text }` POST when ALERT_WEBHOOK_URL is set.
  */
 import { ALERT_WEBHOOK_URL } from '../config';
 import { count, log } from './obs';
@@ -29,12 +26,11 @@ export async function alert(event: string, fields: Record<string, unknown> = {})
 }
 
 /**
- * The reconciliation the admin overview runs on page load, run on a clock instead — drift
- * between a cached balance and its ledger entries means something is spending against a wrong
- * number, and it must not wait for someone to open a dashboard.
+ * The reconciliation the admin overview runs on page load, run on a clock instead — drift between
+ * a cached balance and its ledger entries means something is spending against a wrong number.
  *
- * ponytail: aggregates the whole ledger every sweep. Fine for years at this volume; move to
- * an incremental check keyed on recent refs when a sweep is ever slow enough to notice.
+ * ponytail: aggregates the whole ledger every sweep. Move to an incremental check keyed on recent
+ * refs when a sweep is ever slow enough to notice.
  */
 export function startReconciliation(intervalMs = 10 * 60_000) {
   const sweep = async () => {

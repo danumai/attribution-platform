@@ -1,9 +1,7 @@
 /**
- * Shared utility strings for the primitives the console repeats on every page.
- *
- * These are Tailwind class lists, not a CSS layer — they exist so a card or a
- * button is spelled once instead of four hundred times. Spacing is deliberately
- * absent: margins belong to the call site, where the layout decision is made.
+ * Shared utility strings for the primitives the console repeats on every page. Tailwind class
+ * lists, not a CSS layer: they exist so a card or a button is defined once rather than
+ * re-spelled per page.
  */
 
 export const cx = (...parts: (string | false | null | undefined)[]) =>
@@ -11,21 +9,16 @@ export const cx = (...parts: (string | false | null | undefined)[]) =>
 
 /* ---- surfaces ---- */
 
-/* A card is a raised white surface with a hairline edge and one soft shadow. It carries no
-   hover: a static panel that reacts to the cursor is reactive chrome on a surface nothing can
-   be done to, and a page of twelve of them flickers as the pointer crosses it. */
+/* A card is a raised white surface with a hairline edge and one soft shadow. No hover: a static
+   panel that reacts to the cursor is reactive chrome on something that does nothing. */
 export const card = 'relative rounded-xl border border-line bg-card p-6 shadow-contact-sm';
 
 /** the small field label — sentence case, muted, sits above its value */
 export const stamp = 'text-stamp text-mut';
 
 /**
- * The same label in the landing page's wide-tracked caps.
- *
- * Split from `stamp` by what the label *does*, not which surface it sits on: `stamp` names a
- * control about to be operated, and sentence case reads faster. This names a column — a figure
- * heading, a table head, a section rule — read as identity rather than as prose, where caps at
- * 10.5px stop the label competing with the number under it.
+ * The same label in the landing page's wide-tracked caps. Split from `stamp` by what the label
+ * *does*, not which surface it sits on.
  */
 export const stampCaps = 'text-stamp-caps uppercase text-mut';
 
@@ -38,12 +31,10 @@ export const sectionHead =
 
 /* ---- buttons ---- */
 
-/* Shape and behaviour only — no padding and no colour, so an odd-shaped control
-   (an icon square, a tab, a preset plate) composes from the same base without two
-   utilities fighting over the same property. */
-/* The press is deliberately on the base rather than on each ink: a control that lights up
-   under the cursor but does not move under the finger reads as a picture of a button. One
-   pixel is the whole effect — enough to feel, too little to reflow anything around it. */
+/* Shape and behaviour only — no padding and no colour, so an odd-shaped control composes from the
+   same base without two utilities fighting. */
+/* The press is on the base rather than on each ink: a control that lights under the cursor but
+   does not move under the finger reads as a picture of a button. */
 export const btnBase =
   'relative cursor-pointer rounded-lg border ' +
   'text-[13.5px] font-medium tracking-[-0.006em] whitespace-nowrap no-underline ' +
@@ -128,9 +119,8 @@ export function tab(selected: boolean) {
 
 export const table = 'w-full border-collapse text-[13.5px]';
 
-/* A column heading is the archetypal label-as-identity, so it takes the caps stamp. It also
-   stops the head row needing a heavier weight or a darker ink to separate itself from the
-   first row of data — the case change does that on its own, at a lower volume. */
+/* A column heading is the archetypal label-as-identity, so it takes the caps stamp — which also
+   stops the head row needing a heavier weight to separate itself. */
 export const th =
   `border-b border-line bg-card-alt px-3.5 py-3.5 text-left ${stampCaps}`;
 
@@ -159,17 +149,14 @@ export const tableFoot =
 /* ---- the numbers worth glancing at ---- */
 
 /**
- * The figure strip: a run of stat cells sharing one bordered container, so the labels sit on
- * one baseline and the figures on another — which is the whole reason a strip of numbers is
- * worth glancing at.
+ * The figure strip: a run of stat cells sharing one bordered container, so the labels sit on one
+ * baseline and the figures on another.
  */
 export const figureStrip = 'grid overflow-hidden rounded-xl border border-line bg-card shadow-contact-sm';
 
 /**
- * How many columns a strip of `n` figures breaks into.
- *
- * Hand-picked rather than `auto-fit`, so a wrapped row is never a single orphan: seven goes
- * four-and-three, five goes three-and-two. Past seven, fit what you can.
+ * How many columns a strip of `n` figures breaks into. Hand-picked rather than `auto-fit`, so a
+ * wrapped row is never a single orphan: seven goes four-and-three.
  */
 export function figureColumns(n: number) {
   return (
@@ -186,21 +173,7 @@ export function figureColumns(n: number) {
 }
 
 /* The subdivision is a perforation: down the left of every cell and across the top of every
-   wrapped row. Both are laid 1px outside the cell so the strip's own `overflow-hidden` clips
-   the ones that would otherwise draw over the card's edge — which is what lets the rules
-   survive a grid that reflows its column count.
-
-   This is the one place the console spends a signature. The product prints spending
-   instruments on ticket stock — the landing page is built out of a pass and a tear-off stub —
-   and a strip of figures divided by a perforation is that same object, so the console reads
-   as the same product rather than as a dashboard bolted to the side of one. At 2px on, 4px
-   off it is quieter than the solid hairline it replaces, which is what keeps it a device
-   rather than a costume: from reading distance it is a dashed rule, and it only resolves
-   into a perforation once someone looks at it.
-
-   Both gradients are spelled out in full rather than built by a helper: Tailwind extracts
-   candidates from the source text, so a class name assembled from a variable is a class name
-   that never gets generated. */
+   wrapped row. Both are laid 1px outside the cell so the strip's own border is never doubled. */
 const cellRules =
   "before:absolute before:inset-y-0 before:-left-px before:w-px before:content-[''] " +
   'before:bg-[repeating-linear-gradient(to_bottom,var(--color-line)_0_2px,transparent_2px_6px)] ' +
@@ -244,7 +217,6 @@ const alertBase = 'flex gap-2.5 rounded-lg border px-3.5 py-3 text-[13.5px] anim
 export const alertErr = `${alertBase} border-bad-line bg-bad-soft text-bad`;
 export const alertWarn = `${alertBase} border-warn-line bg-warn-soft text-warn`;
 
-/** status chips are soft-tinted pills */
 const pillBase =
   "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-[3px] align-middle " +
   "text-[12px] font-medium capitalize " +
@@ -257,7 +229,6 @@ export const pillBad = `${pillBase} border-bad-line bg-bad-soft text-bad`;
 /** live: the dot keeps blinking so "active" reads as a state, not a colour */
 const pillActive = `${pillOk} before:animate-blink`;
 
-/** maps a status string to its chip */
 export function pill(status?: string | null) {
   const s = (status ?? '').toLowerCase();
   if (s === 'active') return pillActive;
@@ -267,25 +238,14 @@ export function pill(status?: string | null) {
   return pillNeutral;
 }
 
-/** A figure the page is read for. The size gives way before the number does — a seven-digit
- *  total that overruns its cell is worse than one set slightly smaller.
- *
- *  Proportional, not tabular: nothing in a strip of stat cells aligns vertically, so equal-width
- *  digits buy nothing and only make a number like 121 look loose. */
+/* A figure the page is read for. The size gives way before the number does — a seven-digit total
+   that overruns its cell is worse than one set slightly smaller. */
 export const figure =
   'block text-[clamp(22px,1.95vw,29px)] font-[660] tracking-[-0.035em] text-ink';
 
 /**
- * The signed change under a figure.
- *
- * Colour is direction × whether up is the good news, which is why the caller declares
- * `goodUp` rather than the chip assuming green-is-up: scans rising is good, and a budget
- * burning down faster is not. The arrow carries the direction on its own, so the chip
- * still reads correctly with the colour taken away.
- *
- * Tinted, not bare: coloured text floating under a figure has no edge and at 12px reads as
- * part of the number's descender line. A soft plate makes it a separate fact, at the same rank
- * as a status pill — whose tints it borrows, so the console has one vocabulary for tinted state.
+ * The signed change under a figure. Colour is direction × whether up is the good news, which is
+ * why the caller declares `goodUp` rather than the chip assuming it.
  */
 export function delta(good: boolean) {
   return cx(
@@ -300,7 +260,6 @@ export const skeleton =
 
 /* ---- admin console ---- */
 
-/** table chrome: the filter box and the row count above the sheet */
 export const tablebar = 'mt-4 flex flex-wrap items-center justify-between gap-3';
 
 export const search =
@@ -350,8 +309,8 @@ export function menuItem(danger?: boolean) {
   );
 }
 
-/* The ledger check reads as a banner on the page, not a line in a stats row. The mark and,
-   when it fails, the whole card's wash carry the state. */
+/* The ledger check reads as a banner, not a line in a stats row: the mark and, when it fails, the
+   whole card's wash carry the state. */
 export function health(ok: boolean) {
   return cx(
     'mt-4 flex items-start gap-3.5 rounded-xl border p-5 shadow-contact-sm',
@@ -371,18 +330,12 @@ export function healthMark(ok: boolean) {
 /**
  * The trough a meter fills. A bar is a width, not a chart library — the same call the audience
  * panel's BarList already makes.
- *
- * Meters exist here because a spend product that prints its budget as an integer has hidden its
- * only real story. "1,200 coins" says nothing; "1,200 left of 5,000" is the whole picture.
  */
 export const meter = 'h-1.5 overflow-hidden rounded-full bg-sunk';
 
 /**
- * How full, and in which ink.
- *
- * The thresholds are the ones the dashboard was already applying to text colour inline — a
- * budget that cannot pay for one more signup is `bad`, under ten is `warn`. Lifting them here
- * is what stops the third call site from picking its own numbers.
+ * How full, and in which ink. The thresholds are the ones the dashboard was already applying to
+ * text colour inline.
  */
 export function meterFill(ratio: number, state?: 'ok' | 'warn' | 'bad') {
   const ink = state ?? (ratio <= 0 ? 'bad' : ratio < 0.15 ? 'warn' : 'ok');
@@ -409,15 +362,12 @@ export const studioPreview = 'sticky top-[86px] max-[900px]:static';
 
 export const previewHead = 'mb-3 flex items-baseline justify-between';
 
-/* The plate's background comes from the merchant's chosen backdrop at the call site, not
-   from a theme token — a QR preview is a proof of a printed artifact, and the Cutout
-   preset is transparent. Theming this dark would show an unscannable code as if it were
-   fine. Only the frame around it follows the theme. */
+/* The plate's background comes from the merchant's chosen backdrop at the call site, not from a
+   theme token — a QR preview is a proof of a printed artifact. */
 export const qrbox =
   'flex aspect-square items-center justify-center rounded-lg border border-line p-4 shadow-contact-sm ' +
   'transition-colors duration-200 ease-press [&_img]:max-h-full [&_img]:max-w-full';
 
-/** icon pickers — the option shows the shape, it does not describe it */
 export const swatches = 'mt-2 flex flex-wrap gap-2';
 
 export function chip(on: boolean) {
@@ -434,8 +384,8 @@ export const chipWide = 'w-auto px-3.5 text-[13px] tabular-nums';
 
 export const presets = 'mt-3 grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-1.5';
 
-/* Selection is a recessed mount under the plate, never a ring around it and never coloured:
-   the chrome around a colour swatch has to be achromatic or it fights the swatch. */
+/* Selection is a recessed mount under the plate, never a coloured ring: chrome around a colour
+   swatch has to be achromatic or it fights the swatch. */
 export function preset(pressed: boolean) {
   return cx(
     btnBase,
@@ -465,7 +415,6 @@ export function codeTab(on: boolean, voided: boolean) {
 
 export const colorwell = 'min-w-[150px] flex-[1_1_160px]';
 
-/** logo drop target */
 export function logoWell(state: 'idle' | 'over' | 'filled') {
   return cx(
     'mt-2 rounded-xl border-2 transition-[border-color,background-color] duration-200 ease-press',

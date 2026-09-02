@@ -16,14 +16,8 @@ import {
 import { btn, btnGhost } from '@/lib/tw';
 
 /**
- * The hole `not-found.tsx` left open.
- *
- * A mistyped URL was already caught and printed as an instrument; a render error was not, and
- * still dropped the user into Next's unstyled default screen. Both consoles render straight
- * off API shapes nothing validates at runtime, so one unexpected payload is all it takes.
- *
- * `reset()` re-renders the segment without a full reload, which is the right first try: most
- * of these are a transient bad response rather than a broken build.
+ * The hole `not-found.tsx` left open. A mistyped URL was already caught and printed as an
+ * instrument; a render error was not, and still dropped the user into Next's unstyled default.
  */
 export default function Error({ error, reset }: { error: Error; reset: () => void }) {
   return (

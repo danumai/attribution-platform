@@ -1,14 +1,7 @@
 /**
- * The Partner API: server-to-server only, called by the publisher's own backend.
- *
- * This endpoint answers exactly one question — "is this new user attributable to a campaign?"
- * It never returns an instruction to grant currency, and it never hands anything back that a
- * device could redeem. What the publisher does with a `true` answer is the publisher's own
- * decision under its own new-user policy, funded by its own free-grant allowance.
- *
- * That separation is the compliance argument, and it is structural rather than cosmetic:
- * there is no code path here that could unlock anything inside an app even if a publisher
- * wanted it to.
+ * Partner API: server-to-server only. It answers exactly one question — "is this new user
+ * attributable to a campaign?" — and no code path here can grant currency or hand back
+ * anything a device could redeem. That separation is the compliance argument.
  */
 import {
   BadRequestException,
@@ -46,7 +39,6 @@ interface ClaimableScan {
   campaign_id: string;
   campaign_name: string;
   status: string;
-  /** the offers this campaign advertises — publisher slugs, resolved through `campaignBonuses` */
   bonus_types: string[];
   coin_rate: number;
   guest_rate: number;
@@ -55,15 +47,8 @@ interface ClaimableScan {
   platform_fee_bps: number;
 }
 
-/**
- * The only lookup. A claim id names exactly one scan whichever carrier brought it back —
- * Play's referrer, an App Clip's shared container, or the pasteboard — so there is no
- * ambiguity to resolve, no collisions to score, and one long window is safe for all of them.
- *
- * `FOR UPDATE OF s SKIP LOCKED` rather than plain `FOR UPDATE`: two concurrent claims must
- * never queue up behind each other and then both proceed against the same row. The loser
- * skips it and comes back unattributed, which is the correct answer.
- */
+// SKIP LOCKED, not plain FOR UPDATE: a second concurrent claim must come back unattributed
+// rather than queue behind the first and then re-process the same row.
 const byClaimId = (tx: Tx, publisherId: string, claimId: string) =>
   tx.$queryRaw<ClaimableScan[]>`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status, c.bonus_types,
@@ -78,50 +63,28 @@ const byClaimId = (tx: Tx, publisherId: string, claimId: string) =>
       AND s.scanned_at > now() - make_interval(days => ${REFERRER_WINDOW_DAYS})
     FOR UPDATE OF s SKIP LOCKED`;
 
-/** What the publisher's SDK carried back from the scan. One field, and how it travelled. */
 interface Carried {
   claimId: string | null;
-  /** which channel produced it — reporting only; the lookup is identical for all three */
   carrier: MatchMethod;
 }
 
-/** The carriers, and the only values `match_method` is ever written with. */
 type MatchMethod = 'referrer' | 'appclip' | 'pasteboard';
 const CARRIERS = ['referrer', 'appclip', 'pasteboard'] as const;
 
-/**
- * Parse and bound the claim half of a request body. It crosses a trust boundary — it arrives
- * from another company's server — so nothing is used before `str()` has bounded its length and
- * `claimIdFromReferrer` has confirmed its shape.
- *
- * Note what is no longer read: IP, timezone, screen, locale, core count, appearance. Those were
- * the iOS fingerprint. A publisher SDK still sending them is not an error — the fields are
- * simply ignored, so an un-upgraded integration degrades to "no claim carried" rather than
- * breaking, and `first-open` answers `no_match` until it ships the new SDK.
- */
+/** Parse and bound the claim half of a request body — it arrives from another company's server.
+ *  The old iOS fingerprint fields are ignored rather than rejected, so an un-upgraded SDK
+ *  degrades to "no claim carried". */
 function readCarried(b: Record<string, unknown>): Carried {
   const install_referrer = str(b.install_referrer, 'install_referrer', 1000, false);
-  // An SDK that banked the claim id itself, rather than the whole referrer string, can present
-  // it bare. Wrapped back into referrer shape instead of re-validated here, so there is exactly
-  // one definition of what a claim id may look like.
-  //
-  // A malformed one is a 400, never a silent drop: it means the carrier delivered something,
-  // and quietly discarding it would turn a broken integration into an attribution rate of zero
-  // with no error to find it by.
+  // Wrapped back into referrer shape rather than re-validated, so there is one definition of the
+  // shape. Malformed is a 400: a silent drop turns a broken integration into zero attribution.
   const raw = str(b.claim_id, 'claim_id', 64, false);
   const bare = raw ? claimIdFromReferrer(`qrm_claim=${raw}`) : null;
   if (raw && !bare)
     throw new BadRequestException('claim_id must be the opaque id the scan issued');
 
-  // How it travelled. Asserted by the SDK and believed, because it decides nothing: every
-  // carrier resolves through the same lookup and pays the same fee. It is recorded so a
-  // publisher whose App Clip is misconfigured shows up as a column of `pasteboard` rather
-  // than as a number nobody can explain.
-  //
-  // An SDK that says nothing is recorded as `referrer` — which is both the value this endpoint
-  // has always returned for a bare claim id, so no existing integration changes shape, and the
-  // only honest one: `appclip` and `pasteboard` are the more specific claims, and asserting
-  // either without being told would be inventing the very fact this column exists to report.
+  // Believed because it decides nothing — every carrier pays the same fee. Absent means
+  // `referrer`; the more specific claims must not be invented.
   const claimed = str(b.carrier, 'carrier', 20, false);
   const carrier = (CARRIERS as readonly string[]).includes(claimed ?? '')
     ? (claimed as MatchMethod)
@@ -134,35 +97,17 @@ type Match =
   | { scan: ClaimableScan; confidence: number; match_method: MatchMethod }
   | { reason: string; confidence?: number };
 
-/**
- * Answer `unattributed`, but roll the transaction back first.
- *
- * `claimInstall` and `claimAtSignup` flip their guard (`redeemed` / `consumed`) *before* the
- * budget is known, because the fee depends on `identified`. Returning normally would commit
- * that flip, so a signup arriving one credit short of the budget would permanently burn the
- * install — topping the campaign back up could never make that user attributable again.
- *
- * `firstOpen` checks the budget before consuming anything; here the rollback is the guard.
- */
+/** Unattributed, but roll back first: `claimInstall`/`claimAtSignup` flip their guard before the
+ *  budget is known, so returning normally would permanently burn an install that came up short. */
 class Rollback extends Error {
   constructor(public reason: string) {
     super(reason);
   }
 }
 
-/**
- * Find the scan this install came from, or refuse.
- *
- * There is no fallback, and that absence is the design. A claim id that does not resolve names
- * a scan that is gone, already claimed, or belongs to a different publisher — and the honest
- * answer to all three is `no_match`. The path this replaced answered a failed exact lookup by
- * guessing from the network the phone sat on, which is both the thing Apple forbids and the
- * thing that paid one publisher for another's scan.
- *
- * `confidence` is 100 on every answer because every carrier names one exact scan. It stays in
- * the response so publishers integrated against the old shape keep reading the field they
- * already read.
- */
+/** Find the scan this install came from, or refuse. No fallback by design — gone, already claimed
+ *  and another publisher's all answer `no_match`. `confidence` is always 100, kept for API
+ *  compatibility. */
 async function matchScan(tx: Tx, publisherId: string, carried: Carried): Promise<Match> {
   if (!carried.claimId) return { reason: 'no_claim' };
   const rows = await byClaimId(tx, publisherId, carried.claimId);
@@ -171,20 +116,11 @@ async function matchScan(tx: Tx, publisherId: string, carried: Carried): Promise
     : { reason: 'no_match' };
 }
 
-/**
- * Signup on the preferred path: the match already happened at first open, so this only has to
- * check the install is still spendable and hand back the decision that was recorded then.
- *
- * `redeemed` is flipped inside the same `updateMany` that tests it, which is what makes two
- * simultaneous signups for one install safe — the loser sees `count === 0`. Same trick the
- * scan path uses with `consumed`, for the same reason.
- *
- * The scan is deliberately *not* re-matched here. Re-running the matcher at signup would
- * reintroduce exactly the bug the install stage exists to fix, and the scan is long consumed.
- */
+/** Signup on the preferred path: matched at first open, so this only checks the install is still
+ *  spendable. `redeemed` is flipped inside the `updateMany` that tests it, so two simultaneous
+ *  signups are safe. The scan is deliberately not re-matched. */
 async function claimInstall(tx: Tx, publisherId: string, installId: string): Promise<Match> {
-  // `::uuid` on a caller-supplied string throws 22P02 on a malformed value rather than
-  // returning empty, so the shape is checked before Postgres is asked to parse it.
+  // Shape-checked first: `::uuid` throws 22P02 on a malformed value rather than returning empty.
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(installId))
     return { reason: 'no_match' };
 
@@ -205,9 +141,7 @@ async function claimInstall(tx: Tx, publisherId: string, installId: string): Pro
   const row = rows[0];
   if (!row) return { reason: 'no_match' };
   if (row.install_expired) return { reason: 'install_expired' };
-  // Checked again here, not just at first open. Ending or pausing a campaign has to stop
-  // spending immediately, and installs bound while it was live can otherwise keep drawing on
-  // a funded budget for the whole signup window after the promoter thought they had stopped.
+  // Re-checked here, not just at first open: pausing a campaign has to stop spending immediately.
   if (row.status !== 'active') return { reason: 'campaign_not_active' };
 
   const taken = await tx.install.updateMany({
@@ -223,35 +157,23 @@ async function claimInstall(tx: Tx, publisherId: string, installId: string): Pro
   };
 }
 
-/** What an engagement claim resolves to: one issued code, its scan, and what it pays. */
 interface ClaimableCode {
   qr_code_id: string;
   scan_id: string;
   campaign_id: string;
   campaign_name: string;
   status: string;
-  /** the offers this campaign advertises — publisher slugs, resolved through `campaignBonuses` */
   bonus_types: string[];
   engagement_rate: number;
   platform_fee_bps: number;
 }
 
-/**
- * The engagement path: a code minted against one real purchase, scanned once, paid once.
- *
- * There is no matching to do, and that is the point. `match_method` is `code` and confidence is
- * 100 because the code names a *purchase* rather than a device — stronger evidence than a
- * referrer, not a flattering label.
- *
- * Note what is deliberately NOT checked: `scans.consumed`. That flag is the acquisition guard,
- * and an engagement reward is a different fact about the same scan — a traveller who scans a
- * boarding pass, installs, signs up and has bought a ticket earns both, payably. Sharing one
- * flag would make them race. The engagement guarantee is its own partial unique index.
- */
+/** The engagement path: a code minted against one real purchase, scanned once, paid once.
+ *  `scans.consumed` is deliberately not checked — that is the acquisition guard, and both rewards
+ *  are payable on one scan. The engagement guarantee is its own partial unique index. */
 async function claimCode(tx: Tx, publisherId: string, code: string): Promise<ClaimableCode | { reason: string }> {
-  // `FOR UPDATE OF q` holds the code row for the rest of the transaction, so two simultaneous
-  // claims for one boarding pass serialise here rather than both reaching the INSERT and
-  // relying on the unique index to tell one of them it lost.
+  // `FOR UPDATE OF q` serialises two simultaneous claims for one code here, rather than letting
+  // both reach the INSERT and relying on the unique index to tell one of them it lost.
   const rows = await tx.$queryRaw<(ClaimableCode & { mode: string })[]>`
     SELECT q.id AS qr_code_id, s.id AS scan_id, c.id AS campaign_id, c.name AS campaign_name,
            c.status, c.mode, c.bonus_types, p.engagement_rate, p.platform_fee_bps
@@ -268,27 +190,16 @@ async function claimCode(tx: Tx, publisherId: string, code: string): Promise<Cla
     LIMIT 1
     FOR UPDATE OF q`;
   const row = rows[0];
-  // No row covers four different situations on purpose — an unknown code, a voided one, one
-  // belonging to another publisher, and one nobody has actually scanned yet. Telling them
-  // apart would let a publisher probe which codes exist across the whole platform.
+  // Four situations share one answer on purpose — unknown code, voided, another publisher's, and
+  // one nobody has scanned. Telling them apart would let a publisher probe the whole platform.
   if (!row) return { reason: 'no_match' };
-  // An acquisition campaign has no repeat-purchase price and never agreed to pay one. This is
-  // the refusal a publisher sees if it sends a `code` from the wrong kind of campaign.
   if (row.mode !== 'engagement') return { reason: 'not_engagement' };
-  // Re-checked here and not only at scan time: ending or pausing a campaign has to stop
-  // spending now, and a code scanned while it was live otherwise stays payable for the whole
-  // window after the promoter thought they had stopped.
   if (row.status !== 'active') return { reason: 'campaign_not_active' };
   return row;
 }
 
-/**
- * Signup on the legacy single-call path: match and pay in one request, with no install row.
- *
- * Kept working for publishers already integrated. It runs the same deterministic lookup, so
- * the window question the two-stage path exists to answer does not arise here either — a
- * claim id is as good on day 30 as on minute one.
- */
+/** Legacy single-call path: match and pay in one request, no install row. Same deterministic
+ *  lookup, kept for publishers already integrated. */
 async function claimAtSignup(tx: Tx, publisherId: string, carried: Carried): Promise<Match> {
   const m = await matchScan(tx, publisherId, carried);
   if ('reason' in m) return m;
@@ -308,19 +219,10 @@ async function claimAtSignup(tx: Tx, publisherId: string, carried: Carried): Pro
 @Controller('v1/attribution')
 export class PartnerController {
   /**
-   * Stage one: the app has just opened for the first time. Nothing is paid here.
-   *
-   * Matching and paying happen at different moments. The claim id is available at launch, in
-   * whichever carrier brought it across the install, and it is only readable then: an App
-   * Clip's shared container is migrated once, and the pasteboard holds one thing at a time.
-   * Signup is whenever the user gets round to it, routinely the next day.
-   *
-   * So the publisher's server calls this at launch, banks the `install_id`, and presents it
-   * again at signup. The scan is consumed here — the claim is bound — but no ledger entry
-   * exists until somebody signs up.
-   *
-   * Idempotent by construction: a second call finds the scan already consumed and comes back
-   * `no_match`, so the SDK must persist `install_id` rather than re-derive it.
+   * Stage one: first app open. Nothing is paid here. The claim id is readable only at launch — an
+   * App Clip's container is migrated once, the pasteboard holds one thing — but signup is
+   * routinely the next day, so this consumes the scan and returns an `install_id` the SDK must
+   * persist. A second call finds the scan consumed and answers `no_match`.
    */
   @Post('first-open')
   @HttpCode(200)
@@ -334,17 +236,15 @@ export class PartnerController {
       claim_id?: string;
       /** `referrer` | `appclip` | `pasteboard`. Reporting only; inferred when absent. */
       carrier?: string;
-      /** device integrity, as asserted by the SDK. See the handling note below. */
+      /** device integrity, as asserted by the SDK */
       emulator?: boolean;
       rooted?: boolean;
       vpn?: boolean;
     },
   ) {
     const publisher = await publisherFromKey(auth);
-    // What a *refusal* carries: everything this publisher grants for a signup. No campaign is
-    // known on those answers, so nothing narrower is available — and an SDK that shows the
-    // offer while it retries is showing what the publisher runs, not what one poster promised.
-    // An attributed answer replaces this with the campaign's own pick; see `granted` below.
+    // Refusals carry the publisher's whole signup offer; an attributed answer carries the
+    // campaign's own pick.
     const bonuses = bonusesFor(publisher.bonuses, 'acquisition');
     const carried = readCarried(b as Record<string, unknown>);
     if (!carried.claimId)
@@ -353,18 +253,9 @@ export class PartnerController {
       );
 
     /**
-     * Device integrity is *asserted* by the SDK, never observed by us, so it is graded rather
-     * than trusted uniformly:
-     *
-     *   emulator  blocks — the shape of every install farm, and cheap to act on.
-     *   rooted    recorded only; the honest population is large enough that refusing them
-     *             would deny real users a real reward.
-     *   vpn       recorded only, and no longer a fraud signal at all — nothing about the
-     *             network is compared any more. Kept because publishers already send it, and
-     *             because it costs one boolean to keep an integration from breaking.
-     *
-     * All three are stored on accepted installs too: the pattern worth finding is the one that
-     * got paid.
+     * Asserted by the SDK, never observed, so graded rather than trusted: `emulator` blocks,
+     * `rooted` and `vpn` are recorded only — the honest populations are too large to refuse.
+     * Stored on accepted installs too: the pattern worth finding is the one that got paid.
      */
     const risk = {
       emulator: b.emulator === true,
@@ -382,20 +273,12 @@ export class PartnerController {
       const { scan, confidence, match_method } = m;
       if (scan.status !== 'active') return { attributed: false, reason: 'campaign_not_active' };
 
-      // Bind nothing against a campaign that cannot pay. The signup that follows would only
-      // fail on budget anyway, and it would have burned the scan getting there — leaving a
-      // real scanner permanently unattributable once the promoter tops the budget back up.
+      // Bind nothing against a campaign that cannot pay: the signup would fail on budget anyway
+      // and would have burned the scan getting there.
       if ((await lockedBalance(tx, `campaign:${scan.campaign_id}`)) < scan.guest_rate)
         return { attributed: false, reason: 'budget_exhausted' };
 
-      // The repeat-device check that used to sit here is gone with the signals it hashed.
-      // Nothing is lost that was ever sound: it could only see the probabilistic path, and one
-      // install per scan — the guarantee that actually bounds a print run — is enforced below
-      // by `consumed`, on a claim id that is unique per scan by construction.
-
-      // One install per scan. The row is already locked by the matcher; this is the same
-      // re-check the old code did, kept because it is what makes the guarantee independent
-      // of the lock rather than a consequence of it.
+      // One install per scan, independent of the matcher's lock rather than a consequence of it.
       const consumed = await tx.scan.updateMany({
         where: { id: scan.id, consumed: false },
         data: { consumed: true },
@@ -416,9 +299,8 @@ export class PartnerController {
         select: { id: true },
       });
 
-      // What *this campaign* advertises, not everything the publisher runs: the promoter
-      // picked these offers out of the publisher's list, the artwork was printed off them, and
-      // this is the answer the app grants from. Still a description, never an instruction.
+      // What *this campaign* advertises, not everything the publisher runs — the artwork was
+      // printed off these.
       const granted = campaignBonuses(publisher.bonuses, 'acquisition', scan.bonus_types);
 
       return {
@@ -437,9 +319,8 @@ export class PartnerController {
       };
     });
 
-    // One record per first-open, refused or bound. This is the series that makes a
-    // misconfigured store target visible: it produces no errors and writes no rows, so without
-    // this the only symptom is a publisher quietly earning nothing.
+    // One record per first-open, refused or bound: a misconfigured store target produces no
+    // errors and writes no rows, so this series is the only symptom.
     recordDecision(
       'first_open',
       {
@@ -453,18 +334,11 @@ export class PartnerController {
   }
 
   /**
-   * Stage two: a new user finished signing up, so the fee is earned.
+   * Stage two: a new user finished signing up, so the fee is earned. Preferred shape is
+   * `{ install_id, publisher_user_ref }`; the carrier fields are the legacy single-call shape,
+   * whose only cost is that a signup that never happens leaves the scan claimable.
    *
-   * Preferred shape is `{ install_id, publisher_user_ref }` — the match already happened at
-   * first open and this call only turns it into money.
-   *
-   * The carrier fields are the legacy single-call shape, kept working for publishers already
-   * integrated against it. They run the same deterministic lookup at signup time; the only
-   * cost of this shape is that a signup which never happens leaves the scan claimable, where
-   * the two-stage path would have bound it at first open.
-   *
-   * Unattributed is a normal answer, not an error: most installs are organic. 200 with
-   * `attributed: false`, so a publisher's signup path never treats this as a failure.
+   * Unattributed is a normal answer — most installs are organic — so a 200, not an error.
    */
   @Post('claim')
   @HttpCode(200)
@@ -481,38 +355,25 @@ export class PartnerController {
       claim_id?: string;
       /** legacy single-call shape: which carrier produced it */
       carrier?: string;
-      /**
-       * The engagement path: a transaction code the promoter minted and the user scanned. Bare
-       * (`Ab3x…`) or as the whole Play referrer it arrived in, whichever the SDK banked.
-       *
-       * Explicit, never read out of `install_referrer` implicitly, even though an engagement
-       * referrer carries both: they are different payouts on different terms, and one call
-       * quietly picking between them is an accounting surprise to reconcile by hand later.
-       */
+      /** The engagement path: a transaction code the promoter minted, bare or as the whole
+       *  referrer. Explicit, never read out of `install_referrer` — different payouts, different
+       *  terms. */
       code?: string;
-      /**
-       * The publisher asserting this signup created a brand-new account. Only `false` acts —
-       * an omitted field stays attributable, so publishers integrated before this existed are
-       * unaffected. See the refusal note in the handler.
-       */
+      /** The publisher asserting this account is brand-new. Only `false` acts, so older
+       *  integrations are unaffected. */
       is_new_user?: boolean;
       /** the publisher asserting this user cleared its own verification bar */
       identified?: boolean;
     },
   ) {
     const publisher = await publisherFromKey(auth);
-    // The refusal answer, as in `first-open`: no campaign is resolved on any of them, so this
-    // is the publisher's whole signup offer. Attributed answers carry the campaign's pick.
     const bonuses = bonusesFor(publisher.bonuses, 'acquisition');
-    // Bounded before anything is parsed or stored: `publisher_user_ref` becomes a unique-index
-    // entry, and the rest are attacker-shaped strings from another company's server.
+    // Bounded before anything is parsed or stored — attacker-shaped strings from another server.
     const publisher_user_ref = str(b.publisher_user_ref, 'publisher_user_ref', 200)!;
     const install_id = str(b.install_id, 'install_id', 36, false);
 
-    // Wrapped back into referrer shape rather than validated separately, the same way `claim_id`
-    // is in `readSignals`, so there is exactly one definition of what an issued code looks like.
-    // A malformed one is a 400 and never a silent fallthrough to the acquisition path: that
-    // would answer a question about a purchase with an answer about a signup.
+    // Wrapped back into referrer shape so there is one definition of an issued code. Malformed is
+    // a 400, never a fallthrough to the acquisition path.
     const rawCode = str(b.code, 'code', 1000, false);
     const code = rawCode ? codeFromReferrer(`qrm_code=${rawCode}`) ?? codeFromReferrer(rawCode) : null;
     if (rawCode && !code)
@@ -525,25 +386,18 @@ export class PartnerController {
         'install_id, or install_referrer/claim_id, required to attribute a signup',
       );
 
-    // Every refusal in this handler funnels through here, which is what makes it the one place
-    // worth counting them — including the ones raised inside a transaction that then rolls back.
+    // Every refusal funnels through here, including ones raised inside a rolled-back transaction.
     const unattributed = (reason: string) => {
       recordDecision('claim', { reason }, { publisher_org_id: publisher.id });
       return { attributed: false, reason, bonuses, bonus_label: bonusLabel(bonuses) };
     };
 
-    /**
-     * The fee buys an *acquisition*, and an existing account signing in again is not one. Only
-     * the publisher can know that, so it is asserted — and refused before the install is spent,
-     * or a returning user would burn an install that is then unclaimable for no reason.
-     *
-     * The UNIQUE on (campaign, publisher_user_ref) catches the same ref twice; this catches
-     * what that constraint cannot see — a returning user handed a fresh ref.
-     */
+    /** The fee buys an *acquisition*, and only the publisher knows an account is new. Refused
+     *  before the install is spent. The UNIQUE on (campaign, ref) catches the same ref twice;
+     *  this catches a returning user handed a fresh one. */
     if (b.is_new_user === false) return unattributed('not_a_new_user');
 
-    // Set when the UNIQUE below fires, so the replay can be answered after the transaction
-    // has rolled back — inside an aborted Postgres transaction no further query can run.
+    // Set when the UNIQUE below fires: no query can run inside an aborted Postgres transaction.
     let replayCampaignId: string | null = null;
 
     const fresh = await prisma.$transaction(async (tx) => {
@@ -556,9 +410,8 @@ export class PartnerController {
       const identified = b.identified === true;
       const fee = identified ? scan.coin_rate : scan.guest_rate;
 
-      // Fail closed on an exhausted budget. Unattributed rather than an error, because the
-      // user has already signed up — the publisher's flow must not break over our accounting.
-      // Thrown rather than returned so the install/scan is released: see `Rollback`.
+      // Fail closed, thrown rather than returned so the install/scan is released — see `Rollback`.
+      // Unattributed rather than an error: the user has already signed up.
       if ((await lockedBalance(tx, `campaign:${scan.campaign_id}`)) < fee)
         throw new Rollback('budget_exhausted');
 
@@ -578,9 +431,8 @@ export class PartnerController {
           select: { id: true },
         });
       } catch (e: any) {
-        // UNIQUE (campaign_id, publisher_user_ref): this user already counted for this
-        // campaign. Roll the whole transaction back so the scan is not left consumed, and
-        // answer from the existing row instead — see the replay note below.
+        // UNIQUE (campaign_id, publisher_user_ref): already counted. Roll back so the scan is not
+        // left consumed, and answer from the existing row.
         if (e.code === 'P2002') {
           replayCampaignId = scan.campaign_id;
           throw new ConflictException('duplicate_user');
@@ -593,8 +445,6 @@ export class PartnerController {
         tx, scan.campaign_id, publisher.id, fee, scan.platform_fee_bps, ref,
       );
 
-      // The fee is the number worth being able to sum from logs alone when the ledger is the
-      // thing under question.
       recordDecision(
         'claim',
         { match_method, confidence },
@@ -608,8 +458,6 @@ export class PartnerController {
         },
       );
 
-      // The campaign's own pick, as at `first-open`: what this poster promised, resolved live
-      // against the publisher's current list.
       const granted = campaignBonuses(publisher.bonuses, 'acquisition', scan.bonus_types);
 
       return {
@@ -629,39 +477,27 @@ export class PartnerController {
         confirm_deadline: identified
           ? null
           : new Date(Date.now() + scan.grace_days * 86_400_000).toISOString(),
-        /**
-         * The offers this campaign advertises, echoed back for their logs. A description of
-         * what the publisher grants, never an instruction from this platform.
-         */
+        /** the offers this campaign advertises. A description, never an instruction. */
         bonuses: granted,
         bonus_label: bonusLabel(granted),
         /** false on the first answer for this user; see the replay note on retries. */
         replay: false,
       };
     }).catch((e) => {
-      // Rolled back on purpose, and the caller still gets a 200 — the transaction was undone
-      // so the install stays claimable once the promoter tops the budget back up.
+      // Rolled back on purpose; the caller still gets a 200 and the install stays claimable.
       if (e instanceof Rollback) return unattributed(e.reason);
       if (replayCampaignId) return null; // handled below, as a replay rather than an error
       throw e;
     });
     if (fresh) return fresh;
 
-    /**
-     * Replay. This user was already attributed for this campaign, which in practice means the
-     * first call succeeded and its *response* was lost — a timeout, a retried job, an
-     * at-least-once queue. A 409 would make a correctly-recorded attribution look like a
-     * failure to reconcile by hand, so the original answer is replayed verbatim. The UNIQUE
-     * constraint, not this handler, is what guarantees the fee was paid once.
-     */
+    /** Replay: already attributed, which in practice means the first call succeeded and its
+     *  response was lost. A 409 would make a correct attribution look like something to reconcile
+     *  by hand, so the original answer is replayed verbatim. */
     const prior = await prisma.redemption.findFirst({
-      // `kind` is not decoration here. The unique index that just fired is PARTIAL —
-      // `WHERE kind = 'acquisition'` — so without the same predicate in this WHERE, Postgres
-      // cannot prove the index applies and reads `redemptions` sequentially on every replay.
-      // It is also the correctness half: a traveller who was both a new user and a repeat
-      // purchase on one campaign has two rows under this (campaign, user_ref) pair, and an
-      // unscoped findFirst can hand back the engagement one — a different fee, a different
-      // attribution id, and a /confirm that then answers `already_full`.
+      // `kind` matches the PARTIAL unique index's predicate — without it Postgres cannot prove
+      // the index applies, and an unscoped findFirst can hand back the engagement row for a user
+      // who has both, which is a different fee and a /confirm that answers `already_full`.
       where: { campaign_id: replayCampaignId!, publisher_user_ref, kind: 'acquisition' },
       include: { campaign: { select: { name: true, bonus_types: true, partnership: { select: { coin_rate: true, grace_days: true, platform_fee_bps: true } } } } },
     });
@@ -669,10 +505,8 @@ export class PartnerController {
     if (!prior) throw new ConflictException('duplicate_user');
     const { coin_rate, grace_days, platform_fee_bps } = prior.campaign.partnership;
     const split = splitFee(prior.coins, platform_fee_bps);
-    // Replayed answers carry the campaign's offers too — the same answer, not a different one.
     const granted = campaignBonuses(publisher.bonuses, 'acquisition', prior.campaign.bonus_types);
-    // Counted separately from a fresh attribution: a replay moved no money, and a publisher
-    // whose replay rate is climbing is one whose retry logic is firing, which is worth seeing.
+    // Counted separately: a replay moved no money, and a climbing replay rate means retries firing.
     recordDecision(
       'claim',
       { reason: 'replay', match_method: prior.match_method, confidence: prior.confidence },
@@ -702,32 +536,21 @@ export class PartnerController {
   /**
    * The engagement payout: a repeat purchase, paid on the code that proves it happened.
    *
-   * Deliberately not routed through the acquisition machinery above. All of that is about
-   * *recognising a device* — an install stage, a carried claim, two windows, a dedupe
-   * check — and none of it has a question to answer here: the code was minted against one named
-   * transaction and scanned once.
-   *
-   * What it does share is the shape that matters: the same budget lock, the same double-entry
-   * ledger, the same rollback-on-refusal, the same "a retry replays, it never re-pays".
-   *
-   * There is no guest tier. `identified` splits an acquisition fee because a new account is
-   * worth less until somebody vouches for it; a repeat customer already transacted with the
-   * promoter, which is a harder fact than any verification the publisher could apply.
+   * Not routed through the acquisition machinery — that is all device recognition, which has no
+   * question to answer here. It shares the budget lock, ledger, rollback-on-refusal and
+   * replay-never-re-pay. No guest tier: a repeat customer already transacted with the promoter.
    */
   private async claimPurchase(
     publisher: { id: string; bonuses: unknown },
     code: string,
     publisher_user_ref: string,
   ) {
-    // Refusals only; every attributed answer below carries the campaign's own pick instead.
     const bonuses = bonusesFor(publisher.bonuses, 'engagement');
     const unattributed = (reason: string) => {
       recordDecision('claim', { reason, match_method: 'code' }, { publisher_org_id: publisher.id });
       return { attributed: false, reason, bonuses, bonus_label: bonusLabel(bonuses) };
     };
 
-    // Set when the UNIQUE fires, so the replay can be answered after the transaction has rolled
-    // back — inside an aborted Postgres transaction no further query can run.
     let replayQrCodeId: string | null = null;
 
     const fresh = await prisma
@@ -736,9 +559,7 @@ export class PartnerController {
         if ('reason' in m) return unattributed(m.reason);
 
         const fee = m.engagement_rate;
-        // Fail closed, and thrown rather than returned so the whole transaction is undone —
-        // the code stays claimable once the promoter tops the budget back up. A traveller
-        // holding a boarding pass nobody funded should not have it burned on the way past.
+        // Fail closed, thrown so the whole transaction is undone and the code stays claimable.
         if ((await lockedBalance(tx, `campaign:${m.campaign_id}`)) < fee)
           throw new Rollback('budget_exhausted');
 
@@ -752,8 +573,7 @@ export class PartnerController {
               publisher_user_ref,
               coins: fee,
               kind: 'engagement',
-              // Nothing is held back, so the row is settled the moment it is written and
-              // `/confirm` has nothing to release. See the refusal there.
+              // Settled the moment it is written: nothing is held back for `/confirm` to release.
               identified: true,
               match_method: 'code',
               confidence: 100,
@@ -787,7 +607,6 @@ export class PartnerController {
           },
         );
 
-        // The campaign's pick, scoped to a repeat purchase — what its codes were printed on.
         const granted = campaignBonuses(publisher.bonuses, 'engagement', m.bonus_types);
 
         return {
@@ -829,16 +648,9 @@ export class PartnerController {
     const priorSplit = splitFee(prior.coins, prior.campaign.partnership.platform_fee_bps);
     const granted = campaignBonuses(publisher.bonuses, 'engagement', prior.campaign.bonus_types);
 
-    /**
-     * Two very different situations reach this line, and they must not get the same answer.
-     *
-     * Same user  the first call succeeded and its response was lost. Replaying the original
-     *            answer stops a recorded reward looking like something to reconcile by hand.
-     *
-     * Different  somebody else's boarding pass — forwarded, shared, or a bug in the publisher's
-     *   user     plumbing. Replaying would hand the second user a reward the first earned. One
-     *            reward per code was the guarantee; this is it being kept.
-     */
+    /** Same user: the first call's response was lost, so replay it. Different user: somebody
+     *  else's boarding pass, forwarded or shared — replaying would hand them a reward the first
+     *  earned. */
     if (prior.publisher_user_ref !== publisher_user_ref) return unattributed('already_claimed');
 
     recordDecision(
@@ -875,8 +687,8 @@ export class PartnerController {
   async confirm(@Headers('authorization') auth: string, @Param('id') id: string) {
     const publisher = await publisherFromKey(auth);
     return prisma.$transaction(async (tx) => {
-      // Raw: `FOR UPDATE OF rd` locks the attribution row across the join, which the query
-      // builder cannot express, and the lock is what makes a concurrent double-confirm safe.
+      // Raw because `FOR UPDATE OF rd` locks the attribution row across the join, and that lock
+      // is what makes a concurrent double-confirm safe.
       const rows = await tx.$queryRaw<
         {
           id: string;
@@ -899,13 +711,8 @@ export class PartnerController {
         FOR UPDATE OF rd`;
       const red = rows[0];
       if (!red) throw new NotFoundException('attribution not found');
-      // The one money path that was not checking this. Suspending a partnership is documented
-      // as stopping scans *and* payouts, and every other spend — the redirect, first-open and
-      // both claim paths — filters on it in SQL. Without it the upgrade delta stayed payable,
-      // so an admin freezing a relationship still let up to `coin_rate - guest_rate` per
-      // outstanding guest redemption leave the campaign budget for the whole grace window.
-      // Surfaced rather than filtered out in the WHERE: a publisher deserves a reason here,
-      // not a 404 that reads like a lost attribution.
+      // Suspending a partnership must stop payouts too; every other spend filters on it in SQL.
+      // Surfaced as a reason rather than filtered out, so it does not read like a lost attribution.
       if (red.partnership_status !== 'active')
         throw new ConflictException('partnership_not_active');
       if (red.identified)
@@ -918,8 +725,7 @@ export class PartnerController {
       if (delta > 0) {
         if ((await lockedBalance(tx, `campaign:${red.campaign_id}`)) < delta)
           throw new ConflictException('budget_exhausted');
-        // Same split as the original guest payment, so the platform's cut is taken on the
-        // whole coin_rate however the fee arrived — in one piece or in two.
+        // Same split as the guest payment, so the cut is taken on the whole coin_rate.
         await payout(tx, red.campaign_id, publisher.id, delta, red.platform_fee_bps, `upgrade:${red.id}`);
       }
       await tx.redemption.update({

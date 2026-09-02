@@ -3,36 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useInView } from './useInView';
 import * as lp from '@/lib/lp';
 
-/* One settled signup, as the ledger sees it.
- *
- * This used to be five identical discs crossing a hairline between two figures that both
- * read 50 the whole way through, under a paragraph explaining what you were meant to have
- * seen. Nothing in it ever changed, so there was nothing to understand — the prose was
- * carrying the idea and the motion was decoration on top of it.
- *
- * It is now the two payments the model actually makes, one lane each, and the two figures
- * move when a payment lands:
- *
- *     Promoter 50 → 40 → 0        Publisher 0 → 10 → 50
- *
- *   1. The 10 crosses on its own, straight away. That is the guest rate, paid the moment the
- *      signup is confirmed.
- *   2. The 40 sits in its lane while the grace window fills underneath it, visibly, as a bar.
- *      The wait is the one part of this pricing model that is a duration rather than a
- *      number, so it is the one part drawn as a duration.
- *   3. Verification lands and the 40 follows.
- *
- * The phases are on a timer rather than on `animation-timeline: view()` like the rest of the
- * page, because a scroll-driven version hands the length of the pause to the reader's scroll
- * wheel — and the pause is the thing being demonstrated. Scrolled fast it collapses to a
- * blur; scrolled slowly it is a stall. Authored timing is the only way a wait reads as a wait.
- *
- * Latched, not live: it runs once on arrival and the coins stay where they landed. A live
- * `inView` would restart the whole settlement every time the panel crossed the viewport edge. */
+/**
+ * One settled signup, as the ledger sees it: 50 coins as the two payments it actually is.
+ */
 
-/* When each phase starts, in ms from arrival. The 0.8s gaps are the crossings — a figure must
-   not tick over until the token carrying it has actually arrived — and the 1.95s is the grace
-   window. Everything visible below is a function of `phase` alone. */
+// When each phase starts, in ms from arrival. The 0.8s gaps are the crossings — a figure must not
+// tick over until the token carrying it has arrived.
 const PHASES = [450, 1250, 3200, 4000];
 
 /* What the ledger reads in each phase. Same 50 coins, in three states: all in the budget,
@@ -49,8 +25,8 @@ export default function Settlement() {
     if (!inView || started.current) return;
     started.current = true;
 
-    /* Reduced motion gets the settled ledger, not a faster version of the animation: the
-       final state is the whole story — 0 in the budget, 50 delivered, both payments landed. */
+// Reduced motion gets the settled ledger, not a faster version of the animation: the final state
+// is the whole story.
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
       setPhase(PHASES.length);
       return;

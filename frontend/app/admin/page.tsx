@@ -67,11 +67,8 @@ export default function Admin() {
   }, []);
 
   /**
-   * The three that a filter does change — kept apart because they used to ride along with the
-   * other seven: picking one account from the ledger dropdown re-pulled ~2500 unrelated rows.
-   *
-   * `analytics` shares the campaign filter with the Scans tab on purpose: picking a campaign
-   * in one place and reading the other's platform-wide numbers is how you misread both.
+   * The three a filter does change, kept apart from the other seven: picking one account from the
+   * ledger dropdown used to re-pull every unrelated list on the page.
    */
   const loadFiltered = useCallback(async () => {
     try {

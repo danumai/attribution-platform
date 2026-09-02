@@ -15,12 +15,8 @@ const DESTINATIONS = [
 ] as const;
 
 /**
- * The App Clip carrier, and why it is a separate block from the destinations above.
- *
- * These three do not change *where* a scan goes — they change how the claim gets across the
- * install on iPhone. Without them an iPhone scan is carried by the clipboard, which needs the
- * scanner to tap Continue; with them iOS offers the App Clip straight from the camera and
- * nothing is asked of anyone.
+ * The App Clip carrier, a separate block from the destinations above: these three do not change
+ * *where* a scan goes, only how the claim gets across the install.
  */
 const APPCLIP = [
   ['slug', 'Your URL prefix', 'dramabox'],
@@ -39,9 +35,8 @@ const EMPTY = {
 };
 
 /**
- * One row of the offers editor. Every field is a string here even where the API takes a number:
- * a half-typed `value` is a string for as long as it is being typed, and the API already treats
- * an empty one as absent — so there is nothing to parse on this side.
+ * One row of the offers editor. Every field is a string here even where the API takes a number: a
+ * half-typed `value` is a string for as long as it is being typed.
  */
 type Row = { type: string; label: string; value: string; unit: string; on: Bonus['on'] };
 

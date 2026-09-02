@@ -7,13 +7,10 @@ import { count, log } from './obs';
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
-// ---------- rate limiting ----------
 /**
  * A fixed window, counted in Redis when `REDIS_URL` is set and in this process when it is not.
- *
- * Every per-IP control here is a *security* control, so an in-process counter multiplies each
- * of them by the replica count — two instances means twice the login attempts before anyone is
- * throttled. In-process is correct for exactly one instance; see REDIS_URL in config.ts.
+ * Every per-IP control here is a *security* control, so an in-process counter multiplies each of
+ * them by the replica count. See REDIS_URL in config.ts.
  */
 const buckets = new Map<string, { n: number; reset: number }>();
 
@@ -33,11 +30,9 @@ function localRateLimited(key: string, max: number, windowMs: number): boolean {
 }
 
 /**
- * `INCR` then `PEXPIRE` on the first hit of a window — the standard fixed-window counter, and
- * atomic without a Lua script because `INCR` is itself the read and the write.
- *
- * A pipeline rather than two round trips: this runs on the scan hot path, and the second call
- * would otherwise double the latency this adds.
+ * `INCR` then `PEXPIRE` on the first hit — the standard fixed-window counter, atomic without a
+ * Lua script because `INCR` is itself the read and the write. A pipeline rather than two round
+ * trips: this runs on the scan hot path.
  */
 async function redisRateLimited(
   redis: Redis,
@@ -46,19 +41,17 @@ async function redisRateLimited(
   windowMs: number,
 ): Promise<boolean> {
   const res = await redis.pipeline().incr(key).pexpire(key, windowMs, 'NX').exec();
-  // `exec()` reports a failed command as *data* — a `[error, result]` tuple — and returns
-  // `null` outright when the connection is gone. Unchecked, `undefined > 300` is `false`, so a
-  // dead Redis silently stops limiting anything. Throw so the caller's fallback runs.
+  // `exec()` reports a failed command as *data* and returns `null` when the connection is gone.
+  // Unchecked, `undefined > 300` is `false`, so a dead Redis silently stops limiting anything.
   const [err, n] = res?.[0] ?? [new Error('redis connection unavailable'), null];
   if (err || typeof n !== 'number') throw err ?? new Error('redis returned no count');
   return n > max;
 }
 
 /**
- * Counting is best-effort; refusing to serve because the counter is unreachable is not. On a
- * Redis outage this falls back to the in-process window rather than failing open — degraded to
- * per-instance limits, which is what the deployment had before Redis existed, instead of no
- * limits at all. The log line is warn because it silently weakens a security control.
+ * Counting is best-effort; refusing to serve because the counter is unreachable is not. A Redis
+ * outage falls back to the in-process window — degraded to per-instance limits rather than none.
+ * Warn, because it silently weakens a security control.
  */
 export async function rateLimited(key: string, max: number, windowMs = 60_000): Promise<boolean> {
   const redis = getRedis();
@@ -74,20 +67,16 @@ export async function rateLimited(key: string, max: number, windowMs = 60_000): 
 export const clientIp = (req: Request) => req.ip ?? req.socket.remoteAddress ?? 'unknown';
 
 /**
- * A blanket per-IP ceiling under every route, including the authenticated ones.
+ * A blanket per-IP ceiling under every route, including authenticated ones. The specific limits
+ * (login, signup, scan, partner key) are tuned to their path; this is the floor beneath them, so
+ * a route added later is never accidentally unlimited.
  *
- * The specific limits (login, signup, scan, partner key) are the ones tuned to their path;
- * this is the floor beneath all of them, so a route added later is never accidentally
- * unlimited. It sits high enough that a dashboard loading a dozen panels never notices, and
- * low enough that scraping or credential stuffing from one address runs out of room.
- *
- * Deliberately keyed on IP alone rather than on the session: an attacker without a valid
- * token is exactly the one to slow down, and they have no session to key on.
+ * Keyed on IP alone rather than the session: an attacker without a valid token is exactly the
+ * one to slow down, and they have no session to key on.
  */
 export async function globalRateLimit(req: Request, res: Response, next: NextFunction) {
-  // Health checks are what the load balancer uses to decide this process is alive. Throttling
-  // them would turn a traffic spike into a pulled-from-rotation outage. Metrics likewise: a
-  // scrape that gets 429ed blinds the monitoring exactly when the traffic is interesting.
+  // Health checks decide this process is alive; throttling them turns a traffic spike into a
+  // pulled-from-rotation outage. A 429ed metrics scrape blinds monitoring at the worst moment.
   if (req.path === '/healthz' || req.path === '/metrics') return next();
   if (await rateLimited(`global:${clientIp(req)}`, 300)) {
     count('rate_limited_total', { limit: 'global' });
@@ -98,12 +87,9 @@ export async function globalRateLimit(req: Request, res: Response, next: NextFun
 }
 
 /**
- * A bounded string from an untrusted body.
- *
- * Every free-text field crossing a trust boundary needs a ceiling, or it becomes a cheap way
- * to bloat a row, a log line and an index entry at once. Rejecting loudly beats truncating
- * silently: a `publisher_user_ref` quietly cut to 200 chars would collide with a different
- * user's ref and hand one user's attribution to another.
+ * A bounded string from an untrusted body. Rejecting loudly beats truncating silently: a
+ * `publisher_user_ref` quietly cut to 200 chars would collide with a different user's ref and
+ * hand one user's attribution to another.
  */
 export function str(v: unknown, name: string, max: number, required = true): string | null {
   if (v === undefined || v === null || v === '') {
@@ -121,20 +107,19 @@ export function str(v: unknown, name: string, max: number, required = true): str
 /**
  * The fingerprint key for one device, hashed so no raw address is ever stored.
  *
- * Both halves of the iOS match go through here, and that is the whole point: the scan side
- * gets its address from the socket, the claim side gets it as a string from the publisher's
- * own server, and the two spell the same address differently. A dual-stack listener reports
- * every IPv4 client as `::ffff:203.0.113.7`, while the publisher sends `203.0.113.7`; IPv6
- * is worse, since `2001:db8::1` and `2001:0db8:0:0:0:0:0:1` are the same host. Hashing the
- * raw strings makes those mismatches invisible — no error, just an attribution rate of zero.
+ * Both halves of the iOS match go through here: the scan side gets its address from the socket,
+ * the claim side as a string from the publisher's server, and the two spell it differently — a
+ * dual-stack listener reports `::ffff:203.0.113.7` where the publisher sends `203.0.113.7`, and
+ * `2001:db8::1` and `2001:0db8:0:0:0:0:0:1` are one host. Hashing raw strings hides that as an
+ * attribution rate of zero with no error.
  */
 export function ipHash(ip: string): string {
   let v = ip.trim().toLowerCase();
   // IPv4-mapped IPv6 — what a dual-stack socket reports for a plain IPv4 client.
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v);
   if (mapped) v = mapped[1];
-  // Collapse the many spellings of one IPv6 address to the canonical compressed form. The
-  // WHATWG URL parser already implements exactly that, so there is no address maths here.
+  // Collapse the many spellings of one IPv6 address to the canonical compressed form. The WHATWG
+  // URL parser already implements exactly that, so there is no address maths here.
   if (v.includes(':'))
     try {
       v = new URL(`http://[${v}]`).hostname.replace(/^\[|\]$/g, '');
@@ -144,19 +129,14 @@ export function ipHash(ip: string): string {
   return sha256(v).slice(0, 16);
 }
 
-// ---------- redirect destinations ----------
 const isLocal = (h: string) =>
   h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.localhost');
 
 /**
- * A publisher-registered URL a scan can be redirected to. It carries no token — but it is
- * still an open redirect off our origin, so it is a pre-approved destination rather than free
- * text: rejecting every non-http(s) scheme kills `javascript:`/`data:` redirect XSS, and
- * requiring https outside localhost stops a scan being downgraded to cleartext.
- *
- * Shared by `landing_url` (the web fallback) and `deeplink_url` (where an engagement scan is
- * sent so the OS can open the app). https is also what makes the second work at all — App
- * Links and Universal Links are only claimed on https origins.
+ * A publisher-registered URL a scan can be redirected to. It carries no token, but it is still an
+ * open redirect off our origin, so it is pre-approved rather than free text: rejecting non-http(s)
+ * schemes kills `javascript:`/`data:` redirect XSS, and https outside localhost stops a scan being
+ * downgraded to cleartext — and is what makes App Links and Universal Links work at all.
  */
 function validateRedirectUrl(raw: unknown, name: string): string | null {
   if (raw === undefined || raw === null || raw === '') return null;
@@ -177,12 +157,10 @@ function validateRedirectUrl(raw: unknown, name: string): string | null {
 export const validateLandingUrl = (raw: unknown) => validateRedirectUrl(raw, 'landing_url');
 export const validateDeeplinkUrl = (raw: unknown) => validateRedirectUrl(raw, 'deeplink_url');
 
-// ---------- response headers ----------
 /**
- * `default-src 'none'` is what makes the QR image endpoint safe: it renders attacker-supplied
- * SVG (logo data URLs) from our own origin, and CSP + nosniff stop that SVG executing script
- * when loaded directly. `no-referrer` keeps our scan URLs out of onward Referer headers, so
- * a store listing never learns which code sent the visitor.
+ * `default-src 'none'` is what makes the QR image endpoint safe: it renders attacker-supplied SVG
+ * (logo data URLs) from our own origin, and CSP + nosniff stop that SVG executing script when
+ * loaded directly. `no-referrer` keeps our scan URLs out of onward Referer headers.
  */
 export function securityHeaders(_req: Request, res: Response, next: NextFunction) {
   res.removeHeader('X-Powered-By');

@@ -39,9 +39,8 @@ const REASONS: Record<string, { title: string; body: string; stamp: string }> = 
     body: 'The promoter has paused it for now — try again later.',
     stamp: 'ON HOLD',
   },
-  // Reached both when a budget has been spent down and when one was never funded, so the copy
-  // cannot claim rewards were "given out" — that read as a mystery to the promoter who had just
-  // created the campaign, and it was not true.
+// Reached both when a budget has been spent down and when one was never funded, so the copy
+// cannot claim rewards were "given out".
   budget: {
     title: 'This offer has no rewards available',
     body: 'There are none to give out on this campaign right now.',

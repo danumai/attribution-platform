@@ -1,7 +1,6 @@
 /**
- * The auth card: a form panel carrying the words and a tinted side panel carrying the
- * page's own facts. Login, the 404 and the dead-code page are all the same surface, so the
- * composition lives here once rather than in three copies.
+ * The auth card: a form panel carrying the words and a tinted side panel carrying the page's own
+ * facts. Login, the 404 and the dead-code page are all the same surface.
  */
 import { ReactNode } from 'react';
 import { TicketMark } from '@/lib/mark';
@@ -74,12 +73,8 @@ export function PassStamp({ children, posted }: { children: ReactNode; posted?: 
 }
 
 /**
- * The fork the whole product turns on, asked as a choice rather than buried as a tab.
- *
- * Promoter and publisher are not a preference — they are two different products with two
- * different consoles, and picking wrong means creating an account of the wrong kind. It used to
- * sit as a segmented control halfway down the signup form, below the organization name, which is
- * the one place a reader has already stopped reading.
+ * The fork the whole product turns on, asked as a choice rather than buried as a tab: promoter and
+ * publisher are two different products, not a preference.
  */
 export function RoleCard({
   title,

@@ -62,12 +62,8 @@ export interface AdminData {
 }
 
 /**
- * What every section needs from the page: the data, the two states that gate rendering, the
- * two mutating verbs, and the cross-tab jumps.
- *
- * `filterScans` / `filterLedger` are one call rather than the set-filter-then-switch-tab pair
- * they replace — the filter and the destination are one intent, and splitting them is how a
- * tab ends up showing platform-wide rows under a heading that names one campaign.
+ * What every section needs from the page: the data, the two states that gate rendering, the two
+ * mutating verbs, and the cross-tab jumps.
  */
 export interface SectionProps {
   d: AdminData;

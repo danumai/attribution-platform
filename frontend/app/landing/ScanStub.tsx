@@ -5,31 +5,8 @@ import { useInView } from './useInView';
 import * as lp from '@/lib/lp';
 
 /**
- * The pass, and something to scan it with.
- *
- * The card renders complete on the server and is fully legible with no motion and no
- * pointer — everything below is additive. Three things are layered on top:
- *
- *  1. A tilt. The card sits in a perspective stage and leans toward the pointer, because it
- *     is a printed object and printed objects have a front and a back.
- *  2. A draggable scanner. Drop it on the code and a scan actually resolves: the plate
- *     sweeps, the ring lands, the status flips, the phone turns over to the store listing,
- *     and a redemption posts to the board below.
- *  3. The ambient loop that was already here, which stops the moment the reader takes the
- *     controls — a demo that keeps playing over you is noise.
- *
- * The drag is run from a rAF loop rather than straight out of the pointermove handler, and
- * that is the whole difference between this feeling like a held object and feeling like a
- * dragged sticker. Three things need a frame clock that pointer events cannot give:
- *
- *   - Lag. The phone eases toward the pointer instead of being pinned to it. A few frames of
- *     trailing is what reads as mass.
- *   - Lean. The tilt is derived from how far BEHIND the pointer the phone currently is, so a
- *     flick tips it and holding still levels it out. Out of a move handler this is impossible
- *     to unwind: when the finger stops, no more events arrive and the lean would freeze at
- *     whatever angle it was last flicked to.
- *   - The magnet. Over the code the phone is pulled to the plate's centre rather than to the
- *     pointer, so the drop is forgiving and the scan happens square.
+ * The pass, and something to scan it with. The card renders complete on the server and is fully
+ * legible with no motion and no pointer — everything below is additive.
  */
 
 /** One-shot signal to ActivityBoard. There is no state for the two islands to keep in step,
@@ -39,18 +16,15 @@ export const SCAN_EVENT = 'lp:scan';
 /** Past this, a pointerup is a drag that ended, not a click. */
 const CLICK_SLOP = 5;
 
-/** How long the phone rests on the code after a scan, and how long the card stays resolved.
- *  The phone has to still be there while the sweep runs — a scanner that leaves before the
- *  thing it scanned reacts is the single clearest way to make this read as fake. */
+// How long the phone rests on the code after a scan, and how long the card stays resolved. The
+// phone has to still be there while the sweep runs.
 const UNPIN_MS = 2400;
 const RESET_MS = 4600;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-/** How high the chassis is carried, in px of translateZ: high while it is being flown
- *  around, low once it is over the code and coming in to land. Under the button's 700px of
- *  perspective these read as ~5% and ~1.5% of growth, which is the whole trick — the phone
- *  gets bigger as it comes toward you and settles as it touches down. */
+// How high the chassis is carried, in px of translateZ: high while it is being flown around, low
+// once it is over the code and coming in to land.
 const LIFT = 38;
 const LAND = 10;
 
@@ -71,17 +45,15 @@ export default function ScanStub() {
   /* the reader has driven it at least once, so the ambient loop steps aside */
   const [driven, setDriven] = useState(false);
 
-  /* x/y are what is currently applied; tx/ty are what the pointer is asking for; rx/ry/rz are
-     how the chassis is tipped and z is how far off the card it is being carried. Kept in a
-     ref because they change every frame and none of them is something React should be
-     re-rendering over. */
+// x/y are what is currently applied; tx/ty are what the pointer is asking for; rx/ry/rz are how
+// the chassis is tipped and z is how far off the card it is carried.
   const st = useRef(rest());
   const grab = useRef({ x: 0, y: 0, moved: false });
   const overNow = useRef(false);
   const raf = useRef(0);
   const timers = useRef<number[]>([]);
-  /* Read once rather than per frame: matchMedia in a rAF loop is a needless style query, and
-     neither preference changes mid-drag in any way worth tracking. */
+// Read once rather than per frame: matchMedia in a rAF loop is a needless style query, and
+// neither preference changes mid-drag.
   const canTilt = useRef(false);
 
   useEffect(() => {
@@ -94,9 +66,8 @@ export default function ScanStub() {
     };
   }, []);
 
-  /** Where the phone would sit with no transform on it. The button is only ever translated —
-   *  the tipping all happens on the chassis inside it, and a child's transform does not touch
-   *  its parent's box — so subtracting the applied translation is enough. */
+// Where the phone would sit with no transform on it. The button is only ever translated — the
+// tipping happens on the chassis inside it.
   const homeCentre = (el: HTMLElement) => {
     const c = el.getBoundingClientRect();
     return { x: c.left + c.width / 2 - st.current.x, y: c.top + c.height / 2 - st.current.y };
@@ -108,8 +79,8 @@ export default function ScanStub() {
     dispatchEvent(new CustomEvent(SCAN_EVENT));
     timers.current.forEach(clearTimeout);
     timers.current = [
-      /* off the code first, then out of the resolved state — so the reader watches it lift
-         away from a card that is still showing `redeemed`, rather than both at once */
+// off the code first, then out of the resolved state, so the reader watches it lift away from a
+// card that is still showing `redeemed`
       window.setTimeout(() => {
         setPinned(false);
         st.current = rest();
@@ -129,9 +100,8 @@ export default function ScanStub() {
     const r = el.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width - 0.5;
     const y = (e.clientY - r.top) / r.height - 0.5;
-    /* Written straight to the element rather than through a custom property: a variable set
-       here would be inherited by every field, code cell and status line inside the card and
-       recalculate all of them on each pointermove. */
+// Written straight to the element rather than through a custom property: a variable set here
+// would be inherited by every field, code cell and status line inside the card.
     el.style.transform = `rotate3d(${-y}, ${x}, 0, ${Math.hypot(x, y) * 9}deg)`;
   };
   const untilt = () => {
@@ -160,13 +130,8 @@ export default function ScanStub() {
     s.x += (gx - s.x) * 0.42;
     s.y += (gy - s.y) * 0.42;
 
-    /* The residual gap IS the lean, and it is now spent in three axes rather than one flat
-       spin, because that is the difference between a card being slid around and a slab being
-       carried. Dragged right, the leading edge banks away from you (rotateY); dragged down,
-       the bottom edge does (rotateX); and a little roll on top of both is the wrist. All
-       three unwind to zero the moment the phone catches up with the pointer, which is why
-       this has to run on a frame clock and not out of pointermove — when the finger stops,
-       no more events arrive and the tip would freeze at whatever angle it was flicked to. */
+// The residual gap IS the lean, spent in three axes rather than one flat spin — the difference
+// between a card being slid around and a slab being carried.
     const lx = gx - s.x;
     const ly = gy - s.y;
     s.ry += (clamp(lx * 0.7, -22, 22) - s.ry) * 0.16;
@@ -191,8 +156,8 @@ export default function ScanStub() {
     st.current = rest();
     setHeld(true);
     setPinned(false);
-    /* The loop stops at the grab, not at the drop: once a hand is on the scanner, a demo
-       still cycling underneath it is two scans arguing over one code. */
+// The loop stops at the grab, not at the drop: once a hand is on the scanner, a demo still
+// cycling underneath it is two scans arguing over one code.
     setDriven(true);
     untilt();
     cancelAnimationFrame(raf.current);
@@ -216,14 +181,12 @@ export default function ScanStub() {
     const hit = overNow.current && !!plate.current;
 
     let to = '';
-    /* Levels off and comes to rest just above the card — a slab set down on paper, not one
-       dropped flush into it. Empty on a miss, which hands the chassis back to the resting
-       tilt in the stylesheet. */
+// Levels off and comes to rest just above the card — a slab set down on paper, not one dropped
+// flush into it. Empty on a miss.
     let toChassis = '';
     if (hit) {
-      /* Land square on the code and stay there. The phone is narrower than the plate, so the
-         sweep still runs either side of it — the scanner is on the code while the code reacts
-         to being scanned, which is the entire point of dropping it there. */
+// Land square on the code and stay there. The phone is narrower than the plate, so the sweep
+// still runs either side of it.
       const h = homeCentre(el);
       const p = plate.current!.getBoundingClientRect();
       const s = st.current;
@@ -242,11 +205,8 @@ export default function ScanStub() {
     overNow.current = false;
     setOver(false);
 
-    /* One frame late, deliberately. Which transition carries the phone — the settle onto the
-       code or the spring home — is selected by data-held/data-pinned, and those are React's
-       to write. Applying the transform in this same tick would run it while `data-held` is
-       still on the element, where transform has no transition at all, and the phone would
-       teleport instead of travelling. */
+// One frame late, deliberately: which transition carries the phone is selected by
+// data-held/data-pinned, and those must be set before the transform that reads them.
     requestAnimationFrame(() => {
       el.style.transform = to;
       if (chassis.current) chassis.current.style.transform = toChassis;

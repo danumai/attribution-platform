@@ -14,13 +14,8 @@ type Props = SectionProps & { onNewCampaign: () => void; canCreateCampaign: bool
 const CAP = 100;
 
 /**
- * Redemptions per day, counted off the rows this page already has.
- *
- * There is no scan-analytics endpoint scoped to a whole promoter — only per campaign — so the
- * only history available here is the redemption list itself, and that arrives capped at the
- * newest hundred. The cap is handled by refusing to plot past it: the axis starts at the
- * oldest row on hand, so every day drawn is a day the window fully covers. A series that
- * began before that would slope up out of nothing and read as growth.
+ * Redemptions per day, counted off the rows this page already has. There is no scan-analytics
+ * endpoint scoped to a whole promoter — only per campaign — so the only honest shape is this one.
  */
 function perDay(rows: Redemption[]) {
   if (!rows.length) return null;

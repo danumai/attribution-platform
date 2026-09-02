@@ -132,9 +132,8 @@ export default function CampaignPage() {
     </Link>
   );
 
-  // The shell arrives with the rail intact while the campaign's numbers are in flight — a blank
-  // page is indistinguishable from a broken one. A *failed* load is a third state: it must say
-  // so and offer a way back, not shimmer forever.
+  // The shell arrives with the rail intact while the numbers are in flight — a blank page is
+  // indistinguishable from a broken one. A *failed* load is a third state, not a slow one.
   if (!stats)
     return (
       <Shell org={me} active="campaigns" items={items} title="Campaign" actions={backToCampaigns}>

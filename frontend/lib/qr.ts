@@ -90,10 +90,8 @@ function luminance(hex: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-/**
- * The same contrast rule the server enforces, run locally so the editor can warn while
- * you drag a colour picker instead of only failing on save.
- */
+/** The same contrast rule the server enforces, run locally so the editor can warn while you drag
+ *  a colour picker instead of only failing on save. */
 /** The style keys a preset owns — the ones that decide which preset, if any, is on the plate. */
 const PRESET_KEYS = [
   'dark', 'light', 'margin', 'shape', 'eyeFrame', 'eyeBall', 'eyeColor', 'eyeBallColor',
@@ -101,12 +99,8 @@ const PRESET_KEYS = [
 ] as const;
 
 /**
- * Whether two styles are the same *preset*, ignoring everything a preset does not own —
- * size, error correction and the logo are the promoter's, not the preset's, so changing them
- * must not make the picker lose its highlighted swatch.
- *
- * Lives here rather than in the studio page because it is a fact about presets, which is what
- * this module owns, and because that is what makes it testable.
+ * Whether two styles are the same *preset*, ignoring what a preset does not own — size, error
+ * correction and the logo are the promoter's, not the preset's.
  */
 export const samePlate = (a: Style, b: Style) =>
   PRESET_KEYS.every((k) => JSON.stringify(a[k] ?? null) === JSON.stringify(b[k] ?? null));
@@ -144,10 +138,8 @@ export async function renderPreview(qrId: string, style: Style): Promise<string>
   return text;
 }
 
-/**
- * Rasterise the rendered SVG in the browser. The server's PNG encoder is the flat one and
- * cannot draw shapes, gradients, logos or frames — this can, at any resolution.
- */
+/** Rasterise the rendered SVG in the browser. The server's PNG encoder is the flat one and cannot
+ *  draw shapes, gradients, logos or frames — this can, at any resolution. */
 export function svgToPng(svg: string, px: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
@@ -180,9 +172,8 @@ export function download(blob: Blob, filename: string) {
 }
 
 /**
- * Read a dropped/pasted/picked image into a data URL small enough for the style column.
- * Raster images are downscaled rather than rejected — a 4MB phone photo is a normal thing
- * to drop on a logo well, and failing on it is a worse answer than resizing it.
+ * Read a dropped/pasted/picked image into a data URL small enough for the style column. Raster
+ * images are downscaled rather than rejected — a 4MB phone photo is a normal thing to drop here.
  */
 export function readLogo(file: File, maxPx = 512): Promise<string> {
   if (!/^image\/(png|jpeg|svg\+xml)$/.test(file.type))

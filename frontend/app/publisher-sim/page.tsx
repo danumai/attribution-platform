@@ -18,19 +18,14 @@ import {
 import { alertErr, btn, card, checkLabel, checkbox, cx, field, label, muted, pillNeutral } from '@/lib/tw';
 
 /**
- * Stands in for the publisher's app on first open — the step that used to be a web page
- * carrying a scan token in its URL.
- *
- * There is no token to read here, and that is the point: this screen receives nothing from
- * the scan. It signs the user up, then its backend asks our Partner API whether the install
- * was attributable. Any joining bonus shown is the publisher's own, granted by the publisher.
+ * Stands in for the publisher's app on first open. There is no token to read here — the claim id
+ * travels in the carrier, and nothing reaching the phone is spendable.
  */
 function Sim() {
-  /**
-   * The one thing an engagement scan puts in the app's hands. It is plumbing between two
-   * servers — inert without the publisher's API key — so it is read off the opening URL and
-   * handed straight to the backend, never shown as something to type in or copy.
-   */
+/**
+ * The one thing an engagement scan puts in the app's hands: plumbing between two servers, inert
+ * without the publisher's API key.
+ */
   const code = useSearchParams().get('qrm_code');
   const [email, setEmail] = useState('');
   const [apiKey, setApiKey] = useState('');

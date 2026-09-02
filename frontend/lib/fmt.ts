@@ -4,17 +4,14 @@
 /** Grouped integer. Every coin count on screen goes through this. */
 export const num = (n: number | null | undefined) => (n ?? 0).toLocaleString();
 
-/** Grouped integer, shortened. For axis ticks and sparkline captions, where the exact
- *  figure is one hover away and the width is not negotiable. Never for a printed total. */
+/** Grouped integer, shortened. For axis ticks and sparkline captions, where the exact figure is
+ *  one hover away. Never for a printed money field. */
 export const compact = (n: number | null | undefined) =>
   (n ?? 0).toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 });
 
 /**
- * Signed change of the last `n` points against the `n` before them, as a fraction.
- *
- * `null` whenever the comparison would be invented: fewer than two full windows of data, or
- * a prior window of zero — "up from nothing" has no percentage, and printing one is a lie
- * dressed as a measurement.
+ * Signed change of the last `n` points against the `n` before them, as a fraction. `null` whenever
+ * the comparison would be invented — fewer than two full windows of data.
  */
 export function change(values: number[], n: number) {
   if (values.length < n * 2) return null;
@@ -37,20 +34,15 @@ export const ago = (t?: string | null) => {
   return when(t);
 };
 
-/**
- * Which claim an offer is granted on, as it reads on screen. One definition because the
- * publisher picks it in Settings and the promoter reads it back on the partnership.
- */
+/** Which claim an offer is granted on, as it reads on screen. One definition, because the
+ *  publisher picks it in Settings and the promoter reads it back on the partnership. */
 export const GRANTED_ON = {
   both: 'Every reward',
   acquisition: 'New signups',
   engagement: 'Repeat purchases',
 } as const;
 
-/**
- * A publisher's offers on one line — for a `<select>` option and anywhere else that can only
- * hold a string. `label` is the publisher's own wording, and joining them is the same summary
- * the Partner API returns as `bonus_label`.
- */
+/** A publisher's offers on one line, for a `<select>` option and anywhere else that can only hold
+ *  a string. `label` is the publisher's own wording. */
 export const offerLine = (list?: { label: string }[] | null) =>
   (list ?? []).map((b) => b.label).join(' + ');

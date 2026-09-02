@@ -24,20 +24,17 @@ import {
 } from '@/lib/tw';
 
 /**
- * A column over rows of `T`. `sort` is required whenever `get` returns markup: comparing two
- * React elements with `>` is always false both ways, so those headers used to announce
- * `aria-sort="ascending"` over an order that had not changed.
+ * A column over rows of `T`. `sort` is required whenever `get` returns markup: comparing two React
+ * elements with `>` is always false both ways.
  */
 export type Col<T> = { h: string; get: (row: T) => ReactNode; sort?: (row: T) => unknown; num?: boolean };
 
 const PAGE = 50;
 
 /**
- * One lowercase haystack per row, cached on the row object itself.
- *
- * The filter used to `JSON.stringify` every row inside the predicate, so with `limit=1000`
- * scans it re-serialised a thousand rows on every keystroke. A WeakMap keyed on the row means
- * each row is serialised once and the cache is collected with the data it describes.
+ * One lowercase haystack per row, cached on the row object itself. The filter used to
+ * `JSON.stringify` every row inside the predicate, which at `limit=1000` was 1000 serialisations
+ * per keystroke.
  */
 const haystacks = new WeakMap<object, string>();
 function haystack(row: object): string {
@@ -83,11 +80,8 @@ export function Table<T extends object>({
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const [limit, setLimit] = useState(PAGE);
 
-  // Deliberately outside the memo's dependencies. Every call site passes `cols` as an inline
-  // array literal, so a fresh identity arrives on every render and the memo never hit — it
-  // re-filtered the whole table each time an unrelated piece of state (`busy`) changed. The
-  // only part of `cols` the sort reads is the accessor for the sorted column, and `sort.i`
-  // already changes whenever that does.
+  // Deliberately outside the memo's dependencies: every call site passes `cols` as an inline array
+  // literal, so a fresh identity arrives on every render and the memo would never hold.
   const colsRef = useRef(cols);
   colsRef.current = cols;
 
@@ -95,8 +89,8 @@ export function Table<T extends object>({
     const needle = q.trim().toLowerCase();
     const out = needle ? rows.filter((r) => haystack(r).includes(needle)) : rows.slice();
     if (sort) {
-      // A column with no `sort` sorts on its rendered value, which is only meaningful when
-      // that value is a primitive. `sortable()` is what stops a header claiming otherwise.
+  // A column with no `sort` sorts on its rendered value, which is only meaningful when that value
+  // is a primitive.
       const key = colsRef.current[sort.i].sort ?? colsRef.current[sort.i].get;
       out.sort((a, b) => {
         const [x, y] = [key(a), key(b)] as [any, any];
@@ -106,14 +100,10 @@ export function Table<T extends object>({
     return out;
   }, [q, rows, sort]);
 
-  /**
-   * Whether clicking this header actually reorders anything.
-   *
-   * Without an explicit `sort`, the comparator falls back to `get`, and for a column that
-   * renders markup that means comparing two React elements — always false in both directions,
-   * so the order never changed while `aria-sort` told a screen reader it had. Probing the
-   * first row is enough: a column renders the same kind of thing for every row.
-   */
+/**
+ * Whether clicking this header actually reorders anything. Without an explicit `sort` the
+ * comparator falls back to `get`, which for a column rendering markup compares React elements.
+ */
   const sortable = (c: Col<T>) => {
     if (!c.h) return false;
     if (c.sort) return true;

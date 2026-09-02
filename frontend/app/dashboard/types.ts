@@ -29,9 +29,8 @@ export interface DashboardData {
 }
 
 /**
- * Run a mutation, report it, and refresh. Every write on this page goes through one of these
- * so that "the request succeeded" and "the page now shows what the server holds" cannot come
- * apart — a saved rate that still renders the old number is a promoter funding the wrong one.
+ * Run a mutation, report it, and refresh. Every write on this page goes through one of these, so
+ * "the request succeeded" and "the page now shows what the server holds" are one step.
  */
 export type Act = (fn: () => Promise<unknown>, ok?: string) => Promise<void>;
 
