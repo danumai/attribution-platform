@@ -41,6 +41,19 @@ model Org {
   android_package String?
   /// publishers only; numeric App Store id a scan sends iPhones to
   ios_app_id      String?
+  /// publishers only; the App Clip's app id as it appears in the AASA `appclips.apps` array
+  /// (`TEAMID.com.example.app.Clip`). Set means this publisher's QR codes encode the App Clip
+  /// invocation URL `/c/:slug/:code` instead of `/r/:code`, and the clip carries `claim_id`
+  /// across the install in a shared App Group. Shape is a CHECK in the migration.
+  ios_appclip_id  String?
+  /// publishers only; the App Store Connect provider token (`pt=`) for campaign links. Purely
+  /// a cross-check: App Analytics reports first-time downloads per campaign, which reconciles
+  /// against what was attributed. It carries no per-user data and can never pay anyone.
+  ios_provider_token String?
+  /// publishers only; the path segment in the App Clip invocation URL, and therefore the URL
+  /// prefix registered in App Store Connect. UNIQUE — two publishers sharing one would route
+  /// each other's scans into the wrong clip.
+  slug            String?  @unique
   /// publishers only; the offers the publisher grants out of its OWN pocket, as a list:
   /// `[{ type, label, value?, unit?, on }]` — coins on signup, a free week of premium on a
   /// repeat purchase, whatever it runs. `type` is free text and there is no registry of
@@ -118,6 +131,12 @@ model Campaign {
   /// one per user per campaign (acquisition), or one per issued code (engagement, so a
   /// traveller who flies eleven times is paid for eleven flights).
   mode           String   @default("acquisition")
+  /// which of the publisher's own offers this campaign advertises, named by `orgs.bonuses[].type`.
+  /// The promoter picks from what the publisher grants for this `mode` — that is the whole
+  /// reward story: this platform still never issues or fulfils any of it. Empty = every eligible
+  /// offer, which is what a campaign meant before the pick existed. Resolved live against the
+  /// publisher's current list, so an offer it withdraws stops being promised.
+  bonus_types    String[] @default([])
   created_at     DateTime @default(now()) @db.Timestamptz(6)
 
   partnership Partnership  @relation(fields: [partnership_id], references: [id])
@@ -158,18 +177,20 @@ model QrCode {
 }
 
 /// A scan is an attribution claim waiting to be matched. Nothing here is redeemable by the
-/// device: `claim_id` travels only through Play's install-referrer channel, and the iOS path
-/// carries nothing at all.
+/// device: `claim_id` travels only through channels that survive an install and are inert
+/// without the publisher's server-side API key — Play's install referrer on Android, an App
+/// Clip's shared container or the pasteboard on iOS.
+///
+/// Nothing on this row describes the handset. The columns that once did (hashed IP, timezone,
+/// screen geometry, core count, appearance) were the iOS fingerprint match and are gone.
 model Scan {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   qr_code_id  String   @db.Uuid
   campaign_id String   @db.Uuid
   /// opaque id placed in the Play install referrer; the deterministic match key
   claim_id    String   @unique
-  /// android | ios | other — one half of the fingerprint used when no referrer exists
+  /// android | ios | other — decides which store listing the scan is handed to
   platform    String   @default("other")
-  /// truncated sha256 of the client IP, never the IP itself — the other fingerprint half
-  ip          String?
   user_agent  String?
   /// true once this scan has been matched to an install
   consumed    Boolean  @default(false)
@@ -190,22 +211,10 @@ model Scan {
   /// mobile | tablet | desktop — enforced by CHECK
   device_type  String?
 
-  /// Fingerprint signals collected by the interstitial, NULL when it was skipped (Android,
-  /// desktop) or when JS never ran. Unlike the reporting columns above these DO feed matching,
-  /// so both sides — browser at scan, SDK at first open — must spell them the same way.
-  /// IANA zone, e.g. `Asia/Dhaka`.
-  tz           String?
-  /// `{short}x{long}@{dpr}` in CSS px / points, orientation-normalised: `393x852@3`.
-  screen       String?
-  /// logical CPU count — `hardwareConcurrency` here, `activeProcessorCount` in the SDK
-  cores        Int?     @db.SmallInt
-  /// dark appearance at scan time — `prefers-color-scheme` here, `userInterfaceStyle` in the SDK
-  dark         Boolean?
-
-  /// Everything else the hand-off screen measured. Reporting only, deliberately schemaless: none
-  /// of it survives the browser → native crossing well enough to be evidence, and it is read as
-  /// a per-scan detail rather than grouped, so a column each would be seven migrations for a
-  /// tooltip. Keys are fixed by `clientSignals()`; NULL when the screen was skipped.
+  /// How the hand-off screen itself behaved: `held_ms` and `exit` (`tap` | `auto`), and nothing
+  /// about the device. Deliberately schemaless — it is read as a per-scan detail rather than
+  /// grouped, so a column each would be two migrations for a tooltip. Keys are fixed by
+  /// `clientSignals()`; NULL when the screen was skipped (Android, desktop) or JS never ran.
   client       Json?
 
   qr_code    QrCode      @relation(fields: [qr_code_id], references: [id])
@@ -219,8 +228,6 @@ model Scan {
 
   @@index([campaign_id])
   @@index([scanned_at(sort: Desc)])
-  /// the fingerprint lookup: unmatched scans for one device shape, newest first
-  @@index([ip, platform, consumed, scanned_at(sort: Desc)])
   /// every analytics breakdown: one campaign over a recent window
   @@index([campaign_id, scanned_at(sort: Desc)])
   @@map("scans")
@@ -228,11 +235,9 @@ model Scan {
 
 /// The middle stage: the app opened for the first time and we tied that open back to a scan.
 ///
-/// This is where matching now happens, and the reason it is its own table. First open is
-/// minutes after the scan; signup can be days later. Matching at signup meant the iOS
-/// fingerprint window had to cover install + onboarding + registration, which no honest
-/// window can — so it either missed every real install or was wide enough to match strangers.
-/// Binding here keeps the window tight, and the signup below can then take as long as it likes.
+/// This is where matching happens, and the reason it is its own table. First open is minutes
+/// after the scan; signup can be days later. Binding here lets the signup below take as long
+/// as it likes without holding a claim open for it.
 ///
 /// Nothing is paid at this stage. An install with no signup earns nobody anything.
 model Install {
@@ -242,15 +247,14 @@ model Install {
   /// denormalised from the partnership: every fraud query filters by it, and the join to
   /// get there is three tables deep
   publisher_org_id String   @db.Uuid
-  /// referrer | fingerprint
+  /// Which channel carried `claim_id` across the install: `referrer` (Play), `appclip`
+  /// (shared App Group container) or `pasteboard`. `fingerprint` appears only on rows written
+  /// before that path was removed — it is history, never written again.
   match_method     String
-  /// 0–100. 100 = Play handed us the exact claim id; below that, how many fingerprint
-  /// signals agreed. Stored rather than recomputed so a review months later sees what the
-  /// decision was actually made on.
+  /// Always 100 on every current method, because all of them name one exact scan. Kept as a
+  /// column so pre-existing probabilistic rows still read back as what they were, and so the
+  /// publisher-facing field does not change shape.
   confidence       Int
-  /// hash of the signals that identify one handset, for the repeat-device check. Only ever
-  /// set on the probabilistic path — a deterministic claim id is already unique per scan.
-  device_hash      String?
   /// SDK-asserted device integrity (emulator/rooted/vpn) plus whatever else was rejected on.
   /// Recorded on accepted installs too: the interesting fraud pattern is the one that passed.
   risk             Json     @default("{}")
@@ -263,8 +267,6 @@ model Install {
   scan       Scan        @relation(fields: [scan_id], references: [id])
   redemption Redemption?
 
-  /// the repeat-device check: one campaign, one handset, a recent window
-  @@index([campaign_id, device_hash, first_open_at(sort: Desc)])
   @@index([publisher_org_id])
   @@map("installs")
 }

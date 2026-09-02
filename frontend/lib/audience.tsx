@@ -30,13 +30,11 @@ export interface Analytics {
   days: number;
   totals: {
     scans: number;
-    devices: number;
     conversions: number;
     coins: number;
-    repeat_scans: number;
     geo_known: number;
-    /** scans that passed through the hand-off screen and reported handset detail */
-    handset_known: number;
+    /** iPhone scanners who tapped Continue — the tap that carries the claim to the clipboard */
+    handoff_tapped: number;
     conversion_rate: number;
   };
   dims: Record<string, Bucket[]>;
@@ -73,12 +71,8 @@ function labelFor(dim: string, key: string): string {
       ? key
       : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
   }
-  // `393x852@3` is a storage format, not a label. Printed as geometry it reads as a handset.
-  if (dim === 'screen') {
-    const m = /^(\d+)x(\d+)@([\d.]+)$/.exec(key);
-    if (m) return `${m[1]} × ${m[2]} @${m[3]}×`;
-  }
-  if (dim === 'network') return key.toUpperCase();
+  if (dim === 'handoff')
+    return { tap: 'Tapped Continue', auto: 'Timed out', skipped: 'No hand-off screen' }[key] ?? key;
   return key;
 }
 
@@ -290,12 +284,12 @@ export function Audience({
   // the expected state rather than a fault — say which it is instead of showing a blank panel.
   const geoOff = Boolean(t && t.scans > 0 && t.geo_known === 0);
 
-  // Handset detail only exists for scans that went through the hand-off screen — iOS into a
-  // registered App Store listing. Saying what share that is turns a panel full of "unknown"
-  // from a data fault into the coverage number it actually is.
-  const handsetPct = t?.scans ? Math.round((t.handset_known / t.scans) * 100) : 0;
-  const handsetNote = t?.scans
-    ? `${num(t.handset_known)} of ${num(t.scans)} scans · ${handsetPct}%`
+  // The hand-off screen only appears on an iPhone scan into a registered App Store listing, and
+  // only when the publisher has no App Clip. Saying what share tapped through turns this from a
+  // panel of "skipped" into the coverage number behind iOS attribution.
+  const tappedPct = t?.scans ? Math.round((t.handoff_tapped / t.scans) * 100) : 0;
+  const handoffNote = t?.scans
+    ? `${num(t.handoff_tapped)} of ${num(t.scans)} scans · ${tappedPct}%`
     : undefined;
 
   // The daily series, expanded to every slot in the window, is what the two headline tiles
@@ -315,8 +309,6 @@ export function Audience({
     };
     return [
       { k: 'scans', v: num(t?.scans), ...trend(scans) },
-      { k: 'devices', v: num(t?.devices) },
-      { k: 'repeat scans', v: num(t?.repeat_scans) },
       { k: 'signups', v: num(t?.conversions), ...trend(signups) },
       { k: 'scan → signup', v: `${((t?.conversion_rate ?? 0) * 100).toFixed(1)}%` },
       { k: 'coins granted', v: num(t?.coins) },
@@ -427,29 +419,17 @@ export function Audience({
         </Panel>
       </div>
 
-      <h2 className={sectionHead}>Handset</h2>
+      <h2 className={sectionHead}>Hand-off</h2>
       <p className={cx(muted, 'mt-2 max-w-[68ch]')}>
-        Measured on the hand-off screen an iPhone scan passes through on its way to the App
-        Store. It is the same evidence an install is matched against, so this section doubles as
-        the coverage report behind iOS attribution — “unknown” is a scan that was sent straight
-        to a listing, or one where the browser blocked script.
+        An iPhone scan into an App Store listing passes through a hand-off screen, and tapping
+        Continue is what links the install to this campaign. “Timed out” is a scanner who put
+        the phone down — they still reached the store, but the install reads as organic.
+        “No hand-off screen” is every other scan: Android, desktop, and publishers whose App
+        Clip carries the link with no screen at all.
       </p>
       <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3">
-        <Panel title="Screen" note={handsetNote}>
-          <BarList
-            dim="screen"
-            rows={d.screen ?? []}
-            empty="No scans in this window."
-          />
-        </Panel>
-        <Panel title="Timezone" note="reported by the device">
-          <BarList dim="tz" rows={d.tz ?? []} empty="No scans in this window." />
-        </Panel>
-        <Panel title="Appearance">
-          <BarList dim="theme" rows={d.theme ?? []} empty="No scans in this window." />
-        </Panel>
-        <Panel title="Connection" note="not reported by Safari">
-          <BarList dim="network" rows={d.network ?? []} empty="No scans in this window." />
+        <Panel title="Hand-off outcome" note={handoffNote}>
+          <BarList dim="handoff" rows={d.handoff ?? []} empty="No scans in this window." />
         </Panel>
       </div>
 

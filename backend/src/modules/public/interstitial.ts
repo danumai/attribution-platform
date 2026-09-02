@@ -29,15 +29,25 @@
 /**
  * How long the page is held before the hand-off starts.
  *
- * Not decoration: the signals have to get away before the document is discarded, and a
- * `location.replace` fired in the same tick as page load is swallowed by in-app webviews
- * (Instagram, TikTok). A beat also lets the scanner see the scan was accepted.
+ * Not decoration: a `location.replace` fired in the same tick as page load is swallowed by
+ * in-app webviews (Instagram, TikTok), and a beat lets the scanner see the scan was accepted.
  *
  * ponytail: fixed hold. If measured drop-off between scan and store install ever justifies it,
  * shorten it — `client.held_ms` on every scan row is exactly the measurement to shorten it
- * against. The signals must still be away before the document goes.
+ * against.
  */
 const HOLD_MS = 900;
+
+/**
+ * The hold when this page is carrying a claim: long enough that the tap is what normally
+ * happens, short enough that nobody is stranded.
+ *
+ * Safari only permits a clipboard write inside a user gesture, so on iOS the scanner's tap is
+ * the carrier — an auto-hand-off at 900ms would mean nobody ever taps and every install is
+ * organic. This is the bail-out for someone who put the phone down: they still reach the
+ * store, simply unattributed, which is a true answer rather than a failure.
+ */
+const CARRY_HOLD_MS = 9000;
 
 /** The hand-off itself: card away, store tile forward. Runs after the hold, then it navigates. */
 const EXIT_MS = 340;
@@ -123,10 +133,26 @@ interface InterstitialCopy {
   nonce: string;
   /** which listing the scan resolves to; picks the tile, the headline and the title */
   store: Store;
+  /**
+   * Whether the scanner's tap has to carry the claim to the clipboard — iOS with no App Clip.
+   * It changes the timings as much as the copy: every automatic exit has to sit behind the
+   * tap, or the page leaves before anyone can press anything.
+   */
+  carry?: boolean;
 }
 
-export function interstitialHtml({ destination, go, nonce, store }: InterstitialCopy): string {
+export function interstitialHtml({
+  destination,
+  go,
+  nonce,
+  store,
+  carry = false,
+}: InterstitialCopy): string {
   const href = esc(go);
+  const hold = carry ? CARRY_HOLD_MS : HOLD_MS;
+  // The no-script fallback must outlast the scripted one, or the two race and the slower path
+  // wins on a fast phone. `+3s` keeps that true for both holds.
+  const refresh = Math.ceil(hold / 1000) + 3;
   const dest = esc(destination);
   const mark = MARKS[store] ?? MARKS.web;
   const heading = mark.heading || `Opening ${destination}`;
@@ -137,7 +163,7 @@ export function interstitialHtml({ destination, go, nonce, store }: Interstitial
 <title>${esc(heading)} — scan accepted</title>
 <!-- No-script and script-error fallback. Deliberately longer than the scripted hold so the
      two never race: script wins whenever it runs at all. -->
-<meta http-equiv="refresh" content="4;url=${href}">
+<meta http-equiv="refresh" content="${refresh};url=${href}">
 <style nonce="${nonce}">
 /* The Committed Stock Rule: this world does not follow the OS theme, so every inherited
    value is restated. A half-inherited dark palette here is thermal ink on a dark ground —
@@ -150,7 +176,7 @@ export function interstitialHtml({ destination, go, nonce, store }: Interstitial
   --blue:#1c39bb; --blue-lit:#2a4ae0; --blue-deep:#142a8c;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
-  --hold:${HOLD_MS}ms; --exit:${EXIT_MS}ms;
+  --hold:${hold}ms; --exit:${EXIT_MS}ms;
 }
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -503,13 +529,18 @@ h1{
         <path d="M8 1.6v8.6M4.4 6.8 8 10.4l3.6-3.6M2 11.4v1.4a1.6 1.6 0 0 0 1.6 1.6h8.8a1.6 1.6 0 0 0 1.6-1.6v-1.4"/>
       </svg>
     </a>
-    <p class="note">No code to enter. Nothing to copy. Your bonus is handled inside the app.</p>
+    <p class="note">${
+      carry
+        ? 'Continue keeps this scan linked to your install. Nothing to enter, nothing to redeem.'
+        : 'No code to enter. Nothing to copy. Your bonus is handled inside the app.'
+    }</p>
   </div>
 </main>
 
 <script nonce="${nonce}">
 (function(){
-  var GO = ${JSON.stringify(go)}, HOLD = ${HOLD_MS}, EXIT = ${EXIT_MS};
+  var GO = ${JSON.stringify(go)}, HOLD = ${hold}, EXIT = ${EXIT_MS};
+  var CARRY = ${carry ? 'true' : 'false'};
   var t0 = Date.now();
 
   // Local clock, printed as a field. Purely presentational — the row this page actually
@@ -524,70 +555,37 @@ h1{
   var reduced = mq('(prefers-reduced-motion: reduce)');
 
   /**
-   * The signals this page exists to collect.
+   * The carrier.
    *
-   * Each read is wrapped: this runs in every in-app webview there is, some years behind, and
-   * one throw strands the scanner on a page whose only job is to leave. A missing signal costs
-   * a report bucket or a few points of confidence; a thrown one costs the install.
+   * Safari permits writeText only inside a user gesture, which is exactly why the Continue
+   * key is a real control on this page rather than decoration. What lands on the clipboard is
+   * the same URL this page is about to navigate to: an opaque claim id on our own origin,
+   * inert without the publisher's server-side API key, and the honest description of where
+   * this scan just went if the scanner ever pastes it anywhere.
    *
-   * Five are scored at first open (tz, sc, lang, cores, dark) and must be things a native SDK
-   * can also report. The rest are reporting only — a signal that means something different in a
-   * browser than in an app drags a real match below the acceptance line.
+   * Wrapped and ignored on failure. A refused clipboard is an unattributed install, which is
+   * a true outcome; a thrown one would strand the scanner on a page whose only job is to
+   * leave, which is not.
    */
-  var q = [];
-  var add = function(k, v){
-    if(v === null || v === undefined || v === '' || v !== v) return;
-    q.push(k + '=' + encodeURIComponent(v));
+  var carried = false;
+  var carry = function(){
+    if(carried || !CARRY) return;
+    carried = true;
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(GO);
+    }catch(e){}
   };
-  var take = function(k, fn){ try{ add(k, fn()); }catch(e){} };
 
-  // --- scored: the handset, as both a browser and an SDK can describe it ---
-  take('tz',    function(){ return Intl.DateTimeFormat().resolvedOptions().timeZone; });
-  take('sc',    function(){
-    var w = screen.width, h = screen.height, r = window.devicePixelRatio || 1;
-    // Orientation-normalised at the source: a phone held sideways at scan time and upright
-    // at first open is the same phone, and w×h unsorted would say otherwise.
-    return w && h ? Math.min(w,h) + 'x' + Math.max(w,h) + '@' + r : null;
-  });
-  take('lang',  function(){ return navigator.language; });
-  take('cores', function(){ return navigator.hardwareConcurrency; });
-  add('dark', mq('(prefers-color-scheme: dark)') ? 1 : 0);
-
-  // --- reporting only ---
-  take('tzo',   function(){ return -new Date().getTimezoneOffset(); });
-  take('langs', function(){
-    var l = navigator.languages;
-    return l && l.length ? l.slice(0,6).join(',').toLowerCase() : null;
-  });
-  take('vp',    function(){ return Math.round(innerWidth) + 'x' + Math.round(innerHeight); });
-  take('cd',    function(){ return screen.colorDepth; });
-  take('td',    function(){ return navigator.maxTouchPoints; });
-  take('dm',    function(){ return navigator.deviceMemory; });
-  take('pf',    function(){ return String(navigator.platform).replace(/[^A-Za-z0-9._-]+/g,'-'); });
-  take('net',   function(){
-    var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-    return c && c.effectiveType;
-  });
-  add('sa', (navigator.standalone === true || mq('(display-mode: standalone)')) ? 1 : 0);
-  add('rm', reduced ? 1 : 0);
-
-  var base = GO + (q.length ? '?' + q.join('&') : '');
-  var sep  = q.length ? '&' : '?';
-
-  // Someone who taps Continue has opted out of waiting — but they still get the hand-off, so
-  // the tap and the timeout resolve into one event rather than two competing navigations. The
-  // href is set now regardless: if anything below throws, or the tap lands before this script
-  // finishes, the anchor is still a real link to a real URL carrying the signals.
+  // The href is left exactly as the server rendered it: if anything here throws, or the tap
+  // lands before this script finishes, the anchor is still a real link to a real URL.
   var link = document.querySelector('.go');
-  if(link) link.setAttribute('href', base);
 
   var gone = false;
   var leave = function(via){
     if(gone) return;
     gone = true;
-    var url = base + sep + 'via=' + via + '&held=' + (Date.now() - t0);
-    // Reduced motion means there is no sequence left to watch, so there is nothing to hold
-    // for beyond getting the signals away.
+    var url = GO + '?via=' + via + '&held=' + (Date.now() - t0);
+    // Reduced motion means there is no sequence left to watch, so nothing is held for.
     if(reduced){
       // replace(), not assign(): coming back from the store must not land here again.
       location.replace(url);
@@ -597,12 +595,19 @@ h1{
     setTimeout(function(){ location.replace(url); }, EXIT);
   };
 
+  // The tap is one event, not two competing navigations: it carries, then it hands off.
   if(link) link.addEventListener('click', function(ev){
     ev.preventDefault();
+    carry();
     leave('tap');
   });
 
-  setTimeout(function(){ leave('auto'); }, reduced ? 120 : HOLD);
+  // The bail-out. On a carrying page this is deliberately long — see CARRY_HOLD_MS — and it
+  // does NOT carry: a clipboard write outside a gesture is refused by Safari anyway, and
+  // writing to someone's clipboard when they never touched the page would be rude even if it
+  // worked. Reduced motion still gets its short hold on a non-carrying page, but never skips
+  // past the tap on one that is carrying.
+  setTimeout(function(){ leave('auto'); }, reduced && !CARRY ? 120 : HOLD);
 })();
 </script>
 </body></html>`;

@@ -119,6 +119,16 @@ PB=$(curl -s $API/v1/partnerships -H "Authorization: Bearer $PRO_TOKEN" | j ".fi
 # Scoped to the campaign's mode: an acquisition poster must not promise the repeat-purchase offer.
 CB=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j ".publisher_bonuses.map(b=>b.type).join()")
 [ "$CB" = "coins" ] && pass "campaign artwork is told only the offer that campaign earns" || fail "campaign bonuses: $CB"
+# And the reward is a *pick* out of that list, not everything on it. The publisher declares its
+# offers once, in settings; the promoter says which of them this campaign advertises — and the
+# API refuses one this publisher does not grant on this kind of campaign, because the print run
+# is what pays for that mistake.
+PICK=$(curl -s -XPATCH $API/v1/campaigns/$CAMP_ID -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"bonus_types":["coins"]}' | j ".bonus_types.join()")
+[ "$PICK" = "coins" ] && pass "campaign records the offer the promoter picked" || fail "campaign reward: $PICK"
+BADPICK=$(curl -s -o /dev/null -w '%{http_code}' -XPATCH $API/v1/campaigns/$CAMP_ID -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"bonus_types":["subscription"]}')
+[ "$BADPICK" = "400" ] && pass "an offer that campaign cannot earn is refused as a reward (400)" || fail "reward guard returned $BADPICK"
 
 ANDROID='Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36'
 IOS='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1'
@@ -156,31 +166,36 @@ UP2=$(curl -s -XPOST $API/v1/attribution/$RED_ID/confirm -H "Authorization: Bear
 REM=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 [ "$REM" = "50" ] && pass "budget charged the delta exactly once (90→50)" || fail "budget_remaining=$REM"
 
-echo "6b. iOS path — interstitial, then first-open and signup as separate stages"
-# iOS has no install-referrer channel, so an iPhone scan no longer 302s. It gets an
-# interstitial, which is the only moment this device's timezone, screen and locale can be
-# read — in a browser, before the App Store takes the session away.
+echo "6b. iOS path — the pasteboard carrier, then first-open and signup as separate stages"
+# iOS has no install-referrer channel, so an iPhone scan does not 302. It gets the hand-off
+# screen, and on iOS that screen is load-bearing rather than decorative: Safari only permits a
+# clipboard write inside a user gesture, so the scanner's tap is what carries the claim.
 IOS_PAGE=$(curl -s -A "$IOS" "$API/r/$CODE")
 # Asserted on the `/go/` hand-off, not on the heading: the copy is presentation and has already
 # been reworded once, which failed this line while the mechanism it guards was working fine.
-echo "$IOS_PAGE" | grep -q '/go/' && pass "iPhone scan serves the signal interstitial" || fail "no interstitial served"
-echo "$IOS_PAGE" | grep -qE '(^|[^a-z])(st|token|jwt)=' && fail "interstitial leaks a redeemable token" \
-  || pass "interstitial carries nothing the app could spend"
+echo "$IOS_PAGE" | grep -q '/go/' && pass "iPhone scan serves the hand-off screen" || fail "no hand-off served"
+echo "$IOS_PAGE" | grep -qE '(^|[^a-z])(st|token|jwt)=' && fail "hand-off leaks a redeemable token" \
+  || pass "hand-off carries nothing the app could spend"
+# The regression this whole change exists to prevent. If any of these ever reappear in the
+# page, the platform is fingerprinting again and the build must stop.
+echo "$IOS_PAGE" | grep -qE 'hardwareConcurrency|deviceMemory|devicePixelRatio|resolvedOptions|maxTouchPoints|colorDepth' \
+  && fail "hand-off screen reads device configuration — this is the fingerprinting Apple forbids" \
+  || pass "hand-off screen reads nothing about the device"
 CLAIM=$(printf '%s' "$IOS_PAGE" | grep -o '/go/[A-Za-z0-9_-]\{6,\}' | head -1 | cut -d/ -f3)
-[ -n "$CLAIM" ] && pass "interstitial hands the browser a forwarding hop" || fail "no /go hop in the page"
+[ -n "$CLAIM" ] && pass "hand-off hands the browser a forwarding hop" || fail "no /go hop in the page"
 
-# What the page's script posts back, then the store hop itself.
-STORE=$(curl -s -A "$IOS" -o /dev/null -w '%{redirect_url}' \
-  "$API/go/$CLAIM?tz=Asia/Dhaka&sc=393x852@3&lang=en-US&cores=8&dark=1")
+# The forwarding hop, which is also the string the tap writes to the clipboard: the publisher's
+# SDK reads it back at first open and pulls the claim id out of it.
+STORE=$(curl -s -A "$IOS" -o /dev/null -w '%{redirect_url}' "$API/go/$CLAIM?via=tap&held=1200")
 echo "$STORE" | grep -q '^https://apps.apple.com/app/id123456789$' \
   && pass "forwarding hop reaches the App Store listing, payload-free" || fail "go hop: $STORE"
 
-# Stage one. Minutes after the scan, the app opens for the first time and the publisher's
-# server presents the same signals. Nothing is paid here.
+# Stage one. The app opens for the first time, having read the claim off the pasteboard.
 FO=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d '{"ip":"::1","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US","cores":8,"dark":true}')
-[ "$(echo "$FO" | j .attributed)" = "true" ] && pass "iOS first open matched on the full fingerprint" || fail "first-open: $FO"
-[ "$(echo "$FO" | j .confidence)" = "100" ] && pass "every signal agreeing scores 100" || fail "confidence: $FO"
+  -d "{\"claim_id\":\"$CLAIM\",\"carrier\":\"pasteboard\"}")
+[ "$(echo "$FO" | j .attributed)" = "true" ] && pass "iOS first open matched on the carried claim" || fail "first-open: $FO"
+[ "$(echo "$FO" | j .match_method)" = "pasteboard" ] && pass "the carrier is recorded as what it was" || fail "carrier: $FO"
+[ "$(echo "$FO" | j .confidence)" = "100" ] && pass "a carried claim names one exact scan" || fail "confidence: $FO"
 INSTALL_ID=$(echo "$FO" | j .install_id)
 FO_BUDGET=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 [ "$FO_BUDGET" = "50" ] && pass "first open moves no money (budget untouched at 50)" || fail "first-open charged: $FO_BUDGET"
@@ -189,30 +204,81 @@ FO_BUDGET=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $
 SU=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
   -d "{\"install_id\":\"$INSTALL_ID\",\"publisher_user_ref\":\"ios$S@x.com\"}")
 [ "$(echo "$SU" | j .attributed)" = "true" ] && pass "signup redeems the install banked at first open" || fail "signup: $SU"
-[ "$(echo "$SU" | j .match_method)" = "fingerprint" ] && pass "match method carries through from first open" || fail "method: $SU"
-[ "$(echo "$SU" | j .confidence)" = "100" ] && pass "the fee is paid on the confidence recorded at match time" || fail "confidence: $SU"
+[ "$(echo "$SU" | j .match_method)" = "pasteboard" ] && pass "match method carries through from first open" || fail "method: $SU"
 DUPI=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
   -d "{\"install_id\":\"$INSTALL_ID\",\"publisher_user_ref\":\"iostwo$S@x.com\"}" | j .reason)
 [ "$DUPI" = "already_claimed" ] && pass "one install pays exactly one signup" || fail "install reused: $DUPI"
 
-# The headline behaviour change. A scan whose interstitial never ran leaves only IP + platform,
-# which scores 55 against a floor of 70. That used to be paid. An IP is a postcode — carrier
-# NAT, café wifi, an airport, a corporate VPN — and this is the case that must now refuse.
+# The headline behaviour change. An install that carried nothing is unattributable, full stop.
+# There is no fallback to "someone on this network installed something", because an IP is a
+# postcode — carrier NAT, café wifi, an airport, a corporate VPN — and because deriving an
+# identity from the device is what the Apple Developer Program License Agreement forbids.
 curl -s -A "$IOS" -o /dev/null "$API/r/$CODE"
-WEAK=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d '{"ip":"::1","platform":"ios"}')
-[ "$(echo "$WEAK" | j .attributed)" = "false" ] && pass "IP + platform alone is refused, never paid" || fail "weak fingerprint paid: $WEAK"
-[ "$(echo "$WEAK" | j .confidence)" = "55" ] && pass "the refusal reports the score it refused on" || fail "score: $WEAK"
+WEAK=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/attribution/first-open \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"ip":"::1","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","cores":8,"dark":true}')
+[ "$WEAK" = "400" ] && pass "device signals alone are not an input any more, they are a 400" || fail "signals accepted: $WEAK"
 
 # An emulator is the shape of every install farm, and the SDK says so before we look anything up.
 EMU=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d '{"ip":"::1","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US","emulator":true}' | j .reason)
+  -d "{\"claim_id\":\"$CLAIM\",\"emulator\":true}" | j .reason)
 [ "$EMU" = "device_integrity" ] && pass "a self-declared emulator is refused before matching" || fail "emulator: $EMU"
 
 MISS=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d '{"ip":"203.0.113.99","platform":"ios","tz":"Asia/Dhaka","screen":"393x852@3","language":"en-US"}')
+  -d '{"claim_id":"AAAAAAAAAAAAAAAAAAAAAA","carrier":"appclip"}')
 [ "$(echo "$MISS" | j .attributed)" = "false" ] && pass "an organic install is unattributed, not an error" || fail "organic: $MISS"
 [ "$(echo "$MISS" | j .reason)" = "no_match" ] && pass "unattributed answer names its reason" || fail "reason: $MISS"
+
+echo "6c. App Clip carrier — the invocation URL, the association file, and the JSON hand-off"
+# One document lists every registered clip. It is served to every iPhone that scans anything,
+# which is why a malformed id is a CHECK constraint rather than a validator alone.
+AASA=$(curl -s "$API/.well-known/apple-app-site-association")
+echo "$AASA" | grep -q '"appclips"' && pass "the association file is served, and names appclips" || fail "aasa: $AASA"
+
+# Registering a clip changes the URL the publisher's QR codes encode, because that prefix is
+# what App Store Connect routes on and what the camera recognises offline.
+SLUG="pub$S"
+REG=$(curl -s -XPATCH $API/v1/orgs/me -H "Authorization: Bearer $PUB_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"slug\":\"$SLUG\",\"ios_appclip_id\":\"ABCDE12345.com.example.app.Clip\"}")
+[ "$(echo "$REG" | j .slug)" = "$SLUG" ] && pass "publisher registers an App Clip prefix" || fail "register: $REG"
+# Half a registration is a URL prefix nothing answers to, so it is refused rather than stored.
+HALF=$(curl -s -o /dev/null -w '%{http_code}' -XPATCH $API/v1/orgs/me -H "Authorization: Bearer $PUB_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"ios_appclip_id":""}')
+[ "$HALF" = "400" ] && pass "a slug without a clip id is refused" || fail "half registration accepted: $HALF"
+
+curl -s "$API/.well-known/apple-app-site-association" | grep -q 'ABCDE12345.com.example.app.Clip' \
+  && pass "the registered clip appears in the association file" || fail "clip missing from aasa"
+
+# The QR now encodes the invocation URL rather than /r/.
+NEWQR=$(curl -s -XPOST $API/v1/campaigns/$CAMP_ID/qr-codes -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' -d '{}')
+NEWCODE=$(echo "$NEWQR" | j .code)
+echo "$NEWQR" | j .scan_url | grep -q "/c/$SLUG/$NEWCODE" \
+  && pass "QR codes encode the App Clip invocation URL" || fail "scan_url: $(echo "$NEWQR" | j .scan_url)"
+
+# What the clip itself calls: the same scan, answered as data instead of a redirect.
+CLIP=$(curl -s -A "$IOS" "$API/c/$SLUG/$NEWCODE?format=json")
+CLIP_CLAIM=$(echo "$CLIP" | j .claim_id)
+[ -n "$CLIP_CLAIM" ] && pass "the App Clip collects a claim id" || fail "clip json: $CLIP"
+# The allow-list, not a blocklist: this is the one response in the system that hands a claim id
+# to a device, so what it may contain is enumerated and anything new has to be added here
+# deliberately. `bonuses` is the publisher describing its own offer — the same wording already
+# printed on the hand-off screen — and carries no amount this platform would ever honour.
+KEYS=$(echo "$CLIP" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(Object.keys(JSON.parse(d)).sort().join(',')))")
+[ "$KEYS" = "bonuses,campaign_id,claim_id,ok,publisher,store_url" ] \
+  && pass "clip response carries a reference and a description, nothing redeemable" \
+  || fail "clip response shape changed — every key here reaches a device: $KEYS"
+echo "$CLIP" | grep -qE '"(fee|api_key|secret|signature|balance|budget)"' \
+  && fail "clip response leaks something spendable" || pass "clip response carries no credential or amount"
+
+# And it resolves through the same deterministic lookup as every other carrier.
+CFO=$(curl -s -XPOST $API/v1/attribution/first-open -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"claim_id\":\"$CLIP_CLAIM\",\"carrier\":\"appclip\"}")
+[ "$(echo "$CFO" | j .match_method)" = "appclip" ] && pass "an App Clip install matches deterministically" || fail "clip first-open: $CFO"
+
+# A slug that does not own the code is a hand-assembled URL, and honouring it would give one
+# publisher's scan to another publisher's clip.
+XSLUG=$(curl -s -o /dev/null -w '%{http_code}' -A "$IOS" "$API/c/someone-else/$CODE?format=json")
+[ "$XSLUG" = "410" ] && pass "a mismatched slug is refused, not served" || fail "cross-publisher slug served: $XSLUG"
 
 echo "6c. Repeat purchases — the same traveller, paid again for the next ticket"
 # Everything above pays for an *acquisition*: one person, one signup, one fee, forever. This
@@ -224,9 +290,12 @@ echo "6c. Repeat purchases — the same traveller, paid again for the next ticke
 # system that can know a purchase happened is the one that took the money.
 
 ECAMP=$(curl -s -XPOST $API/v1/campaigns -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"partnership_id\":\"$PART_ID\",\"name\":\"Boarding pass rewards\",\"mode\":\"engagement\"}")
+  -d "{\"partnership_id\":\"$PART_ID\",\"name\":\"Boarding pass rewards\",\"mode\":\"engagement\",\"bonus_types\":[\"subscription\"]}")
 ECAMP_ID=$(echo "$ECAMP" | j .id)
 [ "$(echo "$ECAMP" | j .mode)" = "engagement" ] && pass "engagement campaign created" || fail "mode: $ECAMP"
+# Picked at creation, out of what this publisher grants on a repeat purchase — the same list the
+# portal shows as checkboxes once a partnership and a mode are chosen.
+[ "$(echo "$ECAMP" | j ".bonus_types.join()")" = "subscription" ] && pass "and it advertises the offer picked for it" || fail "engagement reward: $ECAMP"
 BADMODE=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/campaigns -H "Authorization: Bearer $PRO_TOKEN" -H 'Content-Type: application/json' \
   -d "{\"partnership_id\":\"$PART_ID\",\"name\":\"x\",\"mode\":\"whatever\"}")
 [ "$BADMODE" = "400" ] && pass "an unknown campaign mode is rejected (400)" || fail "mode guard: $BADMODE"
@@ -609,6 +678,11 @@ A $API/v1/admin/audit-log | grep -q 'permanent store signage' && pass "every ove
 # Suspending a partnership is the lever for "stop this relationship now". It was checked only
 # when a campaign was created, so afterwards it changed nothing at all: scans kept redirecting
 # and claims kept paying out against a partnership under no agreement.
+#
+# A real, unconsumed claim taken while the agreement was still live — so the assertion below is
+# about the suspension rather than about a claim that was never going to match anyway.
+HELDLOC=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
+HELDREF=$(printf '%s' "$HELDLOC" | sed 's/.*&referrer=//' | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(decodeURIComponent(d.trim())))")
 SUSPEND=$(A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"status":"suspended"}' | j .status)
 [ "$SUSPEND" = "suspended" ] && pass "admin can suspend a partnership" || fail "suspend: $SUSPEND"
 # ...and the publisher cannot lift it. This used to be one call: `accept` moved any partnership
@@ -618,8 +692,11 @@ UNDO=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/partnerships/$PART_
 [ "$UNDO" = "404" ] && pass "...which the publisher cannot re-accept its way out of" || fail "publisher lifted an admin suspension: HTTP $UNDO"
 HELD=$(curl -s -A "$ANDROID" -o /dev/null -w '%{redirect_url}' "$API/r/$CODE")
 echo "$HELD" | grep -q 'reason=partnership_inactive' && pass "an inactive partnership stops scans" || fail "suspended partnership still redirects: $HELD"
+# The claim id is real and its scan is unconsumed; the only thing standing between it and a
+# payout is the suspension. Every carrier resolves through the one lookup, and that lookup
+# joins on `p.status = 'active'` — so suspending stops all three at once.
 HELDCLAIM=$(curl -s -XPOST $API/v1/attribution/claim -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
-  -d "{\"publisher_user_ref\":\"held$S@x.com\",\"ip\":\"::1\",\"platform\":\"ios\"}" | j .attributed)
+  -d "{\"install_referrer\":\"$HELDREF\",\"publisher_user_ref\":\"held$S@x.com\"}" | j .attributed)
 [ "$HELDCLAIM" = "false" ] && pass "...and stops claims paying out against it" || fail "suspended partnership still pays: $HELDCLAIM"
 A -XPATCH $API/v1/admin/partnerships/$PART_ID -H 'Content-Type: application/json' -d '{"status":"active"}' >/dev/null
 

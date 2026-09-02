@@ -69,8 +69,9 @@ function Sim() {
       code: code ?? undefined,
       install_referrer: referrer.trim(),
       publisher_user_ref: email.trim().toLowerCase(),
-      // Android hands the app a referrer; without one this falls back to the fingerprint match.
-      platform: referrer.trim() ? 'android' : undefined,
+      // Android hands the app a referrer. Without one there is nothing to match on and the
+      // answer is `no_match` — which is the honest outcome for an install nobody can trace.
+      carrier: referrer.trim() ? 'referrer' : undefined,
       identified: verified,
     });
   };
@@ -78,7 +79,7 @@ function Sim() {
   const brand = (
     <div className="mb-6 flex items-center gap-2.25 [&_svg]:size-6 [&_svg]:shrink-0 [&_svg]:fill-ink">
       <TicketMark />
-      <b className="text-sm font-[650] tracking-[-0.015em]">DramaBox</b>
+      <b className="text-sm font-[650] tracking-[-0.015em]">BanglaReels</b>
       <span className={pillNeutral}>demo publisher</span>
     </div>
   );

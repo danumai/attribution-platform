@@ -102,32 +102,29 @@ assert.equal(blank.os, null);
 assert.equal(blank.browser, null);
 assert.equal(blank.device_type, 'desktop');
 
-// ---------- what the hand-off screen measured ----------
-// Everything here arrives from a phone via a query string, so the test that matters is what
-// happens to values a phone should never have sent.
-const c = clientSignals({
+// ---------- what the hand-off screen reports about itself ----------
+// Two keys, and the shortness is the assertion. This function used to collect viewport, colour
+// depth, touch points, advertised memory, network class and `navigator.platform` — a
+// fingerprint kit however it was labelled. What survives describes the page, not the phone.
+const c = clientSignals({ held: '900', via: 'tap' })!;
+assert.deepEqual(c, { held_ms: 900, exit: 'tap' });
+
+// The regression guard: every device-describing key a caller might still send is ignored, so
+// an un-upgraded hand-off screen posting the old query string writes none of it.
+const legacy = clientSignals({
   vp: '390x664', tzo: '360', td: '5', langs: 'en-us,bn-bd', net: '4g',
-  dm: '8', cd: '24', pf: 'iPhone', sa: '0', rm: '1', held: '900', via: 'tap',
+  dm: '8', cd: '24', pf: 'iPhone', sa: '0', rm: '1', tz: 'Asia/Dhaka', sc: '393x852@3',
+  held: '412', via: 'auto',
 })!;
-assert.equal(c.viewport, '390x664');
-assert.equal(c.utc_offset, 360);
-assert.equal(c.touch_points, 5);
-assert.equal(c.languages, 'en-us,bn-bd', 'the list keeps its commas');
-assert.equal(c.platform, 'iphone');
-assert.equal(c.standalone, false, 'sa=0 is an answer, not absence');
-assert.equal(c.reduced_motion, true);
-assert.equal(c.held_ms, 900);
-assert.equal(c.exit, 'tap');
+assert.deepEqual(legacy, { held_ms: 412, exit: 'auto' }, 'no device signal may survive');
 
 // Nothing measured is NULL, not an object of nulls: an empty bag in the column would read as
-// "measured nothing" when the truth is "was never asked".
+// "measured nothing" when the truth is "was never asked" — the screen is skipped on Android.
 assert.equal(clientSignals({}), null);
+assert.equal(clientSignals({ vp: '390x664', pf: 'iPhone' }), null, 'device keys alone are nothing');
 
 // Junk is dropped per key rather than poisoning the row — one bad value must not cost the rest.
-const junk = clientSignals({
-  vp: '<script>', tzo: '99999', td: 'lots', net: 'FOUR G', held: '-1', via: 'sideways',
-  cd: '24',
-})!;
-assert.deepEqual(junk, { color_depth: 24 });
+assert.deepEqual(clientSignals({ held: '-1', via: 'sideways' }), null);
+assert.deepEqual(clientSignals({ held: '250', via: 'sideways' }), { held_ms: 250 });
 
 console.log('signals.test.ts ok');

@@ -5,19 +5,34 @@
  * artifact, never an unlock mechanism. App Store 3.1.1 forbids apps using "their own
  * mechanisms to unlock content or functionality, such as license keys, augmented reality
  * markers, QR codes"; Google Play restricts virtual currency to the app it was bought in.
- * So a scan hands the phone exactly one thing — a store listing — and carries no token,
- * code or claim the app could spend. Attribution happens server-to-server afterwards,
- * the same way every mobile measurement partner does it.
+ * So a scan hands the phone exactly one thing — a store listing or an App Clip — and carries
+ * no token, code or claim the app could spend. Attribution happens server-to-server
+ * afterwards, the same way every mobile measurement partner does it.
  *
- * Two match paths, deterministic first:
+ * Every match is deterministic. There is exactly one question — "which scan was this?" — and
+ * it is always answered by an opaque `claim_id` this platform minted, carried across the
+ * install by a channel that survives it. Three carriers, one branch:
  *
- *   Android  Play's Install Referrer survives the install, so the claim id rides along in
- *            `referrer=`. The app reads it via the standard Install Referrer API and its
- *            own backend hands it to us. Exact match, long window.
+ *   referrer    Android. Play's Install Referrer survives the install, so `claim_id` rides in
+ *               `referrer=`. The app reads it via the standard Install Referrer API.
  *
- *   iOS      No referrer exists. Falls back to the industry-standard fingerprint match:
- *            the scan's coarse device signals (hashed IP + platform) are re-presented at
- *            first open and matched inside a short window. Probabilistic on purpose.
+ *   appclip     iOS, publishers who ship an App Clip. The camera invokes `/c/:slug/:code`
+ *               offline, the clip fetches its `claim_id` and writes it to a shared App Group
+ *               container; the full app replaces the clip and reads it. No prompt, nothing
+ *               visible, and Apple built the mechanism for exactly this journey.
+ *
+ *   pasteboard  iOS, everyone else. The hand-off screen writes `<base>/p/<claim_id>` to the
+ *               clipboard on the scanner's tap; the app reads it at first open behind
+ *               `detectPatterns`, which Apple documents as matching "without notifying the
+ *               user" — so only a device that actually came from a scan ever sees a prompt.
+ *
+ * What is deliberately absent: any attempt to recognise the device itself. Apple's Developer
+ * Program License Agreement forbids deriving data from a device to uniquely identify it and
+ * names "properties of a user's web browser and its configuration, the user's device and its
+ * configuration" as examples — which is precisely what the scored iOS match here used to be.
+ * It is deleted rather than tuned, because the rule is written on purpose, not on accuracy,
+ * and WWDC22 is explicit that consent does not cure it. A carrier the user brought with them
+ * is a different fact from a device we recognised.
  */
 import { BadRequestException } from '@nestjs/common';
 import { str } from './security';
@@ -25,9 +40,9 @@ import { str } from './security';
 export type Platform = 'android' | 'ios' | 'other';
 
 /**
- * Coarse on purpose — this is one of two fingerprint dimensions, so it has to agree
- * between a mobile browser at scan time and a native app at first open. Anything finer
- * (browser version, engine) differs across that boundary and would never match.
+ * Which store listing to hand this scan to, and nothing more. It is read once, at redirect
+ * time, and never compared against anything the app later reports — so it is coarse by
+ * design and carries no weight in any decision about who gets paid.
  */
 export function detectPlatform(userAgent = ''): Platform {
   const ua = userAgent.toLowerCase();
@@ -56,6 +71,52 @@ export function validateIosAppId(raw: unknown): string | null {
   const v = String(raw).trim().replace(/^id/i, '');
   if (!/^\d{6,12}$/.test(v))
     throw new BadRequestException('ios_app_id must be the numeric App Store id, e.g. 123456789');
+  return v;
+}
+
+/**
+ * The App Clip's app id, exactly as it goes into the AASA `appclips.apps` array:
+ * `TEAMID.com.example.app.Clip`.
+ *
+ * Validated hard because this string is *served to every iPhone that scans anything*. The
+ * association file is one document listing every registered publisher, and one malformed entry
+ * invalidates the whole file — which would silently break App Clip invocation for all of them,
+ * with no error anywhere. Same rule as `validateAndroidPackage`: anchored, no whitespace, no
+ * way to smuggle JSON structure through.
+ */
+export function validateAppClipId(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string') throw new BadRequestException('ios_appclip_id must be a string');
+  const v = raw.trim();
+  if (!/^[A-Z0-9]{10}\.[A-Za-z0-9.-]{1,180}$/.test(v))
+    throw new BadRequestException(
+      'ios_appclip_id must be TEAMID.bundle.id.Clip, e.g. ABCDE12345.com.example.app.Clip',
+    );
+  return v;
+}
+
+/** App Store Connect provider token — the `pt=` of a campaign link. Digits, nothing else. */
+export function validateProviderToken(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string' && typeof raw !== 'number')
+    throw new BadRequestException('ios_provider_token must be a string');
+  const v = String(raw).trim();
+  if (!/^\d{4,20}$/.test(v))
+    throw new BadRequestException('ios_provider_token must be the numeric provider id from App Store Connect');
+  return v;
+}
+
+/**
+ * The publisher's path segment in the App Clip invocation URL, and therefore the URL prefix
+ * registered in App Store Connect. Lowercase DNS-label shape, because it is also the fallback
+ * if Apple ever refuses two apps sharing one domain: the same string becomes a subdomain.
+ */
+export function validateSlug(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string') throw new BadRequestException('slug must be a string');
+  const v = raw.trim().toLowerCase();
+  if (!/^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])$/.test(v))
+    throw new BadRequestException('slug must be 3–40 characters of a–z, 0–9 and hyphens');
   return v;
 }
 
@@ -97,7 +158,7 @@ export function validateBonuses(raw: unknown): Bonus[] {
   if (!Array.isArray(raw)) throw new BadRequestException('bonuses must be an array');
   if (raw.length > MAX_BONUSES)
     throw new BadRequestException(`bonuses must be ${MAX_BONUSES} entries or fewer`);
-  return raw.map((entry, i) => {
+  const list = raw.map((entry, i) => {
     const at = `bonuses[${i}]`;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry))
       throw new BadRequestException(`${at} must be an object`);
@@ -123,6 +184,15 @@ export function validateBonuses(raw: unknown): Bonus[] {
     if (unit) bonus.unit = unit;
     return bonus;
   });
+  // `type` is the key a campaign names its reward by, so it has to identify one offer. Two
+  // entries sharing a slug would make "this campaign advertises `coins`" ambiguous — and it is
+  // already ambiguous for the publisher's own app, which switches on the same key.
+  const seen = new Set<string>();
+  for (const b of list)
+    if (seen.has(b.type))
+      throw new BadRequestException(`bonuses: ${b.type} appears twice — one entry per kind`);
+    else seen.add(b.type);
+  return list;
 }
 
 /**
@@ -132,6 +202,38 @@ export function validateBonuses(raw: unknown): Bonus[] {
  */
 export function bonusesFor(raw: unknown, kind: 'acquisition' | 'engagement'): Bonus[] {
   return allBonuses(raw).filter((b) => b.on === kind || b.on === 'both' || b.on === undefined);
+}
+
+/**
+ * The offers one *campaign* advertises: the publisher's eligible list for the campaign's mode,
+ * narrowed to the slugs the promoter picked. An empty pick means the whole eligible list —
+ * what every campaign meant before the reward was selectable, and the only honest answer for a
+ * publisher that declares no offers at all.
+ *
+ * Read live off the publisher rather than snapshotted at creation, like every other surface
+ * that prints these: an offer the publisher withdraws drops out of the campaign instead of
+ * being promised from a copy nobody can withdraw.
+ */
+export function campaignBonuses(raw: unknown, mode: string, types?: string[] | null): Bonus[] {
+  const eligible = bonusesFor(raw, mode === 'engagement' ? 'engagement' : 'acquisition');
+  return types?.length ? eligible.filter((b) => types.includes(b.type)) : eligible;
+}
+
+/**
+ * The promoter's pick, checked against what the publisher actually grants for this campaign's
+ * mode. An unknown slug is a 400 and never a silent drop: it is a campaign about to print a
+ * promise nobody fulfils, and the print run is what pays for that mistake.
+ */
+export function validateBonusTypes(raw: unknown, eligible: Bonus[]): string[] {
+  if (raw === undefined || raw === null || raw === '') return [];
+  if (!Array.isArray(raw)) throw new BadRequestException('bonus_types must be an array');
+  const picked = [
+    ...new Set(raw.map((t, i) => str(t, `bonus_types[${i}]`, 40)!.trim().toLowerCase())),
+  ];
+  for (const t of picked)
+    if (!eligible.some((b) => b.type === t))
+      throw new BadRequestException(`bonus_types: this publisher grants no "${t}" on this campaign`);
+  return picked;
 }
 
 /**
@@ -159,6 +261,10 @@ interface AppTargets {
   landing_url: string | null;
   /** engagement only; an https origin the publisher has claimed as an App Link / Universal Link */
   deeplink_url?: string | null;
+  /** App Store Connect provider token, when the publisher wants the campaign-link cross-check */
+  ios_provider_token?: string | null;
+  /** `campaignToken(campaign.id)` — resolved by the caller, which already has the campaign */
+  campaign_token?: string | null;
 }
 
 /**
@@ -166,7 +272,9 @@ interface AppTargets {
  * payload the app can read is the thing that turns a QR into an unlock mechanism.
  *
  * `claim_id` goes in Play's `referrer` (an install-attribution channel, not app content).
- * The App Store has no equivalent, which is exactly why iOS needs the fingerprint path.
+ * The App Store has no equivalent, so on iOS the claim travels beside the store hop rather
+ * than through it — in an App Clip's shared container, or on the pasteboard. Nothing is
+ * appended to the listing URL that the app could read.
  *
  * `code` is the engagement addition and rides in the same referrer, for the same reason and
  * under the same limits: it is an opaque transaction reference, it is useless without the
@@ -188,7 +296,16 @@ export function storeUrl(
       t.android_package,
     )}&referrer=${encodeURIComponent(referrer)}`;
   }
-  if (platform === 'ios' && t.ios_app_id) return `https://apps.apple.com/app/id${t.ios_app_id}`;
+  if (platform === 'ios' && t.ios_app_id) {
+    const url = `https://apps.apple.com/app/id${t.ios_app_id}`;
+    // App Analytics campaign link. Aggregate only — Apple reports first-time downloads per
+    // `ct` and nothing per user — so it can never attribute or pay anyone. It exists to
+    // reconcile: "Apple counted 412 downloads from this poster, we attributed 380 signups."
+    // `ct` is capped at 40 characters by Apple and must not contain ?, ! or &.
+    return t.ios_provider_token && t.campaign_token
+      ? `${url}?pt=${t.ios_provider_token}&ct=${t.campaign_token}&mt=8`
+      : url;
+  }
   // Desktop scan, or a publisher who has not registered an app yet: their own web page,
   // still with no token on it.
   return t.landing_url;
@@ -245,154 +362,40 @@ export function codeFromReferrer(referrer?: string | null): string | null {
   return m ? m[1] : null;
 }
 
-/* ---------------------------------------------------------------------------
- * Device signals — every fingerprint dimension past hashed IP + platform.
+/**
+ * The campaign token for an App Store campaign link (`ct=`).
  *
- * Two sides have to produce byte-identical strings for these to be worth anything: a mobile
- * browser on the interstitial, and a native SDK at first open, minutes later. Everything below
- * exists to survive that crossing. Anything that does not survive it (UA string, browser
- * version, engine, fonts, canvas) is worse than useless here — it does not merely fail to
- * match, it drags a real match below the acceptance line.
- * ------------------------------------------------------------------------- */
-
-/** IANA zone: `Asia/Dhaka` in the browser, the same string from `TimeZone.current` natively. */
-export function normTz(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const v = raw.trim();
-  return /^[A-Za-z0-9_+/-]{1,64}$/.test(v) ? v : null;
-}
+ * Keyed on the *campaign*, never on the scan. Apple caps `ct` at 40 characters, rejects `?`,
+ * `!` and `&` in it, and reports it back only as a download count in a dashboard — so it is a
+ * bucket label. Putting a per-scan id here would turn an aggregate report into exactly the
+ * per-user join this redesign exists to remove, for no gain: a count cannot use it.
+ */
+export const campaignToken = (campaignId: string) => `qrm-${campaignId.replace(/-/g, '').slice(0, 32)}`;
 
 /**
- * `{short}x{long}@{dpr}` — orientation-normalised, because a phone held sideways at scan time
- * and upright at first open is the same phone, and unsorted `w x h` would say otherwise.
+ * The Apple App Site Association document, as served at `/.well-known/`.
  *
- * CSS pixels in the browser, points natively (`UIScreen.bounds`, `dp` on Android) — the same
- * numbers by construction, which is exactly why this is the strongest signal available and
- * why it is weighted highest below.
+ * One file lists every publisher that has registered an App Clip — Apple's documentation is
+ * explicit that the array "can contain entries for multiple App Clips" — so a single hosted
+ * domain serves all of them, and each publisher registers its own `/c/<slug>/` prefix in App
+ * Store Connect. Routing is by longest prefix match, so the slugs never collide.
+ *
+ * ponytail: one shared domain. If App Store Connect ever refuses two apps registering
+ * different prefixes on one domain, the fallback is a subdomain per publisher — the same
+ * `slug`, a wildcard certificate, and this same document served per host.
  */
-export function normScreen(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const m = /^(\d{2,5})x(\d{2,5})@(\d{1,2}(?:\.\d{1,2})?)$/.exec(raw.trim());
-  if (!m) return null;
-  const [w, h] = [Number(m[1]), Number(m[2])];
-  // A trailing `.0` and a bare integer are the same ratio; JS agrees, Postgres `=` does not.
-  return `${Math.min(w, h)}x${Math.max(w, h)}@${Number(m[3])}`;
-}
-
-/** Primary language subtag, lowercased: `en-US` and `en-us` are one locale. */
-export function normLang(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const v = raw.trim().split(',')[0].split(';')[0].trim().toLowerCase();
-  return /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/.test(v) ? v : null;
-}
+export const aasa = (appClipIds: string[]) => ({ appclips: { apps: appClipIds } });
 
 /**
- * Logical CPU count: `navigator.hardwareConcurrency` in the browser, `activeProcessorCount`
- * natively. It splits handsets by generation where the screen only splits them by body size —
- * an iPhone 13 and a 15 share `390x844@3` and do not share a core count.
+ * What a QR code actually encodes. One definition, because this string is *printed*: a URL
+ * built one way here and another way in the console is a print run that cannot be fixed.
  *
- * Bounded rather than trusted: it crosses a trust boundary on both sides, and a nonsense value
- * must land as NULL rather than as its own bucket.
+ * A publisher with a registered App Clip gets `/c/<slug>/<code>`, which iOS recognises offline
+ * and offers the clip for. Everyone else gets `/r/<code>`. Both resolve to the same handler and
+ * burn the same use — the prefix decides only whether iOS has something to invoke.
+ *
+ * Changing a publisher's slug after a run is printed orphans every code already in the world,
+ * which is why the settings endpoint says so out loud.
  */
-export function normCores(raw: unknown): number | null {
-  const n = typeof raw === 'number' ? raw : Number(String(raw ?? '').trim());
-  return Number.isInteger(n) && n >= 1 && n <= 512 ? n : null;
-}
-
-/**
- * Whether the device is in dark appearance: `prefers-color-scheme` in the browser,
- * `userInterfaceStyle` / `isNightModeActive` natively.
- *
- * Worth one bit and weighted like one. It earns its place as a tiebreaker: `decide()` refuses
- * a tie rather than guessing, so a bit that splits two otherwise-identical scans on one NAT is
- * a match that would otherwise be thrown away.
- */
-export function normDark(raw: unknown): boolean | null {
-  if (typeof raw === 'boolean') return raw;
-  const v = String(raw ?? '').trim().toLowerCase();
-  if (['1', 'true', 'dark', 'yes'].includes(v)) return true;
-  if (['0', 'false', 'light', 'no'].includes(v)) return false;
-  return null;
-}
-
-export interface DeviceSignals {
-  tz: string | null;
-  screen: string | null;
-  language: string | null;
-  cores: number | null;
-  dark: boolean | null;
-}
-
-/**
- * Confidence weights, in the 0–100 units `MIN_CONFIDENCE` is expressed in.
- *
- * `BASE` is what hashed IP + platform is worth on its own, and it is deliberately below any
- * legal `MIN_CONFIDENCE`: those two are the *filter* that produces candidates, not evidence
- * that this is the right one. Everything above the base has to be earned by a signal that
- * actually describes the handset.
- *
- * SCREEN outweighs TZ + LANG together because it is the only one with real entropy — a whole
- * country shares a timezone and a language, while screen geometry splits it by model.
- *
- * The weights sum to exactly 100 with `BASE`, so a confidence reads as a percentage and
- * compares directly against `MIN_CONFIDENCE`. A new signal has to be paid for out of the
- * existing ones.
- */
-export const BASE = 55;
-export const WEIGHTS = { tz: 8, screen: 22, language: 7, cores: 5, dark: 3 } as const;
-
-/**
- * What a scan's stored signals score against the ones presented at first open.
- *
- * `== null` rather than falsy: `dark: false` and `cores: 0` are answers, and a truthiness test
- * would silently drop the light-mode half of every device.
- */
-export function score(scan: Partial<DeviceSignals>, open: DeviceSignals): number {
-  let n = BASE;
-  for (const k of Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[])
-    if (scan[k] != null && open[k] != null && scan[k] === open[k]) n += WEIGHTS[k];
-  return n;
-}
-
-type Decision<T> =
-  | { scan: T; confidence: number }
-  | { reason: 'no_match' | 'ambiguous' | 'low_confidence'; confidence?: number };
-
-/**
- * Choose among candidate scans, or refuse. Pure, so the rule that decides who gets paid can
- * be read and tested without a database.
- *
- * The two refusals are the design, not error handling:
- *
- *   low_confidence  The network narrowed it to these scans and no signal from the handset
- *                   agreed with any of them. An IP is a postcode — carrier-grade NAT, café
- *                   wifi, an airport, a corporate VPN — and "somebody on this postcode
- *                   installed something" is not evidence about who scanned the poster.
- *
- *   ambiguous       Two scans fit the evidence equally well. Newest-first would resolve it,
- *                   and that is exactly the temptation to refuse: picking one would be
- *                   inventing a fact, and it would pay one publisher for another's scan.
- *
- * Both are correct answers. Most installs are organic and the honest reply to most of these
- * questions is "we don't know."
- */
-export function decide<T extends Partial<DeviceSignals>>(
-  candidates: T[],
-  open: DeviceSignals,
-  minConfidence: number,
-): Decision<T> {
-  if (!candidates.length) return { reason: 'no_match' };
-
-  // Candidates arrive newest-first and `sort` is stable, so equal evidence still orders by
-  // recency — which is precisely the tie the next line then declines to act on.
-  const scored = candidates
-    .map((scan) => ({ scan, confidence: score(scan, open) }))
-    .sort((a, b) => b.confidence - a.confidence);
-
-  const [best, runnerUp] = scored;
-  if (runnerUp && runnerUp.confidence === best.confidence)
-    return { reason: 'ambiguous', confidence: best.confidence };
-  if (best.confidence < minConfidence)
-    return { reason: 'low_confidence', confidence: best.confidence };
-  return best;
-}
+export const scanUrl = (base: string, code: string, slug?: string | null) =>
+  slug ? `${base}/c/${slug}/${code}` : `${base}/r/${code}`;

@@ -11,8 +11,21 @@
 import { api } from '@/lib/api';
 import { formDialog, toast } from '@/lib/ui';
 import { num, offerLine } from '@/lib/fmt';
-import type { Campaign, Me, Partnership, PublisherOption } from '@/lib/types';
+import type { Bonus, Campaign, Me, Partnership, PublisherOption } from '@/lib/types';
 import type { Act } from './types';
+
+/**
+ * The publisher's offers a campaign of this kind may promise. `both` counts for either, which
+ * is the publisher's own way of saying "whatever the claim was". The API checks the same list
+ * on the way in — this is so the promoter never gets to tick something that will be refused.
+ */
+const offersFor = (partnerships: Partnership[], partnershipId?: string, mode?: string): Bonus[] =>
+  (partnerships.find((p) => p.id === partnershipId)?.publisher_bonuses ?? []).filter(
+    (b) => b.on === 'both' || b.on === (mode ?? 'acquisition'),
+  );
+
+/** A `checks` field arrives as one comma-joined string; the API takes the list. */
+const picked = (v?: string) => (v ? v.split(',') : []);
 
 export async function newPartnership(publishers: PublisherOption[], act: Act) {
   const v = await formDialog({
@@ -150,41 +163,66 @@ export async function proposeRates(p: Partnership, act: Act) {
 export async function newCampaign(activePartnerships: Partnership[], act: Act) {
   const v = await formDialog({
     title: 'New campaign',
-    body: 'A campaign spends against one active partnership, at that partnership’s rates.',
+    body:
+      'A campaign spends against one active partnership, at that partnership’s rates. What it ' +
+      'promises the user is the publisher’s own offer — pick which of them this campaign runs.',
     confirmText: 'Create campaign',
-    fields: [
-      {
-        name: 'partnership_id',
-        label: 'Partnership',
-        type: 'select',
-        required: true,
-        placeholder: 'Select…',
-        options: activePartnerships.map((p) => ({
-          value: p.id,
-          label: `${p.publisher_name} — ${p.coin_rate} coins/signup`,
-        })),
-      },
-      { name: 'name', label: 'Campaign name', required: true, placeholder: 'Inflight entertainment promo' },
-      {
-        name: 'mode',
-        label: 'What this campaign pays for',
-        type: 'select',
-        required: true,
-        value: 'acquisition',
-        options: [
-          { value: 'acquisition', label: 'New signups — one payout per person, ever' },
-          { value: 'engagement', label: 'Repeat purchases — one payout per transaction code you issue' },
-        ],
-      },
-      {
-        name: 'budget',
-        label: 'Starting budget (coins)',
-        type: 'number',
-        required: true,
-        value: '0',
-        hint: 'A campaign with no budget refuses every scan — the scanner is told the offer is claimed. Fund it here or in Edit before printing.',
-      },
-    ],
+    // A function, because the reward cannot be listed until the other two answers are in: the
+    // offers belong to the publisher on the partnership, and a signup offer is not what a
+    // repeat purchase earns. It follows the picks rather than being asked in a second dialog.
+    fields: (cur) => {
+      const offers = offersFor(activePartnerships, cur.partnership_id, cur.mode);
+      return [
+        {
+          name: 'partnership_id',
+          label: 'Partnership',
+          type: 'select',
+          required: true,
+          placeholder: 'Select…',
+          options: activePartnerships.map((p) => ({
+            value: p.id,
+            label: `${p.publisher_name} — ${p.coin_rate} coins/signup`,
+          })),
+        },
+        { name: 'name', label: 'Campaign name', required: true, placeholder: 'Inflight entertainment promo' },
+        {
+          name: 'mode',
+          label: 'What this campaign pays for',
+          type: 'select',
+          required: true,
+          value: 'acquisition',
+          options: [
+            { value: 'acquisition', label: 'New signups — one payout per person, ever' },
+            { value: 'engagement', label: 'Repeat purchases — one payout per transaction code you issue' },
+          ],
+        },
+        {
+          name: 'bonus_types',
+          label: 'The reward this campaign promises',
+          type: 'checks',
+          // Everything the publisher grants for this kind of campaign, ticked. Narrowing it is
+          // the decision; promising all of it is what a campaign always used to mean.
+          value: offers.map((o) => o.type).join(','),
+          required: offers.length > 0,
+          options: offers.map((o) => ({
+            value: o.type,
+            label: `${o.label}${o.value ? ` — ${num(o.value)}${o.unit ? ` ${o.unit}` : ''}` : ''}`,
+          })),
+          placeholder: cur.partnership_id
+            ? 'This publisher declares no offer for this kind of campaign — ask before printing a promise.'
+            : 'Pick a partnership first.',
+          hint: 'The publisher grants these out of its own pocket, not out of your budget. Only what you tick is printed on the artwork and returned to its app when somebody claims.',
+        },
+        {
+          name: 'budget',
+          label: 'Starting budget (coins)',
+          type: 'number',
+          required: true,
+          value: '0',
+          hint: 'A campaign with no budget refuses every scan — the scanner is told the offer is claimed. Fund it here or in Edit before printing.',
+        },
+      ];
+    },
   });
   if (!v) return;
 
@@ -194,7 +232,12 @@ export async function newCampaign(activePartnerships: Partnership[], act: Act) {
   await act(async () => {
     const c = (await api('/v1/campaigns', {
       method: 'POST',
-      body: JSON.stringify({ partnership_id: v.partnership_id, name: v.name, mode: v.mode }),
+      body: JSON.stringify({
+        partnership_id: v.partnership_id,
+        name: v.name,
+        mode: v.mode,
+        bonus_types: picked(v.bonus_types),
+      }),
     })) as { id: string };
     if (!coins)
       return toast.info(`Campaign "${v.name}" created — every scan is refused until you fund it.`);
@@ -228,6 +271,10 @@ export async function newCampaign(activePartnerships: Partnership[], act: Act) {
  */
 export async function editCampaign(c: Campaign, partnerships: Partnership[], act: Act) {
   const p = partnerships.find((x) => x.id === c.partnership_id);
+  // Fixed options here, unlike the create dialog: the publisher and the mode are both settled,
+  // so the only open question is which of that publisher's offers this campaign still promises.
+  const offers = offersFor(partnerships, c.partnership_id, c.mode);
+  const reward = (c.bonus_types.length ? c.bonus_types : offers.map((o) => o.type)).join(',');
   const v = await formDialog({
     title: `Edit "${c.name}"`,
     confirmText: 'Save changes',
@@ -261,6 +308,19 @@ export async function editCampaign(c: Campaign, partnerships: Partnership[], act
         hint: `Same money in the unit you buy it in — wins over Budget when filled. At ${num(c.coin_rate)} coins per signup.`,
       },
       {
+        name: 'bonus_types',
+        label: 'The reward this campaign promises',
+        type: 'checks',
+        value: reward,
+        required: offers.length > 0,
+        options: offers.map((o) => ({
+          value: o.type,
+          label: `${o.label}${o.value ? ` — ${num(o.value)}${o.unit ? ` ${o.unit}` : ''}` : ''}`,
+        })),
+        placeholder: `${c.publisher_name} declares no offer for this kind of campaign.`,
+        hint: 'Codes already printed keep pointing here, so changing this changes what a poster in the wild is promising.',
+      },
+      {
         name: 'coin_rate',
         label: 'Rate (coins per verified signup)',
         type: 'number',
@@ -291,10 +351,12 @@ export async function editCampaign(c: Campaign, partnerships: Partnership[], act
       return toast.error(`The full rate cannot sit below the guest rate of ${num(p.guest_rate)}.`);
   }
 
+  const rewardChanged = v.bonus_types !== reward;
   const summary =
     [
       `"${v.name}" saved`,
       v.status === c.status ? '' : `now ${v.status}`,
+      rewardChanged ? 'reward updated' : '',
       topUp > 0 ? `funded ${num(topUp)} coins` : '',
       rate !== c.coin_rate ? `new rate sent to ${c.publisher_name} for approval` : '',
     ]
@@ -304,7 +366,7 @@ export async function editCampaign(c: Campaign, partnerships: Partnership[], act
   await act(async () => {
     await api(`/v1/campaigns/${c.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name: v.name, status: v.status }),
+      body: JSON.stringify({ name: v.name, status: v.status, bonus_types: picked(v.bonus_types) }),
     });
     if (topUp > 0)
       await api(`/v1/campaigns/${c.id}/fund`, {

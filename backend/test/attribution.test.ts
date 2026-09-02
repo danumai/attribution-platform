@@ -3,25 +3,23 @@
 // Run: npm run test:unit --workspace backend
 import { strict as assert } from 'assert';
 import {
-  BASE,
-  DeviceSignals,
-  WEIGHTS,
-  claimIdFromReferrer,
-  decide,
-  detectPlatform,
-  normCores,
-  normDark,
-  normLang,
-  normScreen,
-  normTz,
+  aasa,
   allBonuses,
   bonusLabel,
   bonusesFor,
-  score,
+  campaignBonuses,
+  campaignToken,
+  claimIdFromReferrer,
+  detectPlatform,
+  scanUrl,
   storeUrl,
   validateAndroidPackage,
+  validateAppClipId,
   validateBonuses,
+  validateBonusTypes,
   validateIosAppId,
+  validateProviderToken,
+  validateSlug,
 } from '../src/common/attribution';
 
 
@@ -48,7 +46,30 @@ const targets = {
 const play = storeUrl('android', targets, 'CLAIM123')!;
 assert.ok(play.startsWith('https://play.google.com/store/apps/details?id=com.dramabox.app&'));
 assert.ok(play.includes('qrm_claim%3DCLAIM123'), 'claim id must be inside the encoded referrer');
-assert.equal(storeUrl('ios', targets, 'CLAIM123'), 'https://apps.apple.com/app/id123456789');
+assert.equal(
+  storeUrl('ios', targets, 'CLAIM123'),
+  'https://apps.apple.com/app/id123456789',
+  'no provider token means a bare listing URL — nothing is appended the app could read',
+);
+
+// The App Store campaign link. Aggregate-only by construction: `ct` is keyed on the campaign,
+// so every scan of one poster run reports into one bucket and no per-user join is possible.
+const withPt = storeUrl('ios', { ...targets, ios_provider_token: '99887766', campaign_token: campaignToken('3f2a1b0c-dead-4beef-8000-000000000001') }, 'CLAIM123')!;
+assert.ok(withPt.includes('pt=99887766'));
+assert.ok(withPt.includes('mt=8'));
+assert.ok(!withPt.includes('CLAIM123'), 'a claim id must never reach an App Store campaign link');
+// Apple caps `ct` at 40 characters and rejects ? ! and & inside it.
+const ct = new URL(withPt).searchParams.get('ct')!;
+assert.ok(ct.length <= 40 && /^[A-Za-z0-9-]+$/.test(ct), `ct must be short and plain: ${ct}`);
+assert.equal(campaignToken('abc-def'), campaignToken('abc-def'), 'stable for one campaign');
+assert.notEqual(campaignToken('campaign-one'), campaignToken('campaign-two'));
+
+// A provider token with no campaign token is a half-configured link, so it degrades to the
+// bare listing rather than emitting `ct=undefined`.
+assert.equal(
+  storeUrl('ios', { ...targets, ios_provider_token: '99887766' }, 'CLAIM123'),
+  'https://apps.apple.com/app/id123456789',
+);
 assert.equal(storeUrl('other', targets, 'CLAIM123'), 'https://dramabox.example/get');
 assert.equal(
   storeUrl('android', { android_package: null, ios_app_id: null, landing_url: null }, 'C'),
@@ -62,99 +83,49 @@ assert.equal(claimIdFromReferrer('utm_source=organic'), null);
 assert.equal(claimIdFromReferrer(null), null);
 assert.equal(claimIdFromReferrer('qrm_claim=abc/../x'), null);
 
-// ---------- device signals ----------
-// The whole value of these is that a mobile browser and a native SDK produce the same string,
-// so normalisation is the feature, not tidying.
-assert.equal(normTz('Asia/Dhaka'), 'Asia/Dhaka');
-assert.equal(normTz('  Europe/London '), 'Europe/London');
-for (const bad of ['Asia/Dhaka; DROP', "'", 'x'.repeat(65), 42, null]) assert.equal(normTz(bad), null);
+// ---------- the iOS carriers ----------
+// The claim id is the only thing that travels, and these are the two things that must be true
+// of every route it travels by: it names one scan, and it is never derived from the device.
 
-// orientation-normalised: the same handset held either way must hash to one value
-assert.equal(normScreen('393x852@3'), '393x852@3');
-assert.equal(normScreen('852x393@3'), '393x852@3', 'landscape must normalise to portrait');
-assert.equal(normScreen('393x852@3.0'), '393x852@3', 'trailing .0 is the same ratio');
-assert.equal(normScreen('390x844@2.5'), '390x844@2.5');
-for (const bad of ['393x852', '393*852@3', '1x2@3', 'a x b @ c', '']) assert.equal(normScreen(bad), null);
+assert.equal(validateAppClipId('ABCDE12345.com.example.app.Clip'), 'ABCDE12345.com.example.app.Clip');
+assert.equal(validateAppClipId(''), null);
+assert.equal(validateAppClipId(undefined), null);
+for (const bad of [
+  'com.example.app.Clip',            // no team id
+  'abcde12345.com.example.app.Clip', // team ids are upper-case
+  'ABCDE12345',                      // no bundle id
+  'ABCDE12345.com.example app',      // a space would break the JSON document
+  'ABCDE12345.com.example","evil":"', // and this is why the shape is anchored
+])
+  assert.throws(() => validateAppClipId(bad), `should reject ${bad}`);
 
-assert.equal(normLang('en-US'), 'en-us');
-assert.equal(normLang('en-US,en;q=0.9,bn;q=0.8'), 'en-us', 'Accept-Language header form');
-assert.equal(normLang('bn'), 'bn');
-for (const bad of ['', 'english-language-tag-far-too-long', '!!']) assert.equal(normLang(bad), null);
+assert.equal(validateProviderToken('123456'), '123456');
+assert.equal(validateProviderToken(123456), '123456');
+for (const bad of ['12', 'abc', '1234567890123456789012']) assert.throws(() => validateProviderToken(bad));
 
-// Core count crosses as an integer or not at all — a float or an out-of-range claim is a
-// caller widening a fingerprint dimension, not a device.
-assert.equal(normCores(6), 6);
-assert.equal(normCores(' 8 '), 8, 'query strings arrive as text');
-for (const bad of [0, 513, 4.5, 'many', '', null, NaN]) assert.equal(normCores(bad), null);
+assert.equal(validateSlug('DramaBox'), 'dramabox', 'slugs are lowercased, not rejected');
+assert.equal(validateSlug('drama-box-2'), 'drama-box-2');
+for (const bad of ['ab', '-lead', 'trail-', 'has space', 'x'.repeat(41), 'under_score'])
+  assert.throws(() => validateSlug(bad), `should reject ${bad}`);
 
-// Appearance is a bit, and `false` is an answer — a truthiness test here would silently drop
-// every light-mode device and score it as "withheld".
-assert.equal(normDark(true), true);
-assert.equal(normDark('1'), true);
-assert.equal(normDark('dark'), true);
-assert.equal(normDark(false), false);
-assert.equal(normDark('0'), false);
-assert.equal(normDark('light'), false);
-for (const bad of ['maybe', '', null, undefined, 2]) assert.equal(normDark(bad), null);
+// What a QR actually encodes. One definition, because this string gets printed: a publisher
+// with an App Clip gets the invocation URL iOS recognises offline, everyone else gets `/r/`.
+assert.equal(scanUrl('https://go.example', 'Ab3xYz'), 'https://go.example/r/Ab3xYz');
+assert.equal(scanUrl('https://go.example', 'Ab3xYz', null), 'https://go.example/r/Ab3xYz');
+assert.equal(scanUrl('https://go.example', 'Ab3xYz', 'dramabox'), 'https://go.example/c/dramabox/Ab3xYz');
 
-// ---------- the decision that spends money ----------
-const OPEN: DeviceSignals = {
-  tz: 'Asia/Dhaka',
-  screen: '393x852@3',
-  language: 'en-us',
-  cores: 8,
-  dark: true,
-};
-const MIN = 70; // the shipped MIN_CONFIDENCE default
+// The association document. One file lists every registered clip — Apple's documentation is
+// explicit that the array may hold more than one — and its shape is exactly this, no more.
+assert.deepEqual(aasa(['ABCDE12345.com.a.Clip', 'FGHIJ67890.com.b.Clip']), {
+  appclips: { apps: ['ABCDE12345.com.a.Clip', 'FGHIJ67890.com.b.Clip'] },
+});
+assert.deepEqual(aasa([]), { appclips: { apps: [] } });
 
-// A scan with nothing but IP + platform behind it scores the base and is refused. This is the
-// case the whole scoring change exists for: an IP is a postcode, not an identity.
-const bare: DeviceSignals = { tz: null, screen: null, language: null, cores: null, dark: null };
-assert.equal(score(bare, OPEN), BASE);
-assert.ok(BASE < MIN, 'IP + platform alone must never clear the floor on its own');
-let d = decide([bare], OPEN, MIN);
-assert.ok('reason' in d && d.reason === 'low_confidence', 'bare fingerprint must be refused');
-assert.equal('confidence' in d ? d.confidence : null, BASE, 'the refusal still reports its score');
-
-// Every signal agreeing is as good as a probabilistic match gets, and it tops out at exactly
-// 100 — the scale the console prints as a percentage and MIN_CONFIDENCE is compared against.
-assert.equal(score(OPEN, OPEN), 100);
-assert.equal(BASE + Object.values(WEIGHTS).reduce((a, b) => a + b, 0), 100);
-
-// `dark: false` is a fact the device reported, not a missing signal. Scoring it as absence
-// would throw away the one bit that most often splits two candidates on the same NAT.
-const light = { ...bare, dark: false };
-assert.equal(score(light, { ...OPEN, dark: false }), BASE + WEIGHTS.dark, 'false must score');
-assert.equal(score(light, OPEN), BASE, 'light against dark is a disagreement, not a match');
-
-// Partial agreement, and the ordering the weights are meant to produce: screen alone (the only
-// signal with real entropy) must outweigh timezone and locale together.
-assert.ok(
-  score({ ...bare, screen: OPEN.screen }, OPEN) > score({ ...bare, tz: OPEN.tz, language: OPEN.language }, OPEN),
-  'screen must dominate — a country shares a timezone and a language, not a handset',
-);
-
-// A signal the scan never captured cannot earn credit, and neither can one that disagrees.
-assert.equal(score({ ...bare, tz: 'Europe/London' }, OPEN), BASE, 'a wrong signal scores nothing');
-assert.equal(score(OPEN, { ...bare }), BASE, 'a signal the device withheld scores nothing');
-
-// The single best candidate wins outright.
-const strong: DeviceSignals = { ...OPEN };
-const weak: DeviceSignals = { ...bare, tz: 'Asia/Dhaka' };
-d = decide([weak, strong], OPEN, MIN);
-assert.ok(!('reason' in d) && d.scan === strong && d.confidence === 100);
-
-// Two candidates fitting equally well is the NAT case: refuse rather than pay the newest one.
-d = decide([{ ...strong }, { ...strong }], OPEN, MIN);
-assert.ok('reason' in d && d.reason === 'ambiguous', 'a tie must never be broken by recency');
-
-// A tie among weak candidates is reported as ambiguous rather than low-confidence — the reason
-// nobody was paid is that we could not tell them apart, and the fraud review needs to know it.
-d = decide([{ ...bare }, { ...bare }], OPEN, MIN);
-assert.ok('reason' in d && d.reason === 'ambiguous');
-
-assert.ok('reason' in decide([], OPEN, MIN) && (decide([], OPEN, MIN) as any).reason === 'no_match');
-
+// The regression this whole change exists to prevent: nothing in this module may reintroduce a
+// way to describe a handset. If a future edit re-adds one, this fails before it ships.
+const surface = Object.keys(require('../src/common/attribution'));
+for (const gone of ['score', 'decide', 'WEIGHTS', 'BASE', 'normTz', 'normScreen', 'normCores', 'normDark'])
+  assert.ok(!surface.includes(gone), `${gone} is device fingerprinting — it must not come back`);
 
 // ---------- the publisher's own offers ----------
 // Everything here is the publisher describing what *it* grants; nothing on this side ever
@@ -178,6 +149,11 @@ assert.throws(() => validateBonuses([{ type: 'free coins', label: 'x' }]), /slug
 assert.throws(() => validateBonuses([{ label: 'no kind' }]), /type is required/);
 assert.throws(() => validateBonuses([{ type: 'coins', label: 'x', on: 'signup' }]), /on must be/);
 assert.throws(() => validateBonuses(new Array(21).fill({ type: 'c', label: 'x' })), /20 entries/);
+// `type` is what a campaign names its reward by, so it has to identify exactly one offer.
+assert.throws(
+  () => validateBonuses([{ type: 'coins', label: '100' }, { type: 'coins', label: '50' }]),
+  /appears twice/,
+);
 
 // The scoping that makes a list worth having: a signup answer must not advertise the offer
 // that is only earned by coming back and buying again.
@@ -189,6 +165,35 @@ assert.deepEqual(bonusesFor('100 free coins', 'acquisition'), []);
 
 assert.equal(bonusLabel(bonusesFor(offers, 'engagement')), '100 free coins + 7 days of premium');
 assert.equal(bonusLabel([]), null);
+
+// ---------- what one campaign promises ----------
+// The promoter picks out of the publisher's eligible list, and only the pick is advertised.
+assert.deepEqual(
+  campaignBonuses(offers, 'engagement', ['subscription']).map((b) => b.label),
+  ['7 days of premium'],
+);
+// No pick = every eligible offer: what a campaign meant before the pick existed, and the only
+// honest answer for a publisher that declares nothing.
+assert.deepEqual(campaignBonuses(offers, 'engagement', []).map((b) => b.type), ['coins', 'subscription']);
+assert.deepEqual(campaignBonuses(offers, 'acquisition').map((b) => b.type), ['coins']);
+// The mode still wins over the pick: an engagement-only offer cannot be promised to a signup,
+// whatever the campaign selected.
+assert.deepEqual(campaignBonuses(offers, 'acquisition', ['subscription']), []);
+// An offer the publisher has since withdrawn drops out rather than being promised from a copy.
+assert.deepEqual(campaignBonuses(offers, 'acquisition', ['gone']), []);
+
+// The pick on the way in: normalised the same way `type` is, deduped, and checked against what
+// that publisher actually grants — a campaign must not be created promising nothing fulfils.
+const eligible = campaignBonuses(offers, 'engagement');
+assert.deepEqual(validateBonusTypes([' Coins ', 'coins'], eligible), ['coins']);
+assert.deepEqual(validateBonusTypes(undefined, eligible), []);
+assert.throws(() => validateBonusTypes('coins', eligible), /must be an array/);
+assert.throws(() => validateBonusTypes(['gone'], eligible), /grants no/);
+// Scoped, not just known: the signup list cannot be handed an engagement-only offer.
+assert.throws(
+  () => validateBonusTypes(['subscription'], campaignBonuses(offers, 'acquisition')),
+  /grants no/,
+);
 
 // What the promoter console reads: every offer, unscoped, and the same degrade-to-none on junk.
 assert.deepEqual(allBonuses(offers).map((b) => b.type), ['coins', 'subscription']);

@@ -10,6 +10,7 @@
  * reporting only, so it can be as fine-grained as the headers allow and can change shape freely.
  */
 import { Request } from 'express';
+import { Prisma } from '../generated/prisma/client';
 
 interface ScanSignals {
   /** ISO-3166 alpha-2, from the CDN in front of us. NULL when nothing resolved it. */
@@ -176,15 +177,23 @@ function deviceType(req: Request, ua: string, os: string | null): string {
 }
 
 /* ---------------------------------------------------------------------------
- * The second source: what the hand-off screen measured in the browser. Reporting only — the
- * timezone, screen, core count and appearance it also sends are matching signals and are parsed
- * by `attribution.ts`. Mixing the two is how a reporting field ends up scored.
+ * The second source: what the hand-off screen reports about itself.
+ *
+ * Two keys, and the shortness is the point. This function used to collect a dozen — viewport,
+ * colour depth, touch points, advertised memory, network class, `navigator.platform` — which
+ * is a fingerprint kit however it is labelled, and Apple names browser and device
+ * configuration explicitly as data that may not be derived to identify a device. It went with
+ * the matcher that consumed its siblings.
+ *
+ * What is left describes the *page*, not the phone: how long it was held and how it was left.
+ * Nothing here narrows down who is holding the device, and nothing here is ever compared
+ * against anything an app reports.
  * ------------------------------------------------------------------------- */
 
 /**
- * A bounded integer, or absence. Everything here arrives from a phone, so nothing is trusted.
- * The empty check is load-bearing: `Number('')` is `0`, so an absent key would otherwise land
- * as a real in-range zero — "reported no touch points" rather than "was never asked".
+ * A bounded integer, or absence. It arrives from a phone, so it is not trusted. The empty
+ * check is load-bearing: `Number('')` is `0`, so an absent key would otherwise land as a real
+ * in-range zero — "held for no time" rather than "was never asked".
  */
 const int = (raw: unknown, lo: number, hi: number): number | null => {
   const v = String(raw ?? '').trim();
@@ -193,49 +202,18 @@ const int = (raw: unknown, lo: number, hi: number): number | null => {
 };
 
 /**
- * A short enum-ish token: lowercased, charset-bounded, so a value read straight into the
- * console can never carry markup. The comma is allowed because `languages` is a list.
- */
-const tok = (raw: unknown, max = 24): string | null => {
-  const v = String(raw ?? '').trim().toLowerCase();
-  return v && v.length <= max && /^[a-z0-9._,-]+$/.test(v) ? v : null;
-};
-
-/**
- * What the browser measured, as a bag of reporting facts.
+ * What the hand-off screen cost, as a bag of facts about the screen itself.
  *
- * Every value is optional twice over: the API is missing on some engines (Safari has no
- * `deviceMemory` or `connection`), and the whole screen is skipped for Android and desktop. So
- * this returns NULL rather than an object of nulls — an empty bag would read as "measured
- * nothing" when the truth is "was never asked".
+ * Returns NULL rather than an object of nulls: an empty bag would read as "measured nothing"
+ * when the truth is "was never asked" — the screen is skipped entirely for Android and desktop.
  */
-export function clientSignals(q: Record<string, unknown>): Record<string, unknown> | null {
-  const bag: Record<string, unknown> = {
-    /** inner window size in CSS px — smaller than `screen` by exactly the browser or in-app chrome */
-    viewport: /^\d{2,5}x\d{2,5}$/.test(String(q.vp ?? '')) ? String(q.vp) : null,
-    /** minutes east of UTC. Redundant with `tz` when that resolved, the only clock answer when it did not. */
-    utc_offset: int(q.tzo, -900, 900),
-    /** 0 on a desktop pointer, 5 on essentially every iPhone — a bot check, not an identity */
-    touch_points: int(q.td, 0, 32),
-    /** the whole `navigator.languages` list; the primary tag alone is already in `language` */
-    languages: tok(q.langs, 120),
-    /** `4g` / `3g` / `slow-2g`, Chromium only. A slow link is the honest reason for a drop-off. */
-    network: tok(q.net, 12),
-    /** advertised RAM in GB, Chromium only and deliberately coarse (0.25 … 8) */
-    memory_gb: int(q.dm, 0, 64),
-    color_depth: int(q.cd, 1, 64),
-    /** the OS the *browser* claims, which is not always the one the UA claims */
-    platform: tok(q.pf, 32),
-    /** true in an installed PWA / standalone webview rather than a browser tab */
-    standalone: q.sa === '1' ? true : q.sa === '0' ? false : null,
-    /** an accessibility preference, reported because it changes what the screen was able to show */
-    reduced_motion: q.rm === '1' ? true : q.rm === '0' ? false : null,
-    /** ms the screen was actually held before it handed off — the real cost of this hop */
-    held_ms: int(q.held, 0, 600_000),
-    /** `tap` when the reader pressed Continue, `auto` when the hold ran out */
-    exit: q.via === 'tap' ? 'tap' : q.via === 'auto' ? 'auto' : null,
-  };
-  for (const [k, v] of Object.entries(bag)) if (v === null) delete bag[k];
+export function clientSignals(q: Record<string, unknown>): Prisma.InputJsonObject | null {
+  const bag: Record<string, string | number> = {};
+  /** ms the screen was actually held before it handed off — the real cost of this hop */
+  const held = int(q.held, 0, 600_000);
+  if (held !== null) bag.held_ms = held;
+  /** `tap` when the scanner pressed Continue, `auto` when the bail-out fired */
+  if (q.via === 'tap' || q.via === 'auto') bag.exit = q.via;
   return Object.keys(bag).length ? bag : null;
 }
 

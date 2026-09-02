@@ -18,21 +18,16 @@ interface ScanAnalytics {
   days: number;
   totals: {
     scans: number;
-    /** distinct hashed IPs — the closest thing to "people" this data supports */
-    devices: number;
     conversions: number;
     coins: number;
-    /** scans beyond the first from the same device: re-scans, or one device hitting many codes */
-    repeat_scans: number;
     /** how many scans the CDN resolved a country for; 0 means geo is simply not wired up */
     geo_known: number;
     /**
-     * How many scans carry handset detail from the hand-off screen. This is the coverage
-     * number behind every panel in the Handset section, and it is also the honest ceiling on
-     * how many iOS installs can ever be matched with confidence — a scan with no signals
-     * scores the base and is refused.
+     * How many iPhone scanners tapped Continue on the hand-off screen rather than letting the
+     * bail-out fire. That tap is what carries the claim to the clipboard, so on publishers with
+     * no App Clip this is the honest ceiling on how many iOS installs can ever be attributed.
      */
-    handset_known: number;
+    handoff_tapped: number;
     conversion_rate: number;
   };
   dims: Record<string, Bucket[]>;
@@ -50,18 +45,17 @@ const DIMENSIONS: Record<string, string> = {
   // 'direct' is the interesting bucket here: no referer is what a real camera scan looks like.
   referer_host: `coalesce(referer_host, 'direct')`,
 
-  // The four below are only ever populated for scans that passed through the hand-off screen,
-  // which today is iOS into a registered App Store listing. Every other scan lands in
-  // 'unknown', and that is the honest bucket rather than a gap — the reader can see at a glance
-  // what share of their traffic this detail is even available for.
+  // There were four more here — screen, timezone, theme and network class — and they were the
+  // most interesting panels on the dashboard. They are gone with the fingerprint they were a
+  // by-product of: Apple names browser and device configuration explicitly as data that may not
+  // be derived to identify a device, and a reporting label does not change what was collected.
   //
-  // `screen` is the interesting one: it is the closest this data ever gets to naming a handset
-  // model, and it costs nothing extra because attribution already stores it.
-  screen: `coalesce(screen, 'unknown')`,
-  tz: `coalesce(tz, 'unknown')`,
-  // Three-valued on purpose: NULL is "never measured", which is not the same fact as "light".
-  theme: `case when dark then 'dark' when dark is false then 'light' else 'unknown' end`,
-  network: `coalesce(client->>'network', 'unknown')`,
+  // What is left is either read off request headers every server sees (geo, UA, language) or
+  // about this platform's own artifacts (which code, which campaign, when).
+  //
+  // How the hand-off screen was left, which is about the page rather than the phone. On a
+  // publisher with no App Clip, `auto` is an install that could never be attributed.
+  handoff: `coalesce(client->>'exit', 'skipped')`,
   qr_code: `coalesce(code, 'unknown')`,
   campaign: `campaign_name`,
   // Zero-padded so the buckets sort lexically into clock order without a numeric cast per row.
@@ -103,8 +97,7 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
   >(
     `WITH s AS (
        SELECT sc.scanned_at, sc.country, sc.city, sc.device_type, sc.os, sc.browser,
-              sc.language, sc.platform, sc.referer_host,
-              sc.screen, sc.tz, sc.dark, sc.client,
+              sc.language, sc.platform, sc.referer_host, sc.client,
               q.code, c.name AS campaign_name,
               r.n > 0 AS converted
        FROM scans sc
@@ -131,11 +124,10 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
     // signup and a purchase reward is still one converted scan — while `coins` sums both,
     // because the campaign budget really did pay for both.
     `SELECT count(*)::int                                        AS scans,
-            count(DISTINCT sc.ip)::int                           AS devices,
             count(*) FILTER (WHERE r.n > 0)::int                 AS conversions,
             coalesce(sum(r.coins), 0)::int                       AS coins,
             count(*) FILTER (WHERE sc.country IS NOT NULL)::int   AS geo_known,
-            count(*) FILTER (WHERE sc.screen IS NOT NULL)::int    AS handset_known
+            count(*) FILTER (WHERE sc.client->>'exit' = 'tap')::int AS handoff_tapped
      FROM scans sc
      LEFT JOIN LATERAL (
        SELECT count(*)::int AS n, coalesce(sum(coins), 0)::int AS coins
@@ -165,13 +157,10 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
     days: window,
     totals: {
       scans: t.scans,
-      devices: t.devices,
       conversions: t.conversions,
       coins: t.coins,
-      // A device that scanned once contributes zero here, so this is genuinely the extra scans.
-      repeat_scans: Math.max(t.scans - t.devices, 0),
       geo_known: t.geo_known,
-      handset_known: t.handset_known,
+      handoff_tapped: t.handoff_tapped,
       conversion_rate: t.scans ? +(t.conversions / t.scans).toFixed(3) : 0,
     },
     dims,

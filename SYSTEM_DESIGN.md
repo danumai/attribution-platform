@@ -40,7 +40,7 @@ Two products share one machine:
 | Guarantee | one payout per user per campaign, **ever** | one payout per **issued code** |
 | Priced at | `coin_rate` (verified) / `guest_rate` (unverified) | `engagement_rate` |
 | Codes | designed in a portal, printed, many scans | minted per transaction by the promoter's server, single-use |
-| How it is matched | Play install referrer, or a device fingerprint | the code itself |
+| How it is matched | An opaque `claim_id`, carried by Play's install referrer, an App Clip container, or the pasteboard | the code itself |
 | Stages | scan → install → signup → reward | scan → reward |
 | Example | a poster in an airport terminal | a code on every boarding pass |
 
@@ -231,7 +231,7 @@ erDiagram
 | `campaigns` | a funded run under a partnership | `mode`: `acquisition \| engagement` |
 | `qr_codes` | one printed design, or one minted transaction code | `issued_ref` (the promoter's PNR/order id — the idempotency key), `max_uses`, `uses` |
 | `scans` | **an attribution claim waiting to be matched** | `claim_id`, hashed `ip`, `consumed`, the five matching signals, plus reporting dimensions |
-| `installs` | first app open, tied back to a scan | `match_method`, `confidence`, `device_hash`, `redeemed` |
+| `installs` | first app open, tied back to a scan | `match_method` (which carrier), `confidence`, `redeemed` |
 | `redemptions` | a fee was earned | `kind`, `coins`, `identified`, `match_method`, `confidence` |
 | `ledger_entries` | **append-only double-entry book** | `(account, ref)` UNIQUE — the replay guard |
 | `account_balances` | materialised sum, locked on every money path | `CHECK balance >= 0` except `external:funding` |
@@ -269,7 +269,8 @@ graph LR
 Matching used to happen at signup, in the same call that paid the fee. On Android that was
 harmless — the referrer names the exact scan whenever it arrives. On iOS it was fatal:
 
-- A scan and a **first open** are minutes apart: same network, same timezone, same handset.
+- A scan and a **first open** are minutes apart, and the claim is only readable at that moment:
+  an App Clip's container is migrated once, and the pasteboard holds one thing at a time.
 - A scan and a **signup** are routinely a day apart: install, onboarding and registration all
   sit between them.
 
@@ -281,7 +282,6 @@ So the pipeline splits:
 | Leg | Window | Config |
 |---|---|---|
 | scan → first open, deterministic | 30 days | `REFERRER_WINDOW_DAYS` |
-| scan → first open, probabilistic | 60 minutes | `FINGERPRINT_WINDOW_MIN` |
 | first open → signup | 30 days | `SIGNUP_WINDOW_DAYS` |
 
 **No money moves until signup.** An install that never signs up earns nobody anything and
@@ -389,9 +389,9 @@ flowchart TD
     D -->|none| X7[reason=no_destination]
     D --> CLAIM["TX: atomic UPDATE<br/>uses = uses + 1<br/>WHERE not voided<br/>AND not expired<br/>AND uses &lt; max_uses"]
     CLAIM -->|0 rows| X8["reason=expired / used_up"]
-    CLAIM -->|1 row| SC["INSERT scan row<br/>claim_id, platform,<br/>hashed IP, signals"]
+    CLAIM -->|1 row| SC["INSERT scan row<br/>claim_id, platform,<br/>coarse geo from headers"]
     SC --> IOS{"iOS + App Store id<br/>and not an engagement<br/>deep link?"}
-    IOS -->|yes| INT["200 interstitial<br/>collects device signals"]
+    IOS -->|yes| INT["200 hand-off screen<br/>tap carries the claim"]
     IOS -->|no| RED["302 to destination"]
 ```
 
@@ -488,11 +488,70 @@ unattributed, which is the correct answer.
 
 ---
 
-## 9. Flow B — iOS acquisition (probabilistic)
+## 9. Flow B — iOS acquisition (two carriers, both deterministic)
 
-The App Store has no referrer channel. Nothing survives the transition, so the match is
-necessarily probabilistic — and the browser at scan time is the **only** moment this handset's
-timezone, screen geometry, locale, core count and appearance can ever be read.
+The App Store has no referrer channel: nothing can be handed *through* it. So on iOS the claim
+travels **beside** the store hop instead, carrying the identical opaque `claim_id` Android
+carries in Play's referrer.
+
+### What this replaced
+
+Until now this flow was probabilistic. The interstitial read the handset's timezone, screen
+geometry, locale, core count and appearance; the publisher's SDK re-presented the same values
+at first open; the platform scored them against stored scans behind a confidence floor.
+
+That is device fingerprinting. Apple's Developer Program License Agreement forbids deriving
+data from a device for the purpose of uniquely identifying it, and the App Store guidance names
+*"properties of a user's web browser and its configuration, the user's device and its
+configuration, the user's location, or the user's network connection"* as examples — which was
+that signal list exactly. Three things closed every escape route we considered:
+
+- **Purpose, not accuracy.** Collecting data *solely to generate a fingerprint* is named as not
+  allowed, so making the match coarser or less reliable would not have helped.
+- **Consent does not cure it.** WWDC22: *"Regardless of whether a user gives your app
+  permission to track, fingerprinting … is not allowed."*
+- **Collecting it on the web did not move it outside the rule.** The prohibition binds the
+  developer, and reaches apps that merely *reference* an SDK doing this — which put every
+  publisher integrated here inside the blast radius, not just this platform.
+
+So it was deleted rather than tuned: the scoring functions, the `scans` columns that stored
+their inputs (`ip`, `tz`, `screen`, `cores`, `dark`), `installs.device_hash`, and the browser
+code that read them. A migration strips the same values out of existing rows, and
+`attribution.test.ts` fails if any of those names returns to the module's exported surface.
+
+### Carrier 1 — App Clip (preferred: no prompt, nothing visible)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Ph as iPhone camera
+    participant Clip as App Clip
+    participant API
+    participant App as Full app
+    participant PB as Publisher backend
+
+    Ph->>Ph: recognises /c/:slug/:code offline<br/>(no request leaves the phone)
+    Ph->>Clip: launches with the URL in an NSUserActivity
+    Clip->>API: GET /c/:slug/:code?format=json
+    API-->>Clip: {claim_id, campaign_id, bonuses, store_url}
+    Clip->>Clip: write claim_id to the shared App Group container
+    Clip->>App: SKOverlay — person installs the full app
+    Note over App: the full app REPLACES the clip<br/>and reads the same container
+    App->>PB: claim_id, carrier "appclip"
+    PB->>API: POST /v1/attribution/first-open {claim_id, carrier}
+```
+
+The platform hosts one `/.well-known/apple-app-site-association` listing every registered
+publisher's clip — Apple's documentation is explicit that the array may hold more than one — and
+each publisher registers its own `/c/<slug>/` prefix in App Store Connect, which routes by
+longest prefix match. The slug is UNIQUE in the database, because two publishers sharing one
+would hand each other's scans to the wrong clip.
+
+> **ponytail: one shared domain.** If App Store Connect ever refuses two apps registering
+> different prefixes on one host, the fallback is a subdomain per publisher — the same `slug`,
+> a wildcard certificate, and the same document served per host.
+
+### Carrier 2 — pasteboard (fallback: one tap, one system prompt)
 
 ```mermaid
 sequenceDiagram
@@ -504,20 +563,23 @@ sequenceDiagram
     participant PB as Publisher backend
 
     Ph->>API: GET /r/:code
-    API-->>Ph: 200 interstitial (our origin, nonce CSP)
-    Note over Ph: reads tz, screen, locale,<br/>cores, dark appearance
-    Ph->>API: GET /go/:claim_id?tz=…&sc=…&lang=…
-    API->>API: write signals onto the unconsumed scan
+    API-->>Ph: 200 hand-off screen (our origin, nonce CSP)
+    Note over Ph: reads NOTHING about the device
+    Ph->>Ph: taps Continue → clipboard = BASE_URL/go/:claim_id
+    Ph->>API: GET /go/:claim_id?via=tap&held=…
     API-->>Ph: 302 apps.apple.com/app/id… (no payload)
     Ph->>ST: installs
-    App->>PB: same signals, from the native side
-    PB->>API: POST /v1/attribution/first-open {ip, platform, tz, screen, …}
-    API->>API: candidates by hashed IP + platform,<br/>score each, apply floor
-    API-->>PB: {attributed:true, install_id, confidence} or {false, reason}
-    PB->>API: POST /v1/attribution/claim {install_id, publisher_user_ref}
+    App->>App: detectPatterns(.probableWebURL) — no prompt<br/>then reads the URL if one is there
+    App->>PB: claim_id, carrier "pasteboard"
+    PB->>API: POST /v1/attribution/first-open {claim_id, carrier}
 ```
 
-### The interstitial
+Safari permits a clipboard write only inside a user gesture, so on iOS the tap is the carrier
+rather than decoration. `detectPatterns` is documented by Apple as matching *"without notifying
+the user"*, so an app only triggers the paste prompt when a URL is actually present — a device
+that never scanned anything never sees one.
+
+### The hand-off screen
 
 One HTML page, the only place in this API that runs script, and therefore the only route with a
 relaxed CSP — a per-render **nonce**, never `unsafe-inline`.
@@ -527,84 +589,36 @@ scanner who never reaches the store is one the publisher never hears about):
 
 | Situation | Behaviour |
 |---|---|
-| script runs | signals collected, `location.replace` after a ~900 ms hold |
-| script blocked or errors | `<meta refresh>` at 4 s — no signals, so the match falls back to IP + platform and is then *correctly refused* as too weak |
-| both fail | the Continue key is a real anchor to a real URL |
+| scanner taps Continue | clipboard written, then `location.replace` |
+| clipboard write refused | the hand-off still happens; the install is simply organic |
+| nobody taps | a 9 s bail-out sends them to the store **unattributed** — a true answer, not an error |
+| script blocked or errors | `<meta refresh>` still lands on the App Store |
+| all of it fails | the Continue key is a real anchor to a real URL |
+
+The bail-out is deliberately long, and it does **not** write the clipboard: a write outside a
+gesture is refused by Safari anyway, and writing to someone's clipboard when they never touched
+the page would be rude even if it worked.
 
 The `claim_id` shape is asserted (`/^[A-Za-z0-9_-]{6,64}$/`) before interpolation into an href
 and a script literal — it comes from `randomBytes` so it cannot carry markup, but a change to
 the generator must fail here rather than open an injection point.
 
-`GET /go/:claim_id` writes the signals and redirects. It **refuses to overwrite once an install
-has been bound** (`WHERE consumed = false`), so a replayed link cannot rewrite the evidence a
-payment decision was made on.
+`GET /go/:claim_id` records how the page was left (`held_ms`, `exit`) and redirects. It refuses
+to overwrite once an install has been bound (`WHERE consumed = false`). It is also the exact
+string the tap writes to the clipboard — one URL for both jobs, so a scanner who pastes it
+somewhere lands on the store listing they were already going to.
 
-### The confidence score
+### What the reporting layer lost
 
-An IP is not an identity. Carrier-grade NAT, café wifi, an airport and a corporate VPN all put
-thousands of unrelated handsets behind one address. So hashed IP + platform is the **filter that
-produces candidates**, never the evidence that picks one.
+`exit: 'auto'` on an iOS scan is now the shape of an unattributable install, and it is the
+number to watch: it says nobody tapped. A publisher who registered an App Clip but shows a
+column of `pasteboard` has a misconfigured association file or URL prefix.
 
-```mermaid
-graph LR
-    B["BASE 55<br/>hashed IP + platform"] --> T["+8 timezone"]
-    T --> S["+22 screen geometry"]
-    S --> L["+7 locale"]
-    L --> C["+5 CPU cores"]
-    C --> D["+3 dark appearance"]
-    D --> M["= 100 max"]
-```
-
-| Signal | Weight | Why that weight |
-|---|---|---|
-| hashed IP + platform | 55 base | narrows the field; never sufficient alone |
-| screen geometry | +22 | the only signal with real entropy — splits a country by handset model |
-| timezone | +8 | a whole country shares one |
-| locale | +7 | a whole country shares one |
-| CPU cores | +5 | splits handsets by generation where screen only splits by body size |
-| dark appearance | +3 | one bit, but often the only thing separating two candidates on a NAT |
-
-The weights sum to exactly 100 with the base, which is what makes confidence readable as a
-percentage. Adding a signal costs the existing ones a few points — deliberately, because the
-alternative is a scale that no longer tops out at 100, or a cap that turns every good match into
-a 100 and hands the tiebreaker ties it then has to refuse.
-
-`MIN_CONFIDENCE` defaults to **70**, so a bare IP + platform match scores 55 and is **refused**.
-
-```mermaid
-flowchart TD
-    C["candidates from<br/>hashed IP + platform + window"] --> E{any?}
-    E -->|no| NM["no_match"]
-    E -->|yes| SC["score each, sort desc"]
-    SC --> TIE{"top two equal?"}
-    TIE -->|yes| AM["ambiguous — refuse"]
-    TIE -->|no| FL{"best >= MIN_CONFIDENCE?"}
-    FL -->|no| LC["low_confidence — refuse"]
-    FL -->|yes| OK["match, confidence stored"]
-```
-
-Both refusals are **answers, not errors**:
-
-- `low_confidence` — the network said "maybe" and no signal from the handset agreed.
-- `ambiguous` — two scans fit the evidence equally well. Newest-first would break the tie, and
-  that is exactly the temptation being refused: picking one invents a fact and pays one
-  publisher for another's scan.
-
-`decide()` is a **pure function**, so the rule that decides who gets paid can be read and tested
-without a database.
-
-### Why these five signals and no more
-
-Screen geometry is comparable across the browser/native boundary because both sides report the
-same numbers — CSS pixels in Safari, points in `UIScreen.bounds` — normalised to
-`{short}x{long}@{dpr}` so a phone held sideways at scan time still matches itself upright at
-first open. Anything finer (UA string, browser version, fonts, canvas) does **not** survive that
-crossing, and would drag real matches below the accept line rather than help.
-
-This is also why `attribution.ts` and `signals.ts` are separate files. `signals.ts` collects
-country, city, browser, in-app webview, device type — rich reporting dimensions that can change
-shape freely. `attribution.ts` holds only what must stay byte-identical across the crossing.
-Mixing them is how a reporting field ends up scored.
+The `screen`, `tz`, `theme` and `network` analytics dimensions are gone, along with `devices`
+and `repeat_scans` — all four dimensions were by-products of the fingerprint, and the two
+totals were `count(DISTINCT hashed_ip)`. The timezone-based geo inference in the admin scan
+table went with them; edge geo and the `Accept-Language` region remain. A coarser answer,
+honestly obtained.
 
 ### Fraud checks at first open
 
@@ -612,16 +626,18 @@ Mixing them is how a reporting field ends up scored.
 |---|---|---|
 | claim already consumed | refuse `already_claimed` | one install per scan, DB-enforced |
 | one install, two signups | refuse `already_claimed` | atomic test-and-set on `redeemed` |
-| same handset, same campaign | refuse `duplicate_device` | **fingerprint path only**, `DEVICE_DEDUPE_DAYS` = 7 |
+| same handset, same campaign | **no longer checked** | it hashed the fingerprint signals; one install per scan is still guaranteed by `scans.consumed` |
 | emulator (SDK-asserted) | refuse `device_integrity` before any lookup | the shape of every install farm |
 | rooted / jailbroken | **recorded, not refused** | large honest population |
-| VPN | **recorded, not refused** | it breaks the IP match anyway — recording it explains a `no_match` |
+| VPN | **recorded, not refused** | no longer a fraud signal at all — nothing about the network is compared |
 | campaign ended/paused | refused at both stages | ending a campaign must stop spend immediately |
 | budget exhausted | refused at first open too | so a scan is not burned against a budget that cannot pay |
 
-The repeat-device check runs **only on the fingerprint path**. A referrer match already names
-one specific scan, so two family members scanning the same poster on the same wifi are two
-legitimate claim ids that must not be collapsed into one "device".
+The repeat-device check is gone with the signals it hashed. Nothing sound was lost: it could
+only ever see the probabilistic path, and it worked on a device *shape* — two identical handsets
+on one NAT collided, which is why it refused an install rather than banning anything. The
+guarantee that actually bounds a print run, one install per scan, is enforced by
+`scans.consumed` on a claim id that is unique per scan by construction.
 
 Risk flags are stored on **accepted** installs too — the fraud pattern worth finding is the one
 that got paid.
@@ -1049,9 +1065,13 @@ kills `javascript:` / `data:` redirect XSS and stops a scan being downgraded to 
 `android_package` and `ios_app_id` are pattern-checked in the API **and** by CHECK constraints,
 because they are interpolated into the store URL a scan redirects to.
 
-Device signals from another company's server are bounded, not trusted: `cores` must be 1–512,
-`screen` must match a strict shape, and a nonsense value lands as NULL rather than as its own
-matching bucket.
+`slug` and `ios_appclip_id` are pattern-checked in the API **and** by CHECK constraints for a
+sharper reason: `ios_appclip_id` is served to every iPhone that scans anything, in one shared
+association document, so a single malformed entry would invalidate the file and silently break
+App Clip invocation for every publisher at once.
+
+What a publisher's server sends at first open is now one field — the claim id — and its shape is
+asserted before it reaches the database. There are no device signals left to bound.
 
 ### Response headers
 
@@ -1095,8 +1115,8 @@ money" must not be one unauthenticated flow. Promoters gate themselves with thei
 | Replayed claim id | `scans.consumed` + `installs.scan_id` UNIQUE | none |
 | One install, two signups | test-and-set on `installs.redeemed` | none |
 | Same user claimed twice | `UNIQUE (campaign_id, publisher_user_ref)` partial index | a returning user with a fresh ref — mitigated by the publisher's `is_new_user: false` assertion |
-| Install farm | emulator refusal, `device_hash` dedupe, confidence floor | `device_hash` is a device *shape*: two identical handsets on one NAT collide, which is why it refuses an install rather than banning anything, and why it can be disabled |
-| Mis-attribution on shared NAT | 55-point base, 70 floor, tie refusal, 60-min window | real; the honest answer is `no_match` far more often than a competitor would admit |
+| Install farm | emulator refusal; one install per scan; a claim id that must have been carried from a real scan | real, and narrower than it was: a farm that can scan a poster and carry the claim is indistinguishable from a customer. Bounded by `max_uses` and budget |
+| Mis-attribution on shared NAT | **eliminated** — nothing is matched on the network any more | none; the cost was moved to coverage instead, as unattributed installs |
 | Publisher lies about `identified` | two-tier payout + settlement window | accepted — bounded by clawback |
 | Promoter self-scans its own campaign | it spends its own funded budget | accepted; it costs the promoter money |
 | Collusion promoter↔publisher | audit log, admin overview, 14-day settlement hold | accepted — bounded by "review before money leaves" |
@@ -1107,19 +1127,32 @@ money" must not be one unauthenticated flow. Promoters gate themselves with thei
 
 ---
 
-## 15. Compliance: why the QR unlocks nothing
+## 15. Compliance: why the QR unlocks nothing, and why nobody is fingerprinted
 
-Three separations, each enforced by code rather than by policy language:
+Four separations, each enforced by code rather than by policy language:
 
 ```mermaid
 graph TB
-    A["1. The QR is a measurement artifact, not a key<br/>a scan resolves to a store listing or the publisher's app link.<br/>What travels is an opaque lookup key, inert without the<br/>publisher's server-side API key. On iOS acquisition: nothing travels."]
+    A["1. The QR is a measurement artifact, not a key<br/>a scan resolves to a store listing, an App Clip or the publisher's app link.<br/>What travels is an opaque lookup key, inert without the<br/>publisher's server-side API key."]
     B["2. What moves between companies is a marketing fee<br/>platform credits, promoter → publisher.<br/>Nothing is credited to an end user, by anyone, anywhere."]
     C["3. The joining bonus is the publisher's own<br/>/claim answers 'is this attributable?' — no amount,<br/>no instruction to grant. bonuses is a list the<br/>publisher writes about itself."]
 ```
 
-The e2e suite asserts this structurally: an acquisition scan redirect containing anything that
-looks like a spendable token fails the build.
+```mermaid
+graph TB
+    D["4. Nothing is derived from the device<br/>every match is an opaque claim id the platform minted,<br/>carried by Play's referrer, an App Clip container or the pasteboard.<br/>No timezone, screen, locale, core count or network is read, stored or compared."]
+```
+
+The e2e suite asserts all of this structurally. An acquisition scan redirect containing
+anything that looks like a spendable token fails the build; so does a hand-off screen whose
+source mentions `hardwareConcurrency`, `deviceMemory`, `devicePixelRatio`, `resolvedOptions`,
+`maxTouchPoints` or `colorDepth`. The App Clip's JSON response is checked against an
+allow-list of keys rather than a blocklist, because it is the one response in the system that
+hands a claim id to a device.
+
+`attribution.test.ts` additionally asserts that `score`, `decide`, `WEIGHTS`, `BASE` and the
+`norm*` signal parsers have not returned to the module's exported surface — the fingerprinting
+path is not just deleted, its names are load-bearing absences.
 
 ### Where the argument gets thinner — say this out loud
 
@@ -1267,10 +1300,7 @@ Everything sits under the 300/min per-IP ceiling; `/healthz` and `/metrics` are 
 | `reason` | Means | What the publisher should do |
 |---|---|---|
 | `no_match` | organic install, or the window expired — the common case | nothing; continue signup |
-| `low_confidence` | signals scored below the floor | nothing |
-| `ambiguous` | two scans fit equally well; refused rather than guessed | nothing |
 | `already_claimed` | that scan, install or code was already matched | nothing |
-| `duplicate_device` | same device shape, same campaign, inside the dedupe window | nothing |
 | `device_integrity` | SDK asserted an emulator | nothing |
 | `campaign_not_active` | paused or ended after the scan | nothing |
 | `budget_exhausted` | the promoter's budget ran out | nothing; we fail closed |
@@ -1294,10 +1324,7 @@ happened regardless of who gets paid for it.
 | `TRUST_PROXY` | `loopback` | which hops may set `X-Forwarded-For`; `true` is refused |
 | `JWT_SECRET` | dev default | session signing; the dev value is refused in prod |
 | `REFERRER_WINDOW_DAYS` | 30 | scan → first open, deterministic |
-| `FINGERPRINT_WINDOW_MIN` | 60 | scan → first open, probabilistic |
 | `SIGNUP_WINDOW_DAYS` | 30 | first open → signup |
-| `MIN_CONFIDENCE` | 70 | accept line; no honest value below 60 |
-| `DEVICE_DEDUPE_DAYS` | 7 | repeat-device lookback; 0 disables |
 | `PLATFORM_FEE_BPS` | 1000 (10%) | take rate, **snapshotted per partnership at creation** |
 | `SETTLEMENT_DELAY_DAYS` | 14 | the clawback window before earnings are withdrawable |
 | `PAYMENT_WEBHOOK_SECRET` | unset | unset ⇒ money-in is off (404) |
@@ -1322,8 +1349,8 @@ the revenue model, and it is snapshotted so a config change never reprices an ag
 3. Four stages, four tables — because a scan→open gap is minutes and an open→signup gap is days.
 4. Deterministic first, and **never** fall back from it: a failed exact lookup must not become a
    guess.
-5. Hashed IP + platform is a *filter*, worth 55 out of a floor of 70.
-6. A tie is refused, not resolved by recency — picking one invents a fact.
+5. Every match is deterministic; there is nothing to fall back *to*, and that absence is the design.
+6. A platform rule written on *purpose* is not satisfied by moving where the collection happens.
 7. Unattributed is a 200; most installs are organic and "we don't know" is the honest answer.
 8. The invariants live in the database — partial unique indexes, CHECKs, an append-only trigger —
    so they hold under concurrency rather than under code review.
@@ -1339,9 +1366,10 @@ the revenue model, and it is snapshotted so a config change never reprices an ag
    (Hint: §13 pattern 5.)
 3. **Reason about a race.** Two `POST /claim` calls for the same `install_id` arrive
    simultaneously. Which line decides the winner, and what does the loser see?
-4. **Weigh a signal.** You want to add "battery level" to the fingerprint. Why must it be
-   rejected? (Does it survive the browser→native crossing, and does it cost the existing weights
-   points for nothing?)
+4. **Reject a signal.** A publisher asks you to match iOS installs on battery level and
+   accelerometer noise "since it's just a fallback, and we'll ask for consent". Give the two
+   sentences from Apple's guidance that settle it, and say why collecting it on the web instead
+   of in the app would not have helped. (§9)
 5. **Find the compliance edge.** Which single line of the e2e suite had to be scoped when
    engagement mode shipped, and what did that scoping concede?
 6. **Operate it.** `attribution_decisions_total{reason="no_match"}` jumps to 100% for one

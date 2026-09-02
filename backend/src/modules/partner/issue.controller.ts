@@ -23,6 +23,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BASE_URL } from '../../config';
+import { scanUrl } from '../../common/attribution';
 import { str } from '../../common/security';
 import { prisma } from '../../database/prisma';
 import { newShortCode } from '../auth/tokens';
@@ -72,10 +73,15 @@ export class IssueController {
         status: 'active',
         partnership: { promoter_org_id: promoter.id, status: 'active' },
       },
-      select: { id: true },
+      select: {
+        id: true,
+        // The publisher's App Clip slug decides the shape of the URL this code is printed as.
+        partnership: { select: { publisher: { select: { slug: true } } } },
+      },
     });
     if (!campaign)
       throw new NotFoundException('no active engagement campaign with that id');
+    const slug = campaign.partnership.publisher.slug;
 
     // `max_uses: 1` is the whole single-use guarantee, and it is claimed by the same atomic
     // conditional UPDATE every printed code already goes through at `/r/:code`. Nothing new
@@ -91,7 +97,7 @@ export class IssueController {
         },
         select: { id: true, code: true, expires_at: true },
       });
-      return { ...qr, issued_ref, scan_url: `${BASE_URL}/r/${qr.code}`, replay: false };
+      return { ...qr, issued_ref, scan_url: scanUrl(BASE_URL, qr.code, slug), replay: false };
     } catch (e: any) {
       if (e.code !== 'P2002') throw e;
       // Same campaign, same transaction reference: the first call already minted it. Returning
@@ -101,7 +107,7 @@ export class IssueController {
         where: { campaign_id, issued_ref },
         select: { id: true, code: true, expires_at: true },
       });
-      return { ...prior, issued_ref, scan_url: `${BASE_URL}/r/${prior.code}`, replay: true };
+      return { ...prior, issued_ref, scan_url: scanUrl(BASE_URL, prior.code, slug), replay: true };
     }
   }
 
@@ -171,6 +177,9 @@ export class IssueController {
         expires_at: true,
         voided: true,
         uses: true,
+        campaign: {
+          select: { partnership: { select: { publisher: { select: { slug: true } } } } },
+        },
         // At most one: `UNIQUE (qr_code_id) WHERE kind = 'engagement'`, and acquisition rows
         // carry a NULL `qr_code_id`, so nothing else can appear here.
         redemptions: { select: { id: true }, take: 1 },
@@ -178,11 +187,11 @@ export class IssueController {
     });
     // Same 404 as `issue` gives for another tenant's campaign, for the same reason.
     if (!qr) throw new NotFoundException('no code issued against that reference');
-    const { redemptions, ...rest } = qr;
+    const { redemptions, campaign, ...rest } = qr;
     return {
       ...rest,
       issued_ref,
-      scan_url: `${BASE_URL}/r/${qr.code}`,
+      scan_url: scanUrl(BASE_URL, qr.code, campaign.partnership.publisher.slug),
       /** the code was scanned and the purchase reward has been paid — voiding cannot undo it */
       redeemed: redemptions.length > 0,
     };

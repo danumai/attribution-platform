@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BASE_URL } from '../../config';
+import { scanUrl } from '../../common/attribution';
 import {
   validateAndroidPackage,
   validateBonuses,
@@ -634,7 +635,6 @@ export class AdminController {
       select: {
         id: true,
         scanned_at: true,
-        ip: true,
         user_agent: true,
         platform: true,
         country: true,
@@ -644,13 +644,9 @@ export class AdminController {
         os: true,
         browser: true,
         device_type: true,
-        // What the hand-off screen measured. `tz`/`screen`/`cores`/`dark` are the evidence an
-        // iOS install is matched on, so support reading a disputed attribution needs to see
-        // exactly what the scan side of that comparison held.
-        tz: true,
-        screen: true,
-        cores: true,
-        dark: true,
+        // How the hand-off screen behaved: how long it was held, and whether the scanner
+        // tapped through or the bail-out fired. `exit: 'auto'` on an iOS scan is the shape of
+        // an install that could never be attributed — nobody tapped, so nothing was carried.
         client: true,
         consumed: true,
         qr_code: { select: { code: true } },
@@ -673,7 +669,6 @@ export class AdminController {
     return rows.map((s) => ({
       id: s.id,
       scanned_at: s.scanned_at,
-      ip_hash: s.ip,
       user_agent: s.user_agent,
       platform: s.platform,
       country: s.country,
@@ -683,10 +678,6 @@ export class AdminController {
       os: s.os,
       browser: s.browser,
       device_type: s.device_type,
-      tz: s.tz,
-      screen: s.screen,
-      cores: s.cores,
-      dark: s.dark,
       client: s.client,
       consumed: s.consumed,
       qr_code: s.qr_code.code,
@@ -700,7 +691,8 @@ export class AdminController {
       coins: s.redemptions.length
         ? s.redemptions.reduce((n, r) => n + r.coins, 0)
         : null,
-      // fingerprint matches are the probabilistic ones — the set worth sampling for fraud
+      // which carrier brought the claim back: referrer | appclip | pasteboard | code. A
+      // publisher whose App Clip is misconfigured shows up here as a column of `pasteboard`.
       match_method: s.redemptions.map((r) => r.match_method).join('+') || null,
       kind: s.redemptions.map((r) => r.kind).join('+') || null,
     }));
@@ -742,7 +734,13 @@ export class AdminController {
         max_uses: true,
         uses: true,
         voided: true,
-        campaign: { select: { id: true, name: true } },
+        campaign: {
+          select: {
+            id: true,
+            name: true,
+            partnership: { select: { publisher: { select: { slug: true } } } },
+          },
+        },
         _count: { select: { scans: true } },
       },
       orderBy: { created_at: 'desc' },
@@ -752,7 +750,7 @@ export class AdminController {
       campaign_id: campaign.id,
       campaign_name: campaign.name,
       scans: _count.scans,
-      scan_url: `${BASE_URL}/r/${q.code}`,
+      scan_url: scanUrl(BASE_URL, q.code, campaign.partnership.publisher.slug),
     }));
   }
 

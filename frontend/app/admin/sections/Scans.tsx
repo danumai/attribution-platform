@@ -4,7 +4,7 @@ import { ago, num, when } from '@/lib/fmt';
 import { cx, muted } from '@/lib/tw';
 import { Table } from '../Table';
 import { place } from '@/lib/place';
-import { device, handset } from '../cells';
+import { device, handoff } from '../cells';
 import type { SectionProps } from '../types';
 
 type Props = Pick<SectionProps, 'd' | 'loading'> & { campaignPicker: ReactNode };
@@ -55,25 +55,27 @@ export function Scans({ d, loading, campaignPicker }: Props) {
           { h: 'OS', sort: (x) => x.os ?? '', get: (x) => x.os ?? '—' },
           { h: 'Browser', sort: (x) => x.browser ?? '', get: (x) => x.browser ?? '—' },
           { h: 'Lang', sort: (x) => x.language ?? '', get: (x) => x.language ?? '—' },
-          // The signals an iOS match is scored on. Hover carries the rest of them.
+          // Whether the scanner tapped through the hand-off screen. On an iPhone with no App
+          // Clip that tap IS the attribution — it is what writes the claim to the clipboard —
+          // so a column of `auto` here is the honest explanation of a low iOS match rate.
           {
-            h: 'Handset',
-            sort: (x) => x.screen ?? '',
-            get: (x) =>
-              x.screen ? (
-                <code title={handset(x)}>{x.screen}</code>
-              ) : (
-                <span className={muted} title={handset(x)}>
-                  —
+            h: 'Hand-off',
+            sort: (x) => String(x.client?.exit ?? ''),
+            get: (x) => {
+              const exit = x.client?.exit;
+              if (!exit) return <span className={muted} title={handoff(x)}>—</span>;
+              return (
+                <span className={cx(exit === 'auto' && muted)} title={handoff(x)}>
+                  {exit === 'tap' ? 'tapped' : 'timed out'}
                 </span>
-              ),
+              );
+            },
           },
           {
             h: 'From',
             sort: (x) => x.referer_host ?? '',
             get: (x) => x.referer_host ?? <span className={muted}>camera</span>,
           },
-          { h: 'IP hash', sort: (x) => x.ip_hash ?? '', get: (x) => <code>{x.ip_hash ?? '—'}</code> },
           {
             h: 'User',
             sort: (x) => userByScan.get(x.id)?.publisher_user_ref ?? '',

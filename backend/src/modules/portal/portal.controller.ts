@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   ForbiddenException,
   Get,
@@ -15,10 +16,15 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ALLOW_SELF_FUNDING, BASE_URL, PLATFORM_FEE_BPS } from '../../config';
 import {
   allBonuses,
-  bonusesFor,
+  campaignBonuses,
+  scanUrl,
   validateAndroidPackage,
+  validateAppClipId,
   validateBonuses,
+  validateBonusTypes,
   validateIosAppId,
+  validateProviderToken,
+  validateSlug,
 } from '../../common/attribution';
 import { QrStyle, validateStyle } from '../../common/qr';
 import { capped } from '../../common/paging';
@@ -265,7 +271,7 @@ export class PortalController {
   @Post('campaigns')
   async createCampaign(
     @Session() s: SessionClaims,
-    @Body() b: { partnership_id: string; name: string; mode?: string },
+    @Body() b: { partnership_id: string; name: string; mode?: string; bonus_types?: unknown },
   ) {
     const name = str(b.name, 'name', 120)!;
     const mode = b.mode ?? 'acquisition';
@@ -273,15 +279,23 @@ export class PortalController {
       throw new BadRequestException('mode must be acquisition|engagement');
     const partnership = await prisma.partnership.findFirst({
       where: { id: b.partnership_id, promoter_org_id: s.org_id, status: 'active' },
-      select: { id: true },
+      select: { id: true, publisher: { select: { bonuses: true } } },
     });
     if (!partnership) throw new BadRequestException('no active partnership with that id');
+    // Which of the publisher's own offers this campaign advertises. Checked against what that
+    // publisher grants for this mode, so a campaign cannot be created promising something
+    // nobody fulfils — the artwork is printed off this.
+    const bonus_types = validateBonusTypes(
+      b.bonus_types,
+      campaignBonuses(partnership.publisher.bonuses, mode),
+    );
     const created = await prisma.campaign.create({
-      data: { partnership_id: b.partnership_id, name, mode },
+      data: { partnership_id: b.partnership_id, name, mode, bonus_types },
     });
     await audit(s.org_id, 'campaign.create', `campaign:${created.id}`, {
       name,
       mode,
+      bonus_types,
       partnership_id: b.partnership_id,
     });
     return created;
@@ -302,7 +316,7 @@ export class PortalController {
             coin_rate: true,
             engagement_rate: true,
             promoter: { select: { name: true } },
-            publisher: { select: { name: true } },
+            publisher: { select: { name: true, bonuses: true } },
           },
         },
       },
@@ -315,6 +329,10 @@ export class PortalController {
       engagement_rate: partnership.engagement_rate,
       promoter_name: partnership.promoter.name,
       publisher_name: partnership.publisher.name,
+      // What this campaign promises: the offers it picked, resolved against the publisher's
+      // list as it stands today. Both sides read the same line — the promoter to know what the
+      // artwork may say, the publisher to see what its own campaigns are advertising.
+      publisher_bonuses: campaignBonuses(partnership.publisher.bonuses, c.mode, c.bonus_types),
       budget: budgets.get(`campaign:${c.id}`) ?? 0,
     }));
   }
@@ -392,13 +410,21 @@ export class PortalController {
   async patchCampaign(
     @Session() s: SessionClaims,
     @Param('id') id: string,
-    @Body() b: { name?: string; status?: string },
+    @Body() b: { name?: string; status?: string; bonus_types?: unknown },
   ) {
-    await this.promoterCampaign(s.org_id, id);
+    const c = await this.promoterCampaign(s.org_id, id);
     // Absent = leave unchanged, same shape as `PATCH orgs/me`, so a rename does not have to
     // restate the status (and quietly reactivate an ended campaign) to change the name.
-    const data: { name?: string; status?: string } = {};
+    const data: { name?: string; status?: string; bonus_types?: string[] } = {};
     if ('name' in b) data.name = str(b.name, 'name', 120)!;
+    // The reward is repickable, unlike `mode`: nothing was paid at these slugs and the
+    // publisher may add or withdraw an offer any day. What it cannot do is reprint a poster,
+    // so it is a deliberate change here rather than something that drifts on its own.
+    if ('bonus_types' in b)
+      data.bonus_types = validateBonusTypes(
+        b.bonus_types,
+        campaignBonuses(c.partnership.publisher.bonuses, c.mode),
+      );
     if ('status' in b) {
       if (!['active', 'paused', 'ended'].includes(b.status!))
         throw new BadRequestException('status must be active|paused|ended');
@@ -431,12 +457,10 @@ export class PortalController {
       redemptions: reds._count,
       coins_granted: reds._sum.coins ?? 0,
       budget_remaining,
-      // Scoped to this campaign's mode, because that is what the artwork can honestly promise:
-      // a poster on an engagement campaign must not advertise the signup offer.
-      publisher_bonuses: bonusesFor(
-        c.partnership.publisher.bonuses,
-        c.mode === 'engagement' ? 'engagement' : 'acquisition',
-      ),
+      // What this campaign advertises: the offers the promoter picked out of what the
+      // publisher grants for this mode. A poster on an engagement campaign cannot promise the
+      // signup offer, and one selling coins does not also promise the free month.
+      publisher_bonuses: campaignBonuses(c.partnership.publisher.bonuses, c.mode, c.bonus_types),
     };
   }
 
@@ -486,7 +510,7 @@ export class PortalController {
         max_uses: b.max_uses ?? null,
       },
     });
-    return { ...qr, scan_url: `${BASE_URL}/r/${qr.code}` };
+    return { ...qr, scan_url: scanUrl(BASE_URL, qr.code, await this.publisherSlug(id)) };
   }
 
   // Promoters can kill their own code (lost/stolen print run) but cannot extend its life —
@@ -531,7 +555,24 @@ export class PortalController {
       orderBy: { created_at: 'desc' },
       take: capped(limit),
     });
-    return rows.map((q) => ({ ...q, scan_url: `${BASE_URL}/r/${q.code}` }));
+    // One lookup for the whole page rather than one per code: every QR on a campaign points at
+    // the same publisher, so the slug is a property of the campaign as far as this list cares.
+    const slug = await this.publisherSlug(id);
+    return rows.map((q) => ({ ...q, scan_url: scanUrl(BASE_URL, q.code, slug) }));
+  }
+
+  /**
+   * The publisher's App Clip slug for a campaign, or NULL when it has not registered one.
+   *
+   * Its own query because the QR code row knows nothing about the publisher — the join is
+   * campaign → partnership → publisher, three tables away from the thing being listed.
+   */
+  private async publisherSlug(campaignId: string): Promise<string | null> {
+    const c = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { partnership: { select: { publisher: { select: { slug: true } } } } },
+    });
+    return c?.partnership.publisher.slug ?? null;
   }
 
   // ---------- publisher settings ----------
@@ -567,6 +608,9 @@ export class PortalController {
         landing_url: true,
         android_package: true,
         ios_app_id: true,
+        ios_appclip_id: true,
+        ios_provider_token: true,
+        slug: true,
         deeplink_url: true,
         bonuses: true,
         suspended: true,
@@ -592,8 +636,14 @@ export class PortalController {
    * an explicit `""` or `null` clears the field — and for `bonuses`, an explicit `[]`, since the
    * list is replaced wholesale rather than merged.
    *
-   * Publishers only: these are the five fields the scan redirect reads off the *publisher*
-   * side of a partnership. A promoter setting them wrote columns that nothing ever reads.
+   * Publishers only: these are the fields the scan redirect reads off the *publisher* side of
+   * a partnership. A promoter setting them wrote columns that nothing ever reads.
+   *
+   * The three iOS fields are what turns on the App Clip carrier. `slug` and `ios_appclip_id`
+   * go together — a slug with no clip id registers a URL prefix nothing answers to, and a clip
+   * id with no slug has no prefix to be invoked at — so they are checked as a pair rather than
+   * left to fail silently at scan time, where the symptom is an attribution rate of zero and
+   * no error anywhere.
    */
   @Patch('orgs/me')
   async patchOrg(
@@ -603,6 +653,12 @@ export class PortalController {
       landing_url?: string;
       android_package?: string;
       ios_app_id?: string;
+      /** `TEAMID.bundle.id.Clip` — set it and this publisher's QR codes become App Clip URLs */
+      ios_appclip_id?: string;
+      /** the path segment of that App Clip URL, and the prefix registered in App Store Connect */
+      slug?: string;
+      /** App Store Connect provider token, for the aggregate campaign-link cross-check */
+      ios_provider_token?: string;
       /** an https origin claimed as an Android App Link / iOS Universal Link */
       deeplink_url?: string;
       /** the publisher's own offers, replaced wholesale — see `validateBonuses` */
@@ -614,29 +670,59 @@ export class PortalController {
       landing_url: validateLandingUrl(b.landing_url),
       android_package: validateAndroidPackage(b.android_package),
       ios_app_id: validateIosAppId(b.ios_app_id),
+      ios_appclip_id: validateAppClipId(b.ios_appclip_id),
+      slug: validateSlug(b.slug),
+      ios_provider_token: validateProviderToken(b.ios_provider_token),
       deeplink_url: validateDeeplinkUrl(b.deeplink_url),
       bonuses: validateBonuses(b.bonuses),
     };
+
+    // The pair check. Read against what the org will hold *after* this patch, not against the
+    // body alone, so setting one field today and the other tomorrow works — and so clearing
+    // one of them is refused for the same reason setting one alone is.
+    const current = await prisma.org.findUniqueOrThrow({
+      where: { id: s.org_id },
+      select: { slug: true, ios_appclip_id: true },
+    });
+    const after = {
+      slug: 'slug' in b ? fields.slug : current.slug,
+      ios_appclip_id: 'ios_appclip_id' in b ? fields.ios_appclip_id : current.ios_appclip_id,
+    };
+    if (Boolean(after.slug) !== Boolean(after.ios_appclip_id))
+      throw new BadRequestException(
+        'slug and ios_appclip_id must be set together — one without the other registers an App Clip URL that nothing answers to',
+      );
     // Filter on whether the key was *sent*, not on the validated value: every validator
     // returns null for a cleared field too, so filtering on the value made clearing impossible.
     const data = Object.fromEntries(Object.entries(fields).filter(([k]) => k in b));
     // Where every scan on this publisher's codes lands. A promoter's whole print run follows
-    // this field, so the platform is answerable for a change to it even though it is the
-    // publisher's own to make.
-    const updated = await prisma.org.update({
-      where: { id: s.org_id },
-      data,
-      select: {
-        id: true,
-        name: true,
-        type: true,
-        landing_url: true,
-        android_package: true,
-        ios_app_id: true,
-        deeplink_url: true,
-        bonuses: true,
-      },
-    });
+    // these fields, so the platform is answerable for a change to them even though they are the
+    // publisher's own to make — and `slug` in particular is baked into printed QR codes, so
+    // changing it after a run is printed silently orphans every code already in the world.
+    const updated = await prisma.org
+      .update({
+        where: { id: s.org_id },
+        data,
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          landing_url: true,
+          android_package: true,
+          ios_app_id: true,
+          ios_appclip_id: true,
+          ios_provider_token: true,
+          slug: true,
+          deeplink_url: true,
+          bonuses: true,
+        },
+      })
+      .catch((e: { code?: string }) => {
+        // UNIQUE on `slug`. A 409 rather than a 500: it is a name someone else took, which is
+        // the publisher's to resolve by picking another.
+        if (e.code === 'P2002') throw new ConflictException('that slug is already taken');
+        throw e;
+      });
     // After the write, like every other notification here: an entry for a change that was
     // rejected is an inbox item about something that never happened.
     await audit(s.org_id, 'org.patch', `org:${s.org_id}`, data);

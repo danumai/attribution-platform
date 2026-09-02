@@ -14,7 +14,29 @@ const DESTINATIONS = [
   ['landing_url', 'Web fallback (desktop scans, and platforms with no app registered)', 'https://example.com/get-the-app'],
 ] as const;
 
-const EMPTY = { landing_url: '', android_package: '', ios_app_id: '', deeplink_url: '' };
+/**
+ * The App Clip carrier, and why it is a separate block from the destinations above.
+ *
+ * These three do not change *where* a scan goes — they change how the claim gets across the
+ * install on iPhone. Without them an iPhone scan is carried by the clipboard, which needs the
+ * scanner to tap Continue; with them iOS offers the App Clip straight from the camera and
+ * nothing is asked of anyone.
+ */
+const APPCLIP = [
+  ['slug', 'Your URL prefix', 'dramabox'],
+  ['ios_appclip_id', 'App Clip app id', 'ABCDE12345.com.example.app.Clip'],
+  ['ios_provider_token', 'App Store Connect provider token (optional)', '123456'],
+] as const;
+
+const EMPTY = {
+  landing_url: '',
+  android_package: '',
+  ios_app_id: '',
+  deeplink_url: '',
+  slug: '',
+  ios_appclip_id: '',
+  ios_provider_token: '',
+};
 
 /**
  * One row of the offers editor. Every field is a string here even where the API takes a number:
@@ -45,6 +67,9 @@ export function Settings({ d, busy, act }: Pick<SectionProps, 'd' | 'busy' | 'ac
       android_package: profile.android_package ?? '',
       ios_app_id: profile.ios_app_id ?? '',
       deeplink_url: profile.deeplink_url ?? '',
+      slug: profile.slug ?? '',
+      ios_appclip_id: profile.ios_appclip_id ?? '',
+      ios_provider_token: profile.ios_provider_token ?? '',
     });
     setRows(
       (profile.bonuses ?? []).map((b) => ({
@@ -94,6 +119,36 @@ export function Settings({ d, busy, act }: Pick<SectionProps, 'd' | 'busy' | 'ac
           An https URL you have registered as an Android App Link / iOS Universal Link. Scans on
           a repeat-purchase campaign are sent here, so the phone opens your app when it is
           installed and falls back to the store when it is not — the OS decides, not us.
+        </p>
+      </div>
+
+      <h2 className={cx(sectionHead, 'mt-8')}>App Clip (iPhone)</h2>
+      <div className={cx(card, 'mt-3')}>
+        <p className={muted}>
+          Optional, and worth doing. Android carries attribution across an install by itself;
+          iPhone has no equivalent, so by default we ask the scanner to tap Continue on the
+          hand-off screen and carry the reference on the clipboard. Register an App Clip and
+          iOS does it silently instead — the camera offers your clip straight from the poster,
+          and your full app picks the reference up from a shared container after install.
+        </p>
+        {APPCLIP.map(([name, text, placeholder]) => (
+          <div key={name}>
+            <label className={label}>{text}</label>
+            <input className={field} value={dest[name]} placeholder={placeholder} onChange={on(name)} />
+          </div>
+        ))}
+        <p className={muted}>
+          Set the first two together — either both or neither. Your QR codes then encode{' '}
+          <span className={codeChip}>/c/{dest.slug || 'your-prefix'}/&lt;code&gt;</span>, which is
+          the URL prefix you register in App Store Connect, and{' '}
+          <span className={codeChip}>appclips:</span> your associated domain must name this
+          site. The provider token is separate and optional: it adds an App&nbsp;Store campaign
+          link so Apple reports a download count you can reconcile against — no per-user data,
+          and it never affects who gets paid.
+        </p>
+        <p className={muted}>
+          Changing your prefix after codes are printed orphans every one already in the world.
+          Pick it once.
         </p>
 
         <label className={label}>What you give the user</label>

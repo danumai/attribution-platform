@@ -25,7 +25,12 @@ const int = (name: string, fallback: number, min: number, max: number) => {
 const flag = (name: string, prodDefault: boolean) =>
   process.env[name] === undefined ? (PROD ? prodDefault : true) : process.env[name] === 'true';
 
-/** Public origin of this API — encoded into every QR code as `${BASE_URL}/r/{code}`. */
+/**
+ * Public origin of this API — encoded into every QR code as `${BASE_URL}/r/{code}`, or
+ * `${BASE_URL}/c/{slug}/{code}` for a publisher with an App Clip. It is also the domain whose
+ * `.well-known/apple-app-site-association` those clips are verified against, so changing it
+ * invalidates every printed code AND every App Clip association at once.
+ */
 export const BASE_URL = required('BASE_URL', 'http://localhost:4000').replace(/\/+$/, '');
 
 /** Browser origins allowed by CORS. First entry is the canonical one used for redirects. */
@@ -49,52 +54,30 @@ export const DATABASE_URL = required(
 );
 
 /**
- * How long a scan stays claimable, per match path.
+ * How long a scan stays claimable.
  *
- * The referrer path is deterministic — Play hands the app the exact claim id — so it affords a
- * window as long as a real install-then-open gap. Play retains the referrer ~90 days.
- *
- * The fingerprint path matches on hashed IP + platform, and behind one carrier NAT those
- * collide fast. This window is the main control on how often it mis-attributes, so it is short
- * and tunable per deployment.
+ * One window, because there is now one match path. Every carrier — Play's install referrer, an
+ * App Clip's shared container, the pasteboard — hands back the exact claim id, so a match is
+ * as sound on day 30 as in the first minute and the window is bounded by how long a real
+ * install-then-open gap can be rather than by how fast a guess goes stale. Play retains the
+ * referrer ~90 days.
  */
 export const REFERRER_WINDOW_DAYS = int('REFERRER_WINDOW_DAYS', 30, 1, 90);
-export const FINGERPRINT_WINDOW_MIN = int('FINGERPRINT_WINDOW_MIN', 60, 1, 1440);
 
 /**
  * How long a matched install stays convertible into a paid signup.
  *
- * Both windows above are measured scan → *first open*, not scan → signup, and that split is
- * why `installs` exists: an install lands minutes after a scan, a signup can land days later,
- * and one window covering both is what made the fingerprint path useless.
+ * The window above is measured scan → *first open*, not scan → signup, and that split is why
+ * `installs` exists: an install lands minutes after a scan, a signup can land days later, and
+ * the carrier is readable only at first open — an App Clip's container is migrated once, and
+ * the pasteboard holds one thing at a time.
  */
 export const SIGNUP_WINDOW_DAYS = int('SIGNUP_WINDOW_DAYS', 30, 1, 180);
 
 /**
- * The accept/reject line for a probabilistic match, in the same 0–100 units as `score()`.
- *
- * Hashed IP + platform alone scores 55, so this default of 70 refuses it — an IP is not an
- * identity. Carrier-grade NAT, café wifi and corporate VPNs put thousands of unrelated handsets
- * behind one address, so at least one real device signal (timezone + locale, or the screen
- * geometry) has to agree before anyone is paid.
- *
- * Raise toward 80 to demand the screen match. There is no honest value below 60.
- */
-export const MIN_CONFIDENCE = int('MIN_CONFIDENCE', 70, 60, 100);
-
-/**
- * How far back the repeat-device check looks. One handset installing the same app for a second
- * campaign reward is the cheapest fraud there is, and the only one a device signal can catch.
- *
- * 0 disables it — worth doing where the fingerprint is coarse enough that unrelated households
- * collide, since a blocked honest install is a publisher support ticket.
- */
-export const DEVICE_DEDUPE_DAYS = int('DEVICE_DEDUPE_DAYS', 7, 0, 90);
-
-/**
  * Which upstream hops may set `X-Forwarded-For`. Every per-IP control here — login throttling,
- * scan limits, the global ceiling, the iOS fingerprint — reads `req.ip`, and `req.ip` is
- * whatever this says to believe.
+ * scan limits, the global ceiling — reads `req.ip`, and `req.ip` is whatever this says to
+ * believe. Nothing derived from the address is stored any more; these are rate limits only.
  *
  * `true` means "trust the header from anyone", which lets a client name its own address: one
  * attacker becomes unlimited distinct IPs and every limit evaporates. Express accepts it

@@ -22,20 +22,18 @@ export const device = (ua: string) =>
   !ua ? '—' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mobile/.test(ua) ? 'Mobile' : 'Desktop';
 
 /**
- * Everything the hand-off screen measured about one handset, as a single hover.
+ * How the hand-off screen behaved on one scan, as a single hover.
  *
- * A column each would be a dozen more on a table that already runs off the side of the screen,
- * and these are read once — when someone is disputing a single attribution — rather than
- * scanned down. Screen leads because it is the highest-weighted signal in the match.
+ * Two facts, and the shortness is deliberate: this used to carry a dozen values describing the
+ * handset itself, which is device fingerprinting whatever it is labelled. What is left is about
+ * the *page* — how long it was held and how it was left — and it is read once, when somebody is
+ * asking why a scan never attributed.
+ *
+ * `exit: auto` on an iPhone is the answer to that question: nobody tapped Continue, so nothing
+ * was carried, so the install was organic as far as anyone can honestly say.
  */
-export const handset = (x: AdminScan) => {
-  const rows = Object.entries({
-    screen: x.screen,
-    tz: x.tz,
-    cores: x.cores,
-    theme: x.dark == null ? null : x.dark ? 'dark' : 'light',
-    ...(x.client ?? {}),
-  }).filter(([, v]) => v !== null && v !== undefined);
+export const handoff = (x: AdminScan) => {
+  const rows = Object.entries(x.client ?? {}).filter(([, v]) => v !== null && v !== undefined);
   return rows.length
     ? rows.map(([k, v]) => `${k}  ${v}`).join('\n')
     : 'No hand-off screen — this scan went straight to its destination.';

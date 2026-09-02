@@ -5,9 +5,11 @@ listing (BanglaReels, DramaBox), install and sign up — and the promoter pays t
 per-acquisition marketing fee.
 
 The QR carries nothing redeemable. It opens a store listing, and the install is tied back to
-the scan server-to-server afterwards — by Play's install referrer on Android, by a
-short-window device match on iOS. That keeps it a measurement artifact rather than an unlock
-mechanism, which is what App Store 3.1.1 forbids. See
+the scan server-to-server afterwards by an opaque claim id the platform minted — carried by
+Play's install referrer on Android, and on iOS by an App Clip's shared container or the
+pasteboard. Nothing is derived from the device, which the Apple Developer Program License
+Agreement forbids; and nothing spendable reaches the app, which is what App Store 3.1.1
+forbids. See
 [Figure 8](SYSTEM_FLOW.md#figure-8-why-the-qr-unlocks-nothing).
 
 - **Swagger UI at `/docs`** — full API reference, generated from the live controllers
@@ -96,7 +98,6 @@ unrecoverable mistake — see below.
 | `FRONTEND_URL` | CORS allowlist, comma-separated; the first entry is used for scan redirects. |
 | `JWT_SECRET` | Signs session tokens. `openssl rand -hex 32`. |
 | `REFERRER_WINDOW_DAYS` | How long a Play install referrer stays claimable. Default 30, max 90. |
-| `FINGERPRINT_WINDOW_MIN` | How long an iOS install can be device-matched to a scan. Default 60. Shorter = fewer false matches under carrier NAT. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seeded on **first boot only** in production — rotating the password in-app is not reverted by the next deploy. |
 | `DATABASE_URL` | Append `?sslmode=require` for managed Postgres. |
 | `TRUST_PROXY` | Set to `1` behind a load balancer, or `req.ip` is the proxy and every per-IP rate limit collapses into one bucket. `true` is **refused at boot** — it trusts `X-Forwarded-For` from any client, letting one attacker present as unlimited IPs. |

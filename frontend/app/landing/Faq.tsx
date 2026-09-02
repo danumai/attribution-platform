@@ -19,7 +19,7 @@ const QA = [
   },
   {
     q: 'How is an install matched on iOS, without a referrer?',
-    a: 'By a short-window device match: the scan is fingerprinted coarsely at redirect time, and the publisher’s claim call is matched against it inside a narrow window. Android uses the Play install referrer, which is exact.',
+    a: 'By carrying the same reference Android carries, along a route that survives the install. Register an App Clip and iOS hands it to your app in a shared container, silently. Without one, the hand-off screen puts it on the clipboard when the scanner taps Continue and your app reads it at first open. Both name one exact scan — nothing is guessed from the device, which Apple does not permit.',
   },
   {
     q: 'What does the publisher have to build?',

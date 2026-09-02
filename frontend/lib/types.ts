@@ -41,6 +41,12 @@ export interface Me {
   landing_url: string | null;
   android_package: string | null;
   ios_app_id: string | null;
+  /** `TEAMID.bundle.id.Clip` — set together with `slug` to turn on the App Clip carrier */
+  ios_appclip_id: string | null;
+  /** the path segment of the App Clip invocation URL, and the prefix registered with Apple */
+  slug: string | null;
+  /** App Store Connect provider token, for the aggregate campaign-link cross-check */
+  ios_provider_token: string | null;
   /** where an engagement scan is sent so the OS can open the app if it is installed */
   deeplink_url: string | null;
   bonuses: Bonus[];
@@ -92,6 +98,10 @@ export interface Campaign {
   status: string;
   /** acquisition = one payout per user ever; engagement = one per issued transaction code */
   mode: 'acquisition' | 'engagement';
+  /** which of the publisher's offers this campaign promises, by `type`. Empty = all eligible. */
+  bonus_types: string[];
+  /** those offers resolved against the publisher's current list — what the artwork may say */
+  publisher_bonuses: Bonus[];
   created_at: string;
   coin_rate: number;
   engagement_rate: number;
@@ -205,7 +215,6 @@ export interface AdminOverview {
 export interface AdminScan {
   id: string;
   scanned_at: string;
-  ip_hash: string | null;
   user_agent: string | null;
   platform: string;
   country: string | null;
@@ -215,12 +224,11 @@ export interface AdminScan {
   os: string | null;
   browser: string | null;
   device_type: string | null;
-  /** the four signals an iOS install is scored against — NULL when the hand-off screen was skipped */
-  tz: string | null;
-  screen: string | null;
-  cores: number | null;
-  dark: boolean | null;
-  /** everything else the hand-off screen measured; reporting only, shape fixed by the server */
+  /**
+   * How the hand-off screen behaved — `held_ms` and `exit` (`tap` | `auto`), nothing about the
+   * device. `exit: 'auto'` on an iOS scan is the shape of an install nobody could attribute:
+   * the scanner never tapped, so the claim was never carried.
+   */
   client: Record<string, string | number | boolean> | null;
   consumed: boolean;
   qr_code: string;
@@ -231,7 +239,7 @@ export interface AdminScan {
   redeemed: boolean;
   /** summed: one scan can pay both an acquisition and a purchase reward */
   coins: number | null;
-  /** `+`-joined when a scan paid twice, e.g. `referrer+code` */
+  /** which carrier brought the claim back; `+`-joined when a scan paid twice, e.g. `referrer+code` */
   match_method: string | null;
   kind: string | null;
 }
