@@ -14,6 +14,7 @@ import {
   normLang,
   normScreen,
   normTz,
+  allBonuses,
   bonusLabel,
   bonusesFor,
   score,
@@ -188,5 +189,10 @@ assert.deepEqual(bonusesFor('100 free coins', 'acquisition'), []);
 
 assert.equal(bonusLabel(bonusesFor(offers, 'engagement')), '100 free coins + 7 days of premium');
 assert.equal(bonusLabel([]), null);
+
+// What the promoter console reads: every offer, unscoped, and the same degrade-to-none on junk.
+assert.deepEqual(allBonuses(offers).map((b) => b.type), ['coins', 'subscription']);
+assert.deepEqual(allBonuses('100 free coins'), []);
+assert.deepEqual(allBonuses([null, 'x', ['y']]), []);
 
 console.log('  ✓ attribution self-check passed');

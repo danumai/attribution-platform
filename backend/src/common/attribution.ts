@@ -131,10 +131,17 @@ export function validateBonuses(raw: unknown): Bonus[] {
  * a payout response.
  */
 export function bonusesFor(raw: unknown, kind: 'acquisition' | 'engagement'): Bonus[] {
+  return allBonuses(raw).filter((b) => b.on === kind || b.on === 'both' || b.on === undefined);
+}
+
+/**
+ * Every offer on the row, unscoped, read just as defensively. What the promoter console shows:
+ * a promoter picking a publisher is choosing between everything it grants, and each entry
+ * carries its own `on` for the surface to print.
+ */
+export function allBonuses(raw: unknown): Bonus[] {
   if (!Array.isArray(raw)) return [];
-  return (raw as Bonus[]).filter(
-    (b) => b && typeof b === 'object' && (b.on === kind || b.on === 'both' || b.on === undefined),
-  );
+  return (raw as Bonus[]).filter((b) => b && typeof b === 'object' && !Array.isArray(b));
 }
 
 /**

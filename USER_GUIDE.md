@@ -394,7 +394,7 @@ Dashboard → **Partnerships** → *Request partnership*.
 
 | Field | Default | Means |
 |---|---|---|
-| Publisher | — | Only approved, non-suspended publishers appear. Ones with no destination are flagged `(no app registered yet)` |
+| Publisher | — | Only approved, non-suspended publishers appear, each listed with the offers *it* gives the user — `100 free coins`, `7 days of premium`, whatever it runs. Ones with no destination are flagged `(no app registered yet)` |
 | `coin_rate` | 50 | Coins per **verified** signup |
 | `guest_rate` | 10 | Coins paid up front for an unverified one; the rest is held back |
 | `grace_days` | 7 | How long a guest has to verify and release the remainder |
@@ -406,6 +406,16 @@ is a different thing being bought and may honestly cost more than a signup.
 
 At creation, the current `PLATFORM_FEE_BPS` is **snapshotted onto the partnership**. Changing
 the platform default later never reprices a deal that both parties already agreed to.
+
+**What the publisher gives the user is not one of the rates above.** It is the publisher's own
+offer, granted out of its own pocket, and it need not be coins — a subscription, a discount and
+a free trial are all normal. The promoter reads it in three places, always live off the
+publisher, so an edit on its side shows up on yours the next time the page loads:
+
+- the picker above, beside the publisher's name;
+- **Partnerships** → *What the user gets*, one line per offer with which reward earns it;
+- the campaign page, above **QR codes**, scoped to that campaign's mode — an acquisition poster
+  is never told about the repeat-purchase offer, because it cannot honestly promise it.
 
 The status starts at `pending`. One partnership per promoter/publisher pair, ever.
 
@@ -896,6 +906,28 @@ Authorization: Bearer pk_<promoter>
 
 Every issued code is `max_uses: 1` — one code, one purchase, one scan.
 
+### Step 1b — refunds and reconciliation
+
+The same two facts a booking system needs after the mint, on the same key and the same reference:
+
+```http
+GET  /v1/issue?campaign_id=…&issued_ref=PNR-XYZ-9
+POST /v1/issue/void          { "campaign_id": "…", "issued_ref": "PNR-XYZ-9" }
+```
+→ `{ id, code, expires_at, issued_ref, scan_url, voided, uses, redeemed }`
+
+| Rule | Behaviour |
+|---|---|
+| Ticket refunded or cancelled | Void it. The code stops paying on the next scan — otherwise you pay for a purchase that was reversed |
+| Code already redeemed | `redeemed: true`, and the payout **stands**. Voiding is not a clawback; the settlement window is the admin's tool for that |
+| Void twice | Same answer, no error — a refund webhook fires twice like a booking one does |
+| Unknown or another tenant's `issued_ref` | 404 |
+| Campaign paused or ended | Still works. A refund arrives exactly when a campaign has been stopped |
+
+Reach for `GET` when the customer says the code does not work: it tells you whether it was
+scanned (`uses`), killed (`voided`) or already paid (`redeemed`). Re-POSTing `/v1/issue` only
+replays the code and answers none of that.
+
 ### Step 2 — the traveller scans it
 
 `GET /r/{code}` → the publisher's App Link carrying `qrm_code` (and `qrm_fallback` for the
@@ -947,6 +979,7 @@ they never race each other.
 
 - [ ] `POST /v1/issue` with the promoter's key mints a `max_uses: 1` code and returns a `scan_url`.
 - [ ] The same `issued_ref` twice returns the **same code** with `replay: true`.
+- [ ] `POST /v1/issue/void` on a refunded booking stops that code paying; a second void is the same answer.
 - [ ] An acquisition campaign answers 404, another tenant's campaign answers 404 (not 403), and the publisher's key answers 401.
 - [ ] The scan redirects to the publisher's App Link carrying `qrm_code` and `qrm_fallback`.
 - [ ] A claim answers `kind: "engagement"`, `match_method: "code"`, `confidence: 100`, `fee` == `engagement_rate`, `pending_fee: 0`, `confirm_deadline: null`.
@@ -1239,6 +1272,7 @@ Everything below is what to check **by hand**.
 | `POST /v1/issue` twice with the same `issued_ref` | Same code, `replay: true` |
 | `POST /v1/issue` against an acquisition campaign | 404 `no active engagement campaign with that id` |
 | `POST /v1/issue` with the **publisher's** key | 401 |
+| `POST /v1/issue/void` after a refund | Code stops paying; already-redeemed ones report `redeemed: true` and stay paid |
 | Claim an engagement code twice as the same user | `replay: true` |
 | Claim it as a **different** user | `attributed: false`, `already_claimed` |
 | Claim an engagement `code` against an acquisition campaign | `not_engagement` |

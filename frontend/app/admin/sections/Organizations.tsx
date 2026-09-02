@@ -35,7 +35,7 @@ export function Organizations({ d, loading, busy, patch, post, del }: Props) {
           h: 'API key',
           sort: (x) => x.has_api_key,
           get: (x) =>
-            x.type !== 'publisher' ? '—' : x.has_api_key ? 'set' : <span className="text-bad">missing</span>,
+            x.has_api_key ? 'set' : <span className="text-bad">missing</span>,
         },
         { h: 'Campaigns', num: true, get: (x) => x.campaigns },
         { h: 'Coins', num: true, get: (x) => x.coin_balance ?? '—' },

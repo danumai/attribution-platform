@@ -109,6 +109,17 @@ echo "5. Scan → store listing (nothing redeemable reaches the device)"
 # returning customer gets, and each claim answer must carry only the ones it earned.
 curl -s -XPATCH $API/v1/orgs/me -H "Authorization: Bearer $PUB_TOKEN" -H 'Content-Type: application/json' \
   -d '{"android_package":"com.dramabox.app","ios_app_id":"123456789","bonuses":[{"type":"coins","label":"100 free coins","value":100,"unit":"coins","on":"acquisition"},{"type":"subscription","label":"7 days of premium","value":7,"unit":"days","on":"engagement"}]}' >/dev/null
+# The promoter's side of the same declaration: it picks a publisher on what that publisher
+# gives the user — which is a subscription as often as it is coins — so the offers travel with
+# the directory row, with the partnership, and with the campaign the artwork is designed on.
+DIR=$(curl -s $API/v1/publishers -H "Authorization: Bearer $PRO_TOKEN" | j ".find(p=>p.id==='$PUB_ID').bonuses.length")
+[ "$DIR" = "2" ] && pass "promoter's publisher directory carries both offers" || fail "directory bonuses: $DIR"
+PB=$(curl -s $API/v1/partnerships -H "Authorization: Bearer $PRO_TOKEN" | j ".find(p=>p.id==='$PART_ID').publisher_bonuses.map(b=>b.type).join()")
+[ "$PB" = "coins,subscription" ] && pass "partnership row shows what the publisher grants" || fail "partnership bonuses: $PB"
+# Scoped to the campaign's mode: an acquisition poster must not promise the repeat-purchase offer.
+CB=$(curl -s $API/v1/campaigns/$CAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j ".publisher_bonuses.map(b=>b.type).join()")
+[ "$CB" = "coins" ] && pass "campaign artwork is told only the offer that campaign earns" || fail "campaign bonuses: $CB"
+
 ANDROID='Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36'
 IOS='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1'
 
@@ -291,6 +302,34 @@ E2=$(EC "{\"code\":\"$ECODE2\",\"publisher_user_ref\":\"$FLYER\"}")
   && pass "the second purchase is its own attribution, not a replay of the first" || fail "collapsed into one: $E2"
 EREM=$(curl -s $API/v1/campaigns/$ECAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
 [ "$EREM" = "60" ] && pass "budget charged exactly twice (100→60), once per purchase" || fail "engagement budget: $EREM"
+
+# Refunds. A ticket that was cancelled is no longer a purchase, but the boarding pass is already
+# printed and its code is still payable. The booking system knows the PNR, not our uuid, so the
+# portal's click-a-row void cannot reach it — this is the machine path.
+IST() { curl -s "$API/v1/issue?campaign_id=$ECAMP_ID&issued_ref=$1" -H "Authorization: Bearer $PRO_KEY"; }
+IVOID() { curl -s -XPOST $API/v1/issue/void -H "Authorization: Bearer $PRO_KEY" -H 'Content-Type: application/json' \
+  -d "{\"campaign_id\":\"$ECAMP_ID\",\"issued_ref\":\"$1\"}"; }
+ECODE3=$(ISS "{\"campaign_id\":\"$ECAMP_ID\",\"issued_ref\":\"PNR-CCC$S\"}" | j .code)
+ST3=$(IST "PNR-CCC$S")
+[ "$(echo "$ST3" | j .code)" = "$ECODE3" ] && [ "$(echo "$ST3" | j .redeemed)" = "false" ] \
+  && pass "the booking system can look a code up by its own PNR" || fail "issue status: $ST3"
+V3=$(IVOID "PNR-CCC$S")
+[ "$(echo "$V3" | j .voided)" = "true" ] && pass "a refund voids the code minted for that ticket" || fail "issue void: $V3"
+[ "$(echo "$(IVOID "PNR-CCC$S")" | j .voided)" = "true" ] && pass "voiding twice is the same answer, not an error" || fail "void not idempotent"
+curl -s -A "$ANDROID" -o /dev/null "$API/r/$ECODE3"
+EV=$(EC "{\"code\":\"$ECODE3\",\"publisher_user_ref\":\"refunded$S@x.com\"}")
+[ "$(echo "$EV" | j .attributed)" = "false" ] && pass "a refunded ticket's code pays nobody" || fail "voided code paid: $EV"
+EREM2=$(curl -s $API/v1/campaigns/$ECAMP_ID/stats -H "Authorization: Bearer $PRO_TOKEN" | j .budget_remaining)
+[ "$EREM2" = "60" ] && pass "and the budget is untouched by it" || fail "void budget: $EREM2"
+# Already paid is not undoable, and saying so is the point: the promoter reconciles against it
+# rather than assuming the void got there first.
+VPAID=$(IVOID "PNR-AAA$S")
+[ "$(echo "$VPAID" | j .redeemed)" = "true" ] \
+  && pass "voiding an already-redeemed code reports the payout, never claws it back" || fail "void redeemed: $VPAID"
+# Another tenant's reference is a 404, the same non-oracle /v1/issue gives.
+VX=$(curl -s -o /dev/null -w '%{http_code}' -XPOST $API/v1/issue/void -H "Authorization: Bearer $PRO_KEY" \
+  -H 'Content-Type: application/json' -d "{\"campaign_id\":\"$ECAMP_ID\",\"issued_ref\":\"PNR-NEVER$S\"}")
+[ "$VX" = "404" ] && pass "voiding an unknown booking reference is a 404" || fail "void unknown: $VX"
 
 # The regression that matters most: acquisition mode must be bit-for-bit what it was. The
 # partial index is the only thing standing between "paid twice for two tickets" and "paid

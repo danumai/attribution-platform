@@ -36,3 +36,21 @@ export const ago = (t?: string | null) => {
   }
   return when(t);
 };
+
+/**
+ * Which claim an offer is granted on, as it reads on screen. One definition because the
+ * publisher picks it in Settings and the promoter reads it back on the partnership.
+ */
+export const GRANTED_ON = {
+  both: 'Every reward',
+  acquisition: 'New signups',
+  engagement: 'Repeat purchases',
+} as const;
+
+/**
+ * A publisher's offers on one line — for a `<select>` option and anywhere else that can only
+ * hold a string. `label` is the publisher's own wording, and joining them is the same summary
+ * the Partner API returns as `bonus_label`.
+ */
+export const offerLine = (list?: { label: string }[] | null) =>
+  (list ?? []).map((b) => b.label).join(' + ');

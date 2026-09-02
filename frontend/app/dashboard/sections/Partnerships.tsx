@@ -2,7 +2,7 @@
 import { api } from '@/lib/api';
 import { Empty, SkeletonTable } from '@/lib/ui';
 import type { Partnership } from '@/lib/types';
-import { num } from '@/lib/fmt';
+import { GRANTED_ON, num } from '@/lib/fmt';
 import {
   btn,
   btnTiny,
@@ -79,7 +79,7 @@ export function Partnerships({ d, isPromoter, loaded, act }: SectionProps) {
     <>
       <h2 className={sectionHead}>All partnerships</h2>
       {!loaded ? (
-        <SkeletonTable className="mt-3" cols={5} />
+        <SkeletonTable className="mt-3" cols={6} />
       ) : partnerships.length === 0 ? (
         <Empty
           className="mt-3"
@@ -109,6 +109,7 @@ export function Partnerships({ d, isPromoter, loaded, act }: SectionProps) {
                 <th className={th}>Promoter</th>
                 <th className={th}>Publisher</th>
                 <th className={thNum}>Guest / full</th>
+                <th className={th}>What the user gets</th>
                 <th className={th}>Status</th>
                 <th className={th} />
               </tr>
@@ -134,6 +135,22 @@ export function Partnerships({ d, isPromoter, loaded, act }: SectionProps) {
                         {' · '}
                         {num(p.proposed_engagement_rate ?? 0)} repeat
                       </div>
+                    )}
+                  </td>
+                  {/* The publisher's own offer, not a rate: nothing here is billed to the
+                      promoter, and the platform never issues any of it. Printed anyway because
+                      it is what the artwork has to promise and what the user actually receives
+                      — and it is a subscription or a discount as often as it is coins. */}
+                  <td className={td}>
+                    {p.publisher_bonuses.length === 0 ? (
+                      <span className={muted}>not declared yet</span>
+                    ) : (
+                      p.publisher_bonuses.map((b, i) => (
+                        <div key={i}>
+                          {b.label}
+                          <span className={muted}> · {GRANTED_ON[b.on] ?? GRANTED_ON.both}</span>
+                        </div>
+                      ))
                     )}
                   </td>
                   <td className={td}>

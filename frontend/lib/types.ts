@@ -81,6 +81,8 @@ export interface Partnership {
   proposed_coin_rate: number | null;
   proposed_guest_rate: number | null;
   proposed_engagement_rate: number | null;
+  /** what the publisher itself grants the user — read live, so it tracks the publisher's edits */
+  publisher_bonuses: Bonus[];
 }
 
 export interface Campaign {
@@ -110,6 +112,8 @@ export interface CampaignStats {
   redemptions: number;
   coins_granted: number;
   budget_remaining: number;
+  /** the publisher's own offers that apply to this campaign's mode — what the artwork promises */
+  publisher_bonuses: Bonus[];
 }
 
 export interface QrCode {

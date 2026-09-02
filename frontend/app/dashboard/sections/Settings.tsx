@@ -2,6 +2,7 @@
 import { ChangeEvent, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { confirmDialog } from '@/lib/ui';
+import { GRANTED_ON } from '@/lib/fmt';
 import { btn, btnGhost, card, code as codeChip, codeKey, cx, field, hint, label, muted, sectionHead, select } from '@/lib/tw';
 import type { Bonus } from '@/lib/types';
 import type { SectionProps } from '../types';
@@ -24,12 +25,6 @@ type Row = { type: string; label: string; value: string; unit: string; on: Bonus
 
 const BLANK: Row = { type: 'coins', label: '', value: '', unit: '', on: 'both' };
 
-/** Which claim an offer is granted on. The two the platform can actually name, plus both. */
-const GRANTED_ON = [
-  ['both', 'Every reward'],
-  ['acquisition', 'New signups'],
-  ['engagement', 'Repeat purchases'],
-] as const;
 
 export function Settings({ d, busy, act }: Pick<SectionProps, 'd' | 'busy' | 'act'>) {
   const { profile } = d;
@@ -140,7 +135,8 @@ export function Settings({ d, busy, act }: Pick<SectionProps, 'd' | 'busy' | 'ac
               onChange={onRow(i, 'unit')}
             />
             <select className={select} value={r.on} aria-label="Granted on" onChange={onRow(i, 'on')}>
-              {GRANTED_ON.map(([v, text]) => (
+              {/* Same wording the promoter reads back on the partnership row, from one place. */}
+              {Object.entries(GRANTED_ON).map(([v, text]) => (
                 <option key={v} value={v}>
                   {text}
                 </option>

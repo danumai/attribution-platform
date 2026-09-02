@@ -11,7 +11,7 @@
  * `assert`, no framework — same shape as backend/test/*.test.ts.
  */
 import assert from 'node:assert/strict';
-import { ago, change, num, when } from '../lib/fmt';
+import { ago, change, num, offerLine, when } from '../lib/fmt';
 import { DEFAULT_STYLE, contrastProblem, samePlate } from '../lib/qr';
 import { ticks } from '../lib/chart';
 import { place } from '../lib/place';
@@ -126,3 +126,11 @@ else assert.equal(byTz?.label, '~United States');
 assert.equal(scan({ language: 'da-dk' })?.label, '~Denmark');
 assert.equal(scan({ language: 'en' }), null, 'a language with no region names no place');
 assert.equal(scan({}), null);
+
+/* ---------------- offerLine ---------------- */
+
+// The publisher's own wording, joined — and nothing at all when it has declared no offer, so
+// the caller can branch on the empty string rather than printing a stray separator.
+assert.equal(offerLine([{ label: '100 free coins' }, { label: '7 days of premium' }]), '100 free coins + 7 days of premium');
+assert.equal(offerLine([]), '');
+assert.equal(offerLine(null), '');

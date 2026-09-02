@@ -10,14 +10,17 @@
  */
 import { api } from '@/lib/api';
 import { formDialog, toast } from '@/lib/ui';
-import { num } from '@/lib/fmt';
+import { num, offerLine } from '@/lib/fmt';
 import type { Campaign, Me, Partnership, PublisherOption } from '@/lib/types';
 import type { Act } from './types';
 
 export async function newPartnership(publishers: PublisherOption[], act: Act) {
   const v = await formDialog({
     title: 'Request a publisher partnership',
-    body: 'The rates are fixed here, before any campaign can spend against them.',
+    body:
+      'The rates are fixed here, before any campaign can spend against them. What each publisher ' +
+      'gives the user is its own offer, listed beside its name — coins, a subscription, whatever ' +
+      'it runs. You never pay for it; you pay the rates below.',
     confirmText: 'Request partnership',
     fields: [
       {
@@ -26,10 +29,13 @@ export async function newPartnership(publishers: PublisherOption[], act: Act) {
         type: 'select',
         required: true,
         placeholder: 'Select a publisher…',
-        options: publishers.map((p) => ({
-          value: p.id,
-          label: p.name,
-        })),
+        options: publishers.map((p) => {
+          const offers = offerLine(p.bonuses);
+          return {
+            value: p.id,
+            label: `${p.name}${offers ? ` — ${offers}` : ''}${p.ready ? '' : ' (no app registered yet)'}`,
+          };
+        }),
       },
       { name: 'coin_rate', label: 'Coins granted per verified signup (full tier)', type: 'number', value: '50', required: true },
       { name: 'guest_rate', label: 'Coins for an unverified guest (the rest is held back)', type: 'number', value: '10', required: true },

@@ -27,7 +27,9 @@ model Org {
   type          String
   email         String   @unique
   password_hash String
-  /// publishers only; sha256 of the partner API key
+  /// sha256 of the machine credential, both tenant types. A publisher's earns fees on
+  /// `/v1/attribution/*`; a promoter's mints transaction codes on `/v1/issue`. NULL only after
+  /// an admin offboards the org.
   api_key_hash  String?
   /// publishers only; web fallback for desktop scans and publishers with no app yet
   landing_url   String?

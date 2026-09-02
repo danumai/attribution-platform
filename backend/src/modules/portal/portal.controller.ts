@@ -14,6 +14,8 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ALLOW_SELF_FUNDING, BASE_URL, PLATFORM_FEE_BPS } from '../../config';
 import {
+  allBonuses,
+  bonusesFor,
   validateAndroidPackage,
   validateBonuses,
   validateIosAppId,
@@ -54,8 +56,9 @@ export class PortalController {
       },
       orderBy: { name: 'asc' },
     });
-    return rows.map(({ landing_url, android_package, ios_app_id, ...o }) => ({
+    return rows.map(({ landing_url, android_package, ios_app_id, bonuses, ...o }) => ({
       ...o,
+      bonuses: allBonuses(bonuses),
       ready: Boolean(landing_url || android_package || ios_app_id),
     }));
   }
@@ -114,7 +117,7 @@ export class PortalController {
       where: { OR: [{ promoter_org_id: s.org_id }, { publisher_org_id: s.org_id }] },
       include: {
         promoter: { select: { name: true } },
-        publisher: { select: { name: true } },
+        publisher: { select: { name: true, bonuses: true } },
       },
       orderBy: { created_at: 'desc' },
       take: capped(limit),
@@ -123,6 +126,10 @@ export class PortalController {
       ...p,
       promoter_name: promoter.name,
       publisher_name: publisher.name,
+      // Read live off the publisher rather than snapshotted at agreement: the offer is the
+      // publisher's own and it may change it any day, and what the promoter needs to see is
+      // what a scanner gets *today* — the rates above are the only agreed numbers here.
+      publisher_bonuses: allBonuses(publisher.bonuses),
     }));
   }
 
@@ -321,7 +328,12 @@ export class PortalController {
       },
       include: {
         partnership: {
-          select: { promoter_org_id: true, publisher_org_id: true, coin_rate: true },
+          select: {
+            promoter_org_id: true,
+            publisher_org_id: true,
+            coin_rate: true,
+            publisher: { select: { bonuses: true } },
+          },
         },
       },
     });
@@ -419,6 +431,12 @@ export class PortalController {
       redemptions: reds._count,
       coins_granted: reds._sum.coins ?? 0,
       budget_remaining,
+      // Scoped to this campaign's mode, because that is what the artwork can honestly promise:
+      // a poster on an engagement campaign must not advertise the signup offer.
+      publisher_bonuses: bonusesFor(
+        c.partnership.publisher.bonuses,
+        c.mode === 'engagement' ? 'engagement' : 'acquisition',
+      ),
     };
   }
 

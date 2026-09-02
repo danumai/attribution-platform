@@ -658,6 +658,21 @@ sequenceDiagram
     API-->>PB: {attributed:true, kind:"engagement", match_method:"code", confidence:100, fee}
 ```
 
+### The reverse of a purchase
+
+A refund, a cancelled ticket or a chargeback un-makes the fact the code was minted against, and
+the boarding pass carrying it is already printed. `POST /v1/issue/void` takes the same
+`{campaign_id, issued_ref}` the mint took, because a refund webhook knows the PNR and not our
+uuid — the portal's void is a human clicking a row on a session, which no booking system has.
+
+It is idempotent, it is **not** a clawback, and it is deliberately unaudited: a refund is routine
+at booking volume, while the portal's void means a print run just stopped working and belongs in
+the admin's inbox. A code already redeemed stays paid; the answer carries `redeemed: true` so the
+promoter reconciles against the fact rather than assuming the void won the race.
+`GET /v1/issue?campaign_id=…&issued_ref=…` is the same lookup without the write — the
+reconciliation and support call, since re-POSTing the mint replays a code but says nothing about
+whether it was scanned, voided or paid.
+
 ### Why there is no matching step
 
 Everything in the acquisition flow exists because a phone walks off to a store and has to be
@@ -1240,7 +1255,7 @@ whenever `DATABASE_URL` pointed elsewhere.
 | `GET /metrics` | bearer token | Prometheus |
 | `/v1/*` portal routes | session JWT, 12 h | promoter + publisher dashboards |
 | `/v1/attribution/*` | `pk_…` | the **publisher's server** — never a browser, never the app |
-| `POST /v1/issue` | `pk_…` | the **promoter's server** — one call per transaction |
+| `POST /v1/issue`, `GET /v1/issue`, `POST /v1/issue/void` | `pk_…` | the **promoter's server** — one call per transaction, plus lookup and refund |
 | `POST /v1/payments/checkout`, `GET /v1/payments` | session JWT | promoter |
 | `POST /v1/payments/webhook` | HMAC signature | the PSP |
 | `/v1/admin/*` | session JWT + `admin` role | super admin console |

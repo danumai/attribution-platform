@@ -9,6 +9,7 @@ import type { CampaignStats, QrCode } from '@/lib/types';
 import { LoadError, SkeletonStrip, toast } from '@/lib/ui';
 import { DEFAULT_STYLE, Style, renderPreview } from '@/lib/qr';
 import { card, cx, link, muted, sectionHead } from '@/lib/tw';
+import { offerLine } from '@/lib/fmt';
 import { CodeList } from './CodeList';
 import { Performance } from './Performance';
 import { Studio } from './Studio';
@@ -166,6 +167,14 @@ export default function CampaignPage() {
       {isPromoter && (
         <>
           <h2 className={sectionHead}>QR codes</h2>
+          {/* What the poster is allowed to promise. The publisher declares it and grants it out
+              of its own pocket — coins, a subscription, a discount — and it is not part of the
+              rate you pay, so it is printed here rather than beside the money. */}
+          <p className={cx(muted, 'mt-3')}>
+            {stats.publisher_bonuses?.length
+              ? `The publisher gives every rewarded user: ${offerLine(stats.publisher_bonuses)}. That is what the artwork can promise.`
+              : 'The publisher has not declared what it gives the user yet — ask before printing a promise.'}
+          </p>
           <CodeList
             campaignId={id}
             qrs={qrs}
