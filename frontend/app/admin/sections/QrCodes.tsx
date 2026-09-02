@@ -18,6 +18,9 @@ export function QrCodes({ d, loading, busy, patch }: Props) {
       empty="No codes issued."
       cols={[
         { h: 'Code', sort: (x) => x.code, get: (x) => <code>{x.code}</code> },
+        // Set only on codes minted by `POST /v1/issue` — a promoter's own PNR or order number.
+        // Studio-designed codes carry none, and search already covers this column for free.
+        { h: 'Ticket ref', sort: (x) => x.issued_ref ?? '', get: (x) => x.issued_ref ?? '—' },
         { h: 'Campaign', get: (x) => x.campaign_name ?? '' },
         { h: 'Scans', num: true, sort: (x) => x.scans ?? 0, get: (x) => x.scans ?? 0 },
         { h: 'Uses', sort: (x) => x.uses, get: (x) => `${x.uses}${x.max_uses ? ` / ${x.max_uses}` : ' / ∞'}` },

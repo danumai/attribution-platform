@@ -35,6 +35,10 @@ export function CodeList({
         {qrs.map((q) => (
           <button key={q.id} className={codeTab(q.id === sel?.id, q.voided)} onClick={() => onSelect(q)}>
             <code className={codeChip}>/{q.code}</code>
+            {/* Only machine-issued codes carry a reference — the promoter's own PNR or order
+             * number, from `POST /v1/issue`. Shown here so this same list, unavoidably shared
+             * with studio-designed poster codes, is where a promoter finds one specific ticket. */}
+            {q.issued_ref && <span className="text-[10.5px] text-ink-soft">{q.issued_ref}</span>}
             <span className="text-[10.5px] font-bold tracking-widest uppercase">
               {q.voided ? 'voided' : `${q.uses ?? 0} scans`}
             </span>

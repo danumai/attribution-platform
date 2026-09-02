@@ -734,6 +734,11 @@ export class AdminController {
         max_uses: true,
         uses: true,
         voided: true,
+        // The promoter's own reference for the transaction this code was minted against — a
+        // PNR, an order number. NULL for every code designed in the portal; set only on the
+        // machine-issued ones from `/v1/issue`. Surfaced so a support search can find one code
+        // by the reference the *promoter* actually holds, not our opaque one.
+        issued_ref: true,
         campaign: {
           select: {
             id: true,

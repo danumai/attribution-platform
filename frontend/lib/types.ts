@@ -137,6 +137,9 @@ export interface QrCode {
   voided: boolean;
   created_at: string;
   scan_url: string;
+  /** the promoter's own reference for the purchase this code was minted against — a PNR, an
+   * order number. NULL for every code designed in the portal; set only by `POST /v1/issue`. */
+  issued_ref: string | null;
   /** admin listing only */
   campaign_name?: string;
   /** admin listing only */
