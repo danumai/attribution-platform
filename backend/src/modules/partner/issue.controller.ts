@@ -1,13 +1,7 @@
 /**
- * The Issuance API: server-to-server, called by the *promoter's* own backend when a ticket is
- * paid for or a receipt prints.
- *
- * What comes back is one single-use code, and that code is the entire proof a purchase happened
- * — the only system that can know is the one that took the money. Minted by a party with no
- * incentive to invent them: the promoter pays for every code redeemed, out of its own budget.
- *
- * Its own controller because the portal is session-authenticated and built for a human; this is
- * a machine call on a different credential, at booking volume, and must be idempotent.
+ * Issuance API: server-to-server, called by the promoter's backend when a ticket is paid for. Its
+ * single-use code is the whole proof of purchase, minted by the only party that can know and pays
+ * for each one. Separate from the session-authed portal: machine credential, volume, idempotent.
  */
 import {
   BadRequestException,
@@ -32,10 +26,8 @@ import { orgFromKey } from './api-key';
 @Controller('v1/issue')
 export class IssueController {
   /**
-   * Mint one code against one transaction. Idempotent on `issued_ref`, because a booking webhook
-   * is exactly the kind of caller that fires twice — and two codes for one ticket is the promoter
-   * paying twice. The UNIQUE index is the guarantee; this only turns the collision into the
-   * original answer.
+   * Mint one code against one transaction. Idempotent on `issued_ref`: booking webhooks fire twice,
+   * and two codes for one ticket is the promoter paying twice. The UNIQUE index is the guarantee.
    */
   @Post()
   async issue(
@@ -43,7 +35,7 @@ export class IssueController {
     @Body()
     b: {
       campaign_id: string;
-      /** the promoter's own id for the purchase — a PNR, an order number, a receipt line */
+      /** the promoter's own id for the purchase — a PNR, order number, receipt line */
       issued_ref: string;
       /** how long the traveller has to scan it; defaults to 30 days */
       expires_in_days?: number;
@@ -56,10 +48,8 @@ export class IssueController {
     if (!Number.isInteger(days) || days < 1 || days > 3650)
       throw new BadRequestException('expires_in_days must be an integer 1–3650');
 
-    // Ownership is inside the WHERE, so another tenant's campaign is a 404 rather than a
-    // permission error — an existence oracle across tenants is itself a leak. `mode` too: a code
-    // minted against an acquisition campaign scans fine, pays an acquisition fee once, then
-    // silently never pays a purchase reward.
+    // Ownership sits in the WHERE so another tenant's campaign is a 404, not a permission error — a
+    // cross-tenant existence oracle leaks. `mode` too: an acquisition code never pays a purchase reward.
     const campaign = await prisma.campaign.findFirst({
       where: {
         id: campaign_id,
@@ -77,8 +67,7 @@ export class IssueController {
       throw new NotFoundException('no active engagement campaign with that id');
     const slug = campaign.partnership.publisher.slug;
 
-    // `max_uses: 1` is the whole single-use guarantee, claimed by the same atomic conditional
-    // UPDATE every printed code already goes through at `/r/:code`.
+    // `max_uses: 1` is the single-use guarantee, claimed by the same atomic conditional UPDATE at `/r/:code`.
     try {
       const qr = await prisma.qrCode.create({
         data: {
@@ -93,8 +82,8 @@ export class IssueController {
       return { ...qr, issued_ref, scan_url: scanUrl(BASE_URL, qr.code, slug), replay: false };
     } catch (e: any) {
       if (e.code !== 'P2002') throw e;
-        // Same campaign, same transaction reference: the first call already minted it. A 409
-        // would make correctly-issued codes look like something to reconcile by hand.
+      // Same campaign and reference: the first call minted it. A 409 would make a correct issuance
+      // look like something to reconcile by hand.
       const prior = await prisma.qrCode.findFirstOrThrow({
         where: { campaign_id, issued_ref },
         select: { id: true, code: true, expires_at: true },
@@ -104,12 +93,9 @@ export class IssueController {
   }
 
   /**
-   * What happened to the code minted against one transaction. The reconciliation call: a booking
-   * system holds a PNR, not our uuid, and re-POSTing `/v1/issue` replays the code but says
-   * nothing about whether it was scanned, voided or already paid for.
-   *
-   * Query parameters rather than a path, because an `issued_ref` with a `/` in it would silently
-   * address a different route.
+   * State of the code for one transaction — the reconciliation call: booking systems hold a PNR,
+   * not our uuid, and re-POSTing `/v1/issue` replays the code without saying if it was scanned,
+   * voided or paid. Query params, not a path: an `issued_ref` containing `/` would hit another route.
    */
   @Get()
   async status(
@@ -122,13 +108,10 @@ export class IssueController {
   }
 
   /**
-   * Kill the code for a transaction that stopped being one — a refund, a cancelled ticket, a
-   * chargeback. Without it the promoter pays for a purchase that was reversed.
-   *
-   * The portal's void is a human clicking a row by uuid on a session; a refund is a webhook that
-   * knows only the PNR. Idempotent, and deliberately not audited — a refund is routine at booking
-   * volume and would bury the admin's inbox. Not a clawback either: a code already redeemed has
-   * been paid for and stays paid, which is what `redeemed: true` in the answer says.
+   * Kill the code for a refund, cancellation or chargeback, else the promoter pays for a reversed
+   * purchase. A refund webhook knows only the PNR, unlike the portal's uuid void; idempotent and
+   * unaudited, as refunds are routine at booking volume. Not a clawback — a redeemed code stays
+   * paid (`redeemed: true`).
    */
   @Post('void')
   async void(
@@ -142,11 +125,8 @@ export class IssueController {
     return { ...found, voided: true };
   }
 
-  /**
-   * One ownership-scoped lookup for both reads above. Campaign `mode` and `status` are
-   * deliberately not filtered the way `issue` filters them: a promoter must be able to kill a
-   * code on a campaign it has since paused, which is exactly when a refund arrives.
-   */
+  // One ownership-scoped lookup for both reads above. Campaign `mode`/`status` deliberately not
+  // filtered as in `issue`: a promoter must be able to void a code on a campaign it has since paused.
   private async find(promoterId: string, campaignId: string, ref: string) {
     const campaign_id = str(campaignId, 'campaign_id', 36)!;
     const issued_ref = str(ref, 'issued_ref', 200)!;
@@ -165,19 +145,18 @@ export class IssueController {
         campaign: {
           select: { partnership: { select: { publisher: { select: { slug: true } } } } },
         },
-        // At most one: `UNIQUE (qr_code_id) WHERE kind = 'engagement'`, and acquisition rows
-        // carry a NULL `qr_code_id`.
+        // At most one: `UNIQUE (qr_code_id) WHERE kind = 'engagement'`; acquisition rows are NULL here.
         redemptions: { select: { id: true }, take: 1 },
       },
     });
-    // Same 404 as `issue` gives for another tenant's campaign, for the same reason.
+    // Same 404 as `issue` gives another tenant, for the same reason.
     if (!qr) throw new NotFoundException('no code issued against that reference');
     const { redemptions, campaign, ...rest } = qr;
     return {
       ...rest,
       issued_ref,
       scan_url: scanUrl(BASE_URL, qr.code, campaign.partnership.publisher.slug),
-      /** the code was scanned and the purchase reward has been paid — voiding cannot undo it */
+      /** scanned and the reward paid — voiding cannot undo it */
       redeemed: redemptions.length > 0,
     };
   }

@@ -6,19 +6,9 @@ import { audit, balance, balances, ledger, withdrawable } from '../../common/led
 import { PrismaService, Tx } from '../../config/prisma';
 
 /**
- * Every read and write the tenant portal performs, and nothing else — no shaping, no policy.
- *
- * Three things live here that look like business rules and are not misplaced:
- *
- *  - the two transactional units (`fundCampaign`, `createWithdrawal`). A transaction is a
- *    data-access boundary, so the service never handles a `tx`. The withdrawal ceiling has to be
- *    tested under the `FOR UPDATE` lock `withdrawable` takes or it is not serialised at all, so
- *    that method throws the domain exception itself.
- *  - the Prisma error codes. `P2002` on a partnership means "already exists", on a slug means
- *    "taken", and inside a keyed funding means "this retry already landed" — three different
- *    answers to one driver code, and the mapping needs to know which statement raised it.
- *  - `audit`, `balance(s)`, `withdrawable` and `scanAnalytics`, which are already data access
- *    shared with the other modules. Wrapped rather than duplicated.
+ * All portal data access, no policy — except transactions (`tx` never leaves this file; the
+ * withdrawal ceiling needs `withdrawable`'s FOR UPDATE lock) and `P2002`, which means something
+ * different per statement.
  */
 
 /** The resolved four rates plus the two sides and the fee snapshot — see `requestPartnership`. */
@@ -28,10 +18,7 @@ export interface PartnershipCreate extends Rates {
   platform_fee_bps: number;
 }
 
-/**
- * The three proposal columns, always written as a set: a publisher accepting must see every
- * number it is agreeing to, not a delta. `null` across the set is a cleared proposal.
- */
+/** Always written as a set so the publisher accepts numbers, not a delta. All-`null` = cleared. */
 export interface RateProposal {
   proposed_coin_rate: number | null;
   proposed_guest_rate: number | null;
@@ -59,7 +46,7 @@ export interface QrCodeCreate {
   max_uses: number | null;
 }
 
-/** Only the columns `PATCH /orgs/me` may write; presence of a key is what makes it written. */
+/** Only what `PATCH /orgs/me` may write; key presence is what makes a column written. */
 export interface OrgPatch {
   landing_url?: string | null;
   deeplink_url?: string | null;
@@ -71,7 +58,7 @@ export interface OrgPatch {
   bonuses?: Bonus[];
 }
 
-/** Either side of a partnership. Campaigns, redemptions and QR codes are all reached through it. */
+// Either side of a partnership; campaigns, redemptions and QR codes are reached through it.
 const bothSides = (orgId: string) => ({
   OR: [{ promoter_org_id: orgId }, { publisher_org_id: orgId }],
 });
@@ -85,7 +72,7 @@ const PUBLISHER_DIRECTORY_SELECT = {
   ios_app_id: true,
 } as const;
 
-/** What a tenant sees of its own org. Wider than the patch response: the fields it cannot set. */
+// Wider than the patch response: also the fields a tenant cannot set.
 const ORG_ME_SELECT = {
   id: true,
   name: true,
@@ -139,17 +126,14 @@ export class PortalRepository {
     return scanAnalytics(campaignId, days);
   }
 
-  /**
-   * Read without the lock and without a transaction: this is a figure on a page, and the request
-   * that spends against it takes the lock itself — see `createWithdrawal`.
-   */
+  // Unlocked read: display only. The spending request locks itself — see `createWithdrawal`.
   withdrawableNow(publisherOrgId: string) {
     return withdrawable(this.db, publisherOrgId, false);
   }
 
   // ------------------------------------------------------------------------------- publishers
 
-  /** Suspended and unapproved publishers are excluded: neither can ever pay out. */
+  // Suspended and unapproved publishers excluded: neither can ever pay out.
   listPublishers() {
     return this.db.org.findMany({
       where: { type: 'publisher', suspended: false, approved: true },
@@ -160,10 +144,7 @@ export class PortalRepository {
 
   // ------------------------------------------------------------------------------ partnerships
 
-  /**
-   * The foreign key only proves an id names *an org*. Without this a promoter could partner with
-   * one that can never pay out, and every campaign on it dies at the redirect.
-   */
+  // The FK only proves the id names *an org*; without this, campaigns die at the redirect.
   findEligiblePublisher(id: string) {
     return this.db.org.findFirst({
       where: { id, type: 'publisher', suspended: false, approved: true },
@@ -173,8 +154,7 @@ export class PortalRepository {
 
   createPartnership(data: PartnershipCreate) {
     return this.db.partnership.create({ data }).catch((e: { code?: string }) => {
-      // One partnership per pair, by UNIQUE — and a publisher deleted between the eligibility
-      // check and this insert takes the foreign key with it.
+      // UNIQUE = one per pair; P2003 = publisher deleted since the eligibility check.
       if (e.code === 'P2002') throw new BadRequestException('partnership already exists');
       if (e.code === 'P2003') throw new BadRequestException('publisher not found');
       throw e;
@@ -197,10 +177,8 @@ export class PortalRepository {
     return this.db.partnership.findUnique({ where: { id } });
   }
 
-  /**
-   * updateMany so the ownership check is in the WHERE, and `status: 'pending'` with it: with only
-   * two states this endpoint *was* the undo for an admin suspension.
-   */
+  // updateMany puts ownership *and* `status: 'pending'` in the WHERE — otherwise accepting
+  // doubles as an undo for an admin suspension.
   async acceptPartnership(id: string, publisherOrgId: string): Promise<number> {
     const { count } = await this.db.partnership.updateMany({
       where: { id, publisher_org_id: publisherOrgId, status: 'pending' },
@@ -209,7 +187,7 @@ export class PortalRepository {
     return count;
   }
 
-  /** `active` only — a suspended partnership is an admin hold, and repricing must not lift it. */
+  // `active` only: a suspended partnership is an admin hold, and repricing must not lift it.
   findActivePartnershipAsPromoter(id: string, promoterOrgId: string) {
     return this.db.partnership.findFirst({
       where: { id, promoter_org_id: promoterOrgId, status: 'active' },
@@ -226,10 +204,8 @@ export class PortalRepository {
     return this.db.partnership.update({ where: { id }, data });
   }
 
-  /**
-   * Compare-and-set on the proposal itself: a revision between this publisher's read and its
-   * click would otherwise apply a price nobody is looking at.
-   */
+  // Compare-and-set on the proposal: a revision between read and click would otherwise apply a
+  // price nobody is looking at.
   async decideRates(id: string, expected: RateProposal, data: RateDecision): Promise<number> {
     const { count } = await this.db.partnership.updateMany({ where: { id, ...expected }, data });
     return count;
@@ -237,7 +213,7 @@ export class PortalRepository {
 
   // --------------------------------------------------------------------------------- campaigns
 
-  /** The publisher's own offer list comes with it: a campaign advertises a subset of that. */
+  // Includes the publisher's offer list: a campaign advertises a subset of it.
   findActivePartnershipForCampaign(id: string, promoterOrgId: string) {
     return this.db.partnership.findFirst({
       where: { id, promoter_org_id: promoterOrgId, status: 'active' },
@@ -272,7 +248,7 @@ export class PortalRepository {
     });
   }
 
-  /** Scoped to both sides; which of the two the session is decides what it may *do* — see the service. */
+  // Both sides may read; which side may *act* is decided in the service.
   findOwnedCampaign(orgId: string, campaignId: string) {
     return this.db.campaign.findFirst({
       where: { id: campaignId, partnership: bothSides(orgId) },
@@ -305,11 +281,8 @@ export class PortalRepository {
     ]);
   }
 
-  /**
-   * Credit a campaign budget. Keyed on the caller's own key when it sends one, so a retry
-   * collides on `UNIQUE (account, ref)`. The PSP checkout that replaces this keys on the payment
-   * intent, the same shape.
-   */
+  // Credit a campaign budget. A caller-supplied key makes retries collide on
+  // `UNIQUE (account, ref)`; the PSP checkout that replaces this keys on the payment intent.
   fundCampaign(campaignId: string, coins: number, key?: string) {
     return this.db
       .$transaction(async (tx: Tx) => {
@@ -318,8 +291,7 @@ export class PortalRepository {
         await ledger(tx, `campaign:${campaignId}`, coins, ref);
       })
       .catch((e: { code?: string }) => {
-        // Same key, same campaign: the first call already landed, and the current budget is the
-        // honest reply.
+        // Same key, same campaign: the first call already landed.
         if (e.code === 'P2002' && key) return;
         throw e;
       });
@@ -331,7 +303,7 @@ export class PortalRepository {
     return this.db.qrCode.create({ data });
   }
 
-  /** Promoter-scoped in the WHERE: a publisher has no say over the artwork it did not print. */
+  // Promoter-scoped in the WHERE: a publisher has no say over artwork it did not print.
   async updateOwnQrCode(
     orgId: string,
     id: string,
@@ -356,10 +328,7 @@ export class PortalRepository {
     });
   }
 
-  /**
-   * The publisher's App Clip slug for a campaign, or NULL. Its own query because the join is
-   * campaign → partnership → publisher, three tables from the thing being listed.
-   */
+  // Own query because the join is campaign → partnership → publisher, three tables out.
   async publisherSlug(campaignId: string): Promise<string | null> {
     const c = await this.db.campaign.findUnique({
       where: { id: campaignId },
@@ -378,7 +347,7 @@ export class PortalRepository {
     return this.db.org.findUniqueOrThrow({ where: { id: orgId }, select: ORG_ME_SELECT });
   }
 
-  /** The App Clip pair as stored, so the rule can be judged on the post-patch org. */
+  // The App Clip pair as stored, so the rule can be judged on the post-patch org.
   findClipRegistration(orgId: string) {
     return this.db.org.findUniqueOrThrow({
       where: { id: orgId },
@@ -390,8 +359,7 @@ export class PortalRepository {
     return this.db.org
       .update({ where: { id: orgId }, data, select: ORG_PATCHED_SELECT })
       .catch((e: { code?: string }) => {
-        // UNIQUE on `slug`. A 409 rather than a 500: a name someone else took is the publisher's
-        // to resolve by picking another.
+        // UNIQUE on `slug`; 409 not 500 — the publisher resolves it by picking another.
         if (e.code === 'P2002') throw new ConflictException('that slug is already taken');
         throw e;
       });
@@ -399,11 +367,8 @@ export class PortalRepository {
 
   // ------------------------------------------------------------------------------- withdrawals
 
-  /**
-   * Queue a payout request. The ceiling is tested inside the transaction because `withdrawable`
-   * locks the balance row: two concurrent requests serialise here, and the second is judged
-   * against a pool the first has already claimed from.
-   */
+  // Ceiling is tested inside the transaction because `withdrawable` locks the balance row, so
+  // concurrent requests serialise instead of both spending the same pool.
   createWithdrawal(publisherOrgId: string, coins: number) {
     return this.db.$transaction(async (tx: Tx) => {
       const available = await withdrawable(tx, publisherOrgId);

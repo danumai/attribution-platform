@@ -1,7 +1,6 @@
 /**
- * Partner API: server-to-server only. It answers exactly one question — "is this new user
- * attributable to a campaign?" — and no code path here can grant currency or hand back
- * anything a device could redeem. That separation is the compliance argument.
+ * Partner API: server-to-server only, answering just "is this new user attributable to a campaign?"
+ * No path here grants currency or anything a device could redeem — that is the compliance argument.
  */
 import { Body, Controller, Get, Headers, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -15,10 +14,8 @@ export class PartnerController {
   constructor(private readonly svc: PartnerService) {}
 
   /**
-   * Stage one: first app open. Nothing is paid here. The claim id is readable only at launch — an
-   * App Clip's container is migrated once, the pasteboard holds one thing — but signup is
-   * routinely the next day, so this consumes the scan and returns an `install_id` the SDK must
-   * persist. A second call finds the scan consumed and answers `no_match`.
+   * Stage one: first app open, nothing paid. The claim id is readable only at launch but signup is
+   * usually later, so this consumes the scan for an `install_id` the SDK persists; replays `no_match`.
    */
   @Post('first-open')
   @HttpCode(200)
@@ -27,13 +24,9 @@ export class PartnerController {
   }
 
   /**
-   * Stage two: a new user finished signing up, so the fee is earned. Preferred shape is
-   * `{ install_id, publisher_user_ref }`; the carrier fields are the legacy single-call shape,
-   * whose only cost is that a signup that never happens leaves the scan claimable.
-   *
-   * A `code` instead routes to the engagement payout — a repeat purchase, priced separately.
-   *
-   * Unattributed is a normal answer — most installs are organic — so a 200, not an error.
+   * Stage two: signup done, fee earned. Prefer `{ install_id, publisher_user_ref }`; the carrier
+   * fields are the legacy single-call shape, whose cost is an abandoned signup leaving the scan
+   * claimable. A `code` routes to the engagement payout; unattributed is normal, so a 200 not an error.
    */
   @Post('claim')
   @HttpCode(200)

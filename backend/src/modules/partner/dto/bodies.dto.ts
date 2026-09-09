@@ -1,8 +1,6 @@
 /**
- * The two Partner API request bodies. Plain object types rather than validated DTO classes: every
- * field here is bounded by `str()` and parsed by the service, because a body arriving from
- * another company's server is checked for what it *means* (is this a claim id the scan issued?)
- * and not only for its type.
+ * The two Partner API request bodies. Plain types, not DTO classes: the service bounds each field
+ * with `str()` and checks what it *means* (is this a claim id the scan issued?), not just its type.
  */
 
 export type FirstOpenBody = {
@@ -28,12 +26,10 @@ export type ClaimBody = {
   claim_id?: string;
   /** legacy single-call shape: which carrier produced it */
   carrier?: string;
-  /** The engagement path: a transaction code the promoter minted, bare or as the whole
-   *  referrer. Explicit, never read out of `install_referrer` — different payouts, different
-   *  terms. */
+  /** Engagement path: a promoter-minted transaction code. Never read out of `install_referrer`,
+   *  since the payouts and terms differ. */
   code?: string;
-  /** The publisher asserting this account is brand-new. Only `false` acts, so older
-   *  integrations are unaffected. */
+  /** Publisher asserting the account is brand-new; only `false` acts, so old integrations are safe. */
   is_new_user?: boolean;
   /** the publisher asserting this user cleared its own verification bar */
   identified?: boolean;

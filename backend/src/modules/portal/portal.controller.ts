@@ -28,13 +28,8 @@ import { CampaignAnalyticsQuery, RedemptionsQuery } from './dto/queries.dto';
 import { PortalService } from './portal.service';
 
 /**
- * The tenant console, for both roles: a promoter picks a publisher, agrees rates, funds a
- * campaign and prints codes; a publisher declares its offers, accepts, and withdraws what it
- * earned. Which of the two a session is decides what it may do, and that is the service's job —
- * `AuthGuard` only proves there *is* a live tenant behind the token.
- *
- * Routing only. Path ids are parsed by `ParseUUIDPipe` so a malformed one is rejected here rather
- * than reaching the driver as a 22P02 for `PrismaExceptionFilter` to translate back into a 400.
+ * Tenant console for both roles. `AuthGuard` only proves a live tenant; role checks are the
+ * service's job. `ParseUUIDPipe` rejects malformed ids here instead of as a driver 22P02.
  */
 @ApiTags('Portal')
 @ApiBearerAuth('session')

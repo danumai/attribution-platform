@@ -13,8 +13,8 @@ export function OptionalIdFilter() {
   return (target: object, key: string) => {
     ApiPropertyOptional({ format: 'uuid' })(target, key);
     IsOptional()(target, key);
-    // Rejected here rather than reaching the driver: a malformed uuid used to surface as a 22P02
-    // that PrismaExceptionFilter had to translate back into the 400 it always was.
+    // Rejected here, not by the driver: a malformed uuid surfaced as a 22P02 that
+    // PrismaExceptionFilter had to translate back into the 400 it always was.
     IsUUID()(target, key);
     Transform(({ value }) => (value === '' ? undefined : value))(target, key);
   };

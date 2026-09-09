@@ -34,11 +34,8 @@ import {
 } from './dto/queries.dto';
 
 /**
- * Super admin: reads everything across all orgs and can act on anything. No org scoping here —
- * `AdminGuard` is the whole boundary, and it is declared once for every route on the class.
- *
- * Routing only. Path ids are parsed by `ParseUUIDPipe` so a malformed one is rejected here rather
- * than reaching the driver as a 22P02 for `PrismaExceptionFilter` to translate back into a 400.
+ * Super admin, no org scoping: class-wide `AdminGuard` is the whole boundary. `ParseUUIDPipe`
+ * rejects malformed path ids here instead of as a driver 22P02 via `PrismaExceptionFilter`.
  */
 @ApiTags('Admin')
 @ApiBearerAuth('session')

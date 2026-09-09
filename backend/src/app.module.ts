@@ -7,11 +7,8 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { PublicController } from './modules/public/public.controller';
 
-/**
- * Modules appear here as they gain providers. `PublicController` is still listed directly because
- * it has none — it is the unauthenticated scan redirect, holding its own queries — and a
- * `@Module({ controllers: [...] })` file for it would be two files saying nothing.
- */
+// `PublicController` is listed directly because it has no providers — it is the unauthenticated
+// scan redirect, holding its own queries, so a `@Module` wrapper would say nothing.
 @Module({
   imports: [
     PrismaModule,

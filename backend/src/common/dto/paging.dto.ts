@@ -4,15 +4,8 @@ import { IsInt, IsOptional, IsString, Max, MaxLength, Min, NotContains } from 'c
 import { capped } from '../paging';
 
 /**
- * The row ceiling, declared once instead of at each of the sixteen `capped(limit)` call sites it
- * used to be spelled at. `capped` still owns the clamp — including the reason it clamps the low
- * end, which is that Prisma reads a negative `take` as "last N, reversed".
- *
- * The default lands here rather than in the handler, which needs `@Expose()`: class-transformer
- * takes its key list from the *incoming object*, so a `@Transform` on an absent parameter never
- * runs — `limit` would arrive undefined and fail `@IsInt()` on every unparameterised list call.
- * `@Expose()` adds the key to that list, which is its only job here; the default `exposeAll`
- * strategy makes it a no-op otherwise.
+ * The row ceiling, declared once. `capped` owns the clamp, low end too (Prisma reads a negative
+ * `take` as "last N, reversed"). `@Expose()` lists the key so an absent `limit` defaults, not 400s.
  */
 export function CappedLimit(fallback?: number) {
   return (target: object, key: string) => {
@@ -31,12 +24,8 @@ export class LimitQuery {
 }
 
 /**
- * The window `scanAnalytics` aggregates over. Shared by the admin console and the promoter's own
- * campaign page, which read the same function — an unbounded `days` on one of them is an
- * unbounded aggregate over the whole scan table.
- *
- * `@Expose()` for the same reason as `CappedLimit`: without it the transform is skipped when
- * `days` is absent, and the default never lands.
+ * The window `scanAnalytics` aggregates over, bounded because admin and promoter pages share it and
+ * an unbounded `days` aggregates the whole scan table. `@Expose()` as in `CappedLimit`.
  */
 export function DaysProperty(fallback = 30) {
   return (target: object, key: string) => {

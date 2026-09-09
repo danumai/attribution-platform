@@ -4,10 +4,8 @@ import { PaymentsController } from './payments.controller';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
 
-/**
- * `AuthModule` is imported for `AuthGuard`, which the two promoter-facing routes declare. The
- * webhook deliberately carries no guard — it authenticates by HMAC, not by session.
- */
+// `AuthModule` for `AuthGuard` on the two promoter routes; the webhook has none by design —
+// it authenticates by HMAC, not by session.
 @Module({
   imports: [AuthModule],
   controllers: [PaymentsController],

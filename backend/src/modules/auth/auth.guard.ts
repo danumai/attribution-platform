@@ -19,14 +19,13 @@ export class AuthGuard implements CanActivate {
     const token = (req.headers.authorization ?? '').replace(/^Bearer /, '');
     let claims: SessionClaims;
     try {
-      // Algorithm pinned, not inferred from the token's own header: the one input an attacker
-      // controls must never name the scheme it is checked under.
+      // Algorithm pinned: attacker-controlled input must not name the scheme it is checked under.
       claims = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as SessionClaims;
     } catch {
       throw new UnauthorizedException();
     }
-    // Instant revocation: suspending or offboarding a tenant must cut access now, not whenever its
-    // 12h JWT expires. Costs one primary-key lookup per request.
+    // Instant revocation: suspending a tenant must cut access now, not when its 12h JWT expires.
+    // Costs one primary-key lookup per request.
     const org = await this.db.org.findUnique({
       where: { id: claims.org_id },
       select: { type: true, suspended: true },
@@ -41,9 +40,8 @@ export class AuthGuard implements CanActivate {
 
 @Injectable()
 export class AdminGuard extends AuthGuard {
-  // Redeclared rather than inherited: TypeScript only emits `design:paramtypes` for a class that
-  // writes its own constructor, and that metadata is the only thing telling Nest what to inject.
-  // Omitting it leaves `this.db` undefined at the first request, not at boot.
+  // Redeclared, not inherited: TS only emits `design:paramtypes` for a class with its own
+  // constructor, and Nest needs it to inject. Omitting it leaves `this.db` undefined at request time.
   constructor(db: PrismaService) {
     super(db);
   }

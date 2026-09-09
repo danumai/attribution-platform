@@ -5,20 +5,14 @@ import { BonusDto, BonusListProperty } from './bonus.dto';
 import { IsRedirectUrl } from '../validation';
 
 /**
- * Absent, null and `''` all mean "not set", and `''` specifically is how a PATCH *clears* a
- * column — so it must normalise to null rather than fail the format check on the field. Every
- * field here therefore pairs its transform with `@IsOptional()`, which skips validation for null.
- *
- * One `@Transform` per property, doing both the blank check and the normalisation: class-transformer
- * runs multiple transforms on a property in decorator *application* order, which is bottom-to-top,
- * and a rule that subtle is one reorder away from silently not running.
+ * Absent, null and `''` mean "not set"; `''` clears a column on PATCH, so it normalises to null and
+ * `@IsOptional()` skips it rather than failing the format check. One `@Transform` each, bottom-to-top.
  */
 export const blank = (v: unknown) => v === undefined || v === null || v === '';
 
 /**
- * Where a scan is sent, as a tenant declares it. Shared because signup, `PATCH /v1/orgs/me` and
- * `PATCH /v1/admin/orgs/:id` all accept exactly these — three copies is three chances for one to
- * drift into accepting something the others reject.
+ * Where a scan is sent, as a tenant declares it. Shared so signup, `PATCH /v1/orgs/me` and
+ * `PATCH /v1/admin/orgs/:id` cannot drift into accepting different things.
  */
 export class AppTargetsDto {
   /** the page a desktop scan, or a publisher with no app registered, is sent to */
@@ -49,8 +43,7 @@ export class AppTargetsDto {
   @Matches(/^\d{6,12}$/, {
     message: 'ios_app_id must be the numeric App Store id, e.g. 123456789',
   })
-  // Accepts a number as well as a string, and tolerates the `id` prefix people copy out of a
-  // store URL, exactly as the imperative validator did.
+  // Accepts a number as well as a string, and strips the `id` prefix copied out of a store URL.
   @Transform(({ value }) =>
     blank(value)
       ? null

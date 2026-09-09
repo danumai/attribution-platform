@@ -1,12 +1,8 @@
 /**
- * Money in — the production replacement for ALLOW_SELF_FUNDING.
- *
- * PSP-agnostic on purpose: `checkout` records what the promoter intends to buy and hands back a
- * `payment_id`; the PSP carries that id in its metadata and its webhook adapter POSTs the result
- * to `webhook`, signed. Swapping processors is an adapter, not a schema change.
- *
- * Routing only. The webhook's raw body is pulled off the request here rather than passed down,
- * so the service signs a `Buffer` and knows nothing about express.
+ * Money in — the production replacement for ALLOW_SELF_FUNDING. PSP-agnostic: `checkout` hands
+ * back a `payment_id` the PSP carries in metadata and signs back to `webhook`, so swapping
+ * processors is an adapter, not a schema change. Raw body is read here so the service signs a
+ * `Buffer` and knows nothing about express.
  */
 import {
   Body,

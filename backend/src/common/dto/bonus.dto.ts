@@ -26,9 +26,8 @@ const trimLower = Transform(({ value }) =>
 const trim = Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
 
 /**
- * What the publisher gives a user out of its *own* pocket. `type` is free text with no registry:
- * the platform never issues or fulfils any of these, so an unrecognised type costs it nothing,
- * where anything narrower would be a deploy per invented offer.
+ * What the publisher gives a user out of its *own* pocket. `type` has no registry: the platform
+ * never fulfils these, so an unknown type is harmless where a whitelist would mean a deploy per offer.
  */
 export class BonusDto {
   /** the publisher's own slug for the kind of thing granted: `coins`, `subscription`, … */
@@ -36,8 +35,7 @@ export class BonusDto {
   @IsString()
   @NotContains('\0', { message: '$property must not contain null bytes' })
   @MaxLength(40)
-  // Slug rather than free text: `type` is the key the publisher's app switches on, and a key with
-  // spaces or punctuation is one nobody can match on reliably.
+  // Slug, not free text: the publisher's app switches on this, and punctuation makes it unmatchable.
   @Matches(/^[a-z0-9][a-z0-9_-]*$/, {
     message: '$property must be a slug, e.g. coins or subscription',
   })
@@ -63,8 +61,7 @@ export class BonusDto {
   /** optional amount, for the offers that have one: 100 coins, 7 days */
   @ApiPropertyOptional({ example: 100 })
   @IsOptional()
-  // Coerced rather than required to arrive as a number: `"100"` from a form post was accepted
-  // before and still is. `''` is "not set", not zero.
+  // Coerced so `"100"` from a form post still passes; `''` is "not set", not zero.
   @Transform(({ value }) => (value === '' || value === null ? undefined : Number(value)))
   @IsNumber()
   @Min(0)
@@ -82,12 +79,8 @@ export class BonusDto {
 }
 
 /**
- * DTO instance to the shape that goes into the JSONB column.
- *
- * Not a cast: `Bonus` is a type *alias* precisely because only an alias gets the implicit index
- * signature Prisma's `InputJsonValue` requires, and a class instance has no such signature. The
- * empty-value keys are dropped rather than written as `undefined`, which JSON.stringify would
- * turn into a missing key anyway — this way the row and the response agree.
+ * DTO instance to the JSONB shape. Not a cast: only a type alias gets the implicit index signature
+ * Prisma's `InputJsonValue` wants. Empty keys are dropped so the row and the response agree.
  */
 export function toBonus(dto: BonusDto): Bonus {
   return {
@@ -111,16 +104,11 @@ export function BonusListProperty() {
     ArrayMaxSize(MAX_BONUSES)(target, key);
     ValidateNested({ each: true })(target, key);
     HasUniqueBonusTypes()(target, key);
-    // Builds the element instances by hand instead of `@Type(() => BonusDto)`, because a
-    // `@Transform` on the same property takes precedence over `@Type` — with both, the elements
-    // stay plain objects and `@ValidateNested` has nothing to descend into. The transform is
-    // needed at all because `''` and null mean "no offers", the same as an absent key, and that
-    // is how a publisher clears its list.
+    // Elements built by hand, not `@Type(() => BonusDto)`: a `@Transform` on the same property
+    // wins over `@Type`, leaving plain objects for `@ValidateNested` to find nothing in.
     Transform(({ value }) => {
-      // Absent stays absent, and that distinction is load-bearing: a PATCH that does not mention
-      // `bonuses` must leave the column alone, where one sending `''` or null is clearing it.
-      // Collapsing both to `[]` here would silently wipe a publisher's offers on every unrelated
-      // PATCH. `toBonuses()` maps undefined to `[]` for the create path, which does want that.
+      // Absent leaves the column alone; `''` or null clears it. Collapsing both to `[]` would wipe
+      // a publisher's offers on every unrelated PATCH. `toBonuses()` maps undefined to `[]` on create.
       if (value === undefined) return undefined;
       if (value === '' || value === null) return [];
       if (!Array.isArray(value)) return value; // shape is @IsArray's to reject

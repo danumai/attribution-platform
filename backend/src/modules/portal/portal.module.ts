@@ -4,7 +4,7 @@ import { PortalController } from './portal.controller';
 import { PortalRepository } from './portal.repository';
 import { PortalService } from './portal.service';
 
-/** `AuthModule` is imported for `AuthGuard`, which the controller declares on every route. */
+// `AuthModule` for `AuthGuard`, declared on every controller route.
 @Module({
   imports: [AuthModule],
   controllers: [PortalController],

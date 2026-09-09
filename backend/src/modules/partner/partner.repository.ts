@@ -4,21 +4,10 @@ import { REFERRER_WINDOW_DAYS, SIGNUP_WINDOW_DAYS } from '../../config';
 import { PrismaService, Tx } from '../../config/prisma';
 
 /**
- * Every read and write the Partner API performs, and nothing else — no response shaping, no
- * bonus resolution, no decision logging.
- *
- * Three things live here that look like business rules and are not misplaced:
- *
- *  - the four transactional units (`bindInstall`, `recordAcquisition`, `recordEngagement`,
- *    `confirm`). A transaction is a data-access boundary, and every guard in them — the budget
- *    check, the test-and-set on `consumed`/`redeemed`, the `FOR UPDATE` locks — is only
- *    serialised if it runs inside the same transaction as the write it protects.
- *  - `Rollback`. Whether a refusal commits or unwinds is a transaction decision: the matchers
- *    flip their guard before the budget is known, so a refusal *after* that point has to throw or
- *    it would permanently burn an install that came up short.
- *  - the Prisma error codes. `P2002` means "already counted" on the acquisition unique and
- *    "already rewarded" on the engagement one — two different replays, and the mapping needs to
- *    know which statement raised it.
+ * Every read and write the Partner API performs — no response shaping, bonuses or logging. The
+ * transactional units, `Rollback` and the `P2002` mapping live here because each is a transaction
+ * concern: guards serialise only alongside their write, a refusal after the guard flips must unwind
+ * or it burns the install, and `P2002` means a different replay per statement.
  */
 
 export type MatchMethod = 'referrer' | 'appclip' | 'pasteboard';
@@ -28,8 +17,7 @@ export interface Carried {
   carrier: MatchMethod;
 }
 
-/** A type alias, not an interface: Prisma's `Json` input needs an implicit index signature, and
- *  only aliases carry one. */
+/** Alias, not an interface: Prisma's `Json` input needs the implicit index signature only aliases carry. */
 export type DeviceRisk = {
   emulator: boolean;
   rooted: boolean;
@@ -77,7 +65,7 @@ export type BindResult =
 
 export type AcquisitionResult =
   | { status: 'unattributed'; reason: string }
-  /** the UNIQUE fired: this user was already counted, and the prior row is the honest answer */
+  /** the UNIQUE fired: already counted, so the prior row is the honest answer */
   | { status: 'replay'; campaign_id: string }
   | {
       status: 'attributed';
@@ -107,8 +95,8 @@ export type ConfirmResult =
   | { status: 'already_full'; id: string; fee: number }
   | { status: 'confirmed'; id: string; fee: number; fee_added: number };
 
-/** Unattributed, but roll back first: `claimInstall`/`claimAtSignup` flip their guard before the
- *  budget is known, so returning normally would permanently burn an install that came up short. */
+/** Unattributed, but unwind: `claimInstall`/`claimAtSignup` flip their guard before the budget is
+ *  known, so returning normally would permanently burn an install that came up short. */
 class Rollback extends Error {
   constructor(public reason: string) {
     super(reason);
@@ -121,8 +109,7 @@ export class PartnerRepository {
 
   // ------------------------------------------------------------------------------- matching
 
-  // SKIP LOCKED, not plain FOR UPDATE: a second concurrent claim must come back unattributed
-  // rather than queue behind the first and then re-process the same row.
+  // SKIP LOCKED, not plain FOR UPDATE: a concurrent claim must return unattributed, not queue and re-process the row.
   private byClaimId(tx: Tx, publisherId: string, claimId: string) {
     return tx.$queryRaw<ClaimableScan[]>`
     SELECT s.id, s.campaign_id, c.name AS campaign_name, c.status, c.bonus_types,
@@ -138,9 +125,8 @@ export class PartnerRepository {
     FOR UPDATE OF s SKIP LOCKED`;
   }
 
-  /** Find the scan this install came from, or refuse. No fallback by design — gone, already claimed
-   *  and another publisher's all answer `no_match`. `confidence` is always 100, kept for API
-   *  compatibility. */
+  // Find the scan this install came from, or refuse. No fallback by design — gone, already claimed
+  // and another publisher's all answer `no_match`. `confidence` is always 100, kept for API compatibility.
   private async matchScan(tx: Tx, publisherId: string, carried: Carried): Promise<Match> {
     if (!carried.claimId) return { reason: 'no_claim' };
     const rows = await this.byClaimId(tx, publisherId, carried.claimId);
@@ -149,9 +135,8 @@ export class PartnerRepository {
       : { reason: 'no_match' };
   }
 
-  /** Signup on the preferred path: matched at first open, so this only checks the install is still
-   *  spendable. `redeemed` is flipped inside the `updateMany` that tests it, so two simultaneous
-   *  signups are safe. The scan is deliberately not re-matched. */
+  // Preferred signup path: matched at first open, so this only checks the install is still spendable.
+  // `redeemed` flips inside the `updateMany` that tests it; the scan is deliberately not re-matched.
   private async claimInstall(tx: Tx, publisherId: string, installId: string): Promise<Match> {
     // Shape-checked first: `::uuid` throws 22P02 on a malformed value rather than returning empty.
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(installId))
@@ -174,7 +159,7 @@ export class PartnerRepository {
     const row = rows[0];
     if (!row) return { reason: 'no_match' };
     if (row.install_expired) return { reason: 'install_expired' };
-    // Re-checked here, not just at first open: pausing a campaign has to stop spending immediately.
+    // Re-checked, not just at first open: pausing a campaign must stop spending immediately.
     if (row.status !== 'active') return { reason: 'campaign_not_active' };
 
     const taken = await tx.install.updateMany({
@@ -190,16 +175,14 @@ export class PartnerRepository {
     };
   }
 
-  /** The engagement path: a code minted against one real purchase, scanned once, paid once.
-   *  `scans.consumed` is deliberately not checked — that is the acquisition guard, and both rewards
-   *  are payable on one scan. The engagement guarantee is its own partial unique index. */
+  // Engagement path: one code per real purchase, paid once. `scans.consumed` deliberately unchecked —
+  // that is the acquisition guard; both rewards pay on one scan, and engagement has its own partial unique index.
   private async claimCode(
     tx: Tx,
     publisherId: string,
     code: string,
   ): Promise<ClaimableCode | { reason: string }> {
-    // `FOR UPDATE OF q` serialises two simultaneous claims for one code here, rather than letting
-    // both reach the INSERT and relying on the unique index to tell one of them it lost.
+    // `FOR UPDATE OF q` serialises two simultaneous claims here, rather than letting both reach the INSERT.
     const rows = await tx.$queryRaw<(ClaimableCode & { mode: string })[]>`
     SELECT q.id AS qr_code_id, s.id AS scan_id, c.id AS campaign_id, c.name AS campaign_name,
            c.status, c.mode, c.bonus_types, p.engagement_rate, p.platform_fee_bps
@@ -216,22 +199,21 @@ export class PartnerRepository {
     LIMIT 1
     FOR UPDATE OF q`;
     const row = rows[0];
-    // Four situations share one answer on purpose — unknown code, voided, another publisher's, and
-    // one nobody has scanned. Telling them apart would let a publisher probe the whole platform.
+    // One answer for unknown, voided, another publisher's and unscanned codes on purpose: telling them
+    // apart would let a publisher probe the whole platform.
     if (!row) return { reason: 'no_match' };
     if (row.mode !== 'engagement') return { reason: 'not_engagement' };
     if (row.status !== 'active') return { reason: 'campaign_not_active' };
     return row;
   }
 
-  /** Legacy single-call path: match and pay in one request, no install row. Same deterministic
-   *  lookup, kept for publishers already integrated. */
+  // Legacy single-call path: match and pay in one request, no install row. Kept for already-integrated publishers.
   private async claimAtSignup(tx: Tx, publisherId: string, carried: Carried): Promise<Match> {
     const m = await this.matchScan(tx, publisherId, carried);
     if ('reason' in m) return m;
     if (m.scan.status !== 'active') return { reason: 'campaign_not_active' };
 
-    // No install row to guard with, so the scan itself is the guard — same atomic test-and-set.
+    // No install row, so the scan itself is the guard — same atomic test-and-set.
     const consumed = await tx.scan.updateMany({
       where: { id: m.scan.id, consumed: false },
       data: { consumed: true },
@@ -243,9 +225,8 @@ export class PartnerRepository {
   // ------------------------------------------------------------------------------- first open
 
   /**
-   * Consume the scan and bind an install to it. Nothing is paid — the budget is only tested, so a
-   * campaign that cannot afford the guest tier binds nothing rather than burning the scan on a
-   * signup that would fail later anyway.
+   * Consume the scan and bind an install. Nothing is paid, the budget is only tested: a campaign
+   * that cannot afford the guest tier binds nothing rather than burning the scan on a doomed signup.
    */
   bindInstall(
     publisherId: string,
@@ -260,12 +241,11 @@ export class PartnerRepository {
       if (scan.status !== 'active')
         return { status: 'unattributed', reason: 'campaign_not_active' };
 
-      // Bind nothing against a campaign that cannot pay: the signup would fail on budget anyway
-      // and would have burned the scan getting there.
+      // Bind nothing against a campaign that cannot pay: the signup would fail on budget having burned the scan.
       if ((await lockedBalance(tx, `campaign:${scan.campaign_id}`)) < scan.guest_rate)
         return { status: 'unattributed', reason: 'budget_exhausted' };
 
-      // One install per scan, independent of the matcher's lock rather than a consequence of it.
+      // One install per scan, independent of the matcher's lock rather than relying on it.
       const consumed = await tx.scan.updateMany({
         where: { id: scan.id, consumed: false },
         data: { consumed: true },
@@ -299,10 +279,7 @@ export class PartnerRepository {
 
   // ------------------------------------------------------------------------------ acquisition
 
-  /**
-   * Match, count the signup and pay the fee, in one transaction. `install_id` takes the preferred
-   * path; `carried` is the legacy single-call shape.
-   */
+  /** Match, count the signup and pay, in one transaction. `install_id` is preferred; `carried` is legacy. */
   async recordAcquisition(
     publisherId: string,
     args: {
@@ -313,7 +290,7 @@ export class PartnerRepository {
     },
   ): Promise<AcquisitionResult> {
     const { install_id, carried, publisher_user_ref, identified } = args;
-    // Set when the UNIQUE below fires: no query can run inside an aborted Postgres transaction.
+    // Set when the UNIQUE below fires: no query can run in an aborted Postgres transaction.
     let replayCampaignId: string | null = null;
 
     const fresh = await this.db
@@ -326,8 +303,8 @@ export class PartnerRepository {
 
         const fee = identified ? scan.coin_rate : scan.guest_rate;
 
-        // Fail closed, thrown rather than returned so the install/scan is released — see `Rollback`.
-        // Unattributed rather than an error: the user has already signed up.
+        // Fail closed, thrown so the install/scan is released (see `Rollback`), and unattributed
+        // rather than an error because the user has already signed up.
         if ((await lockedBalance(tx, `campaign:${scan.campaign_id}`)) < fee)
           throw new Rollback('budget_exhausted');
 
@@ -347,8 +324,7 @@ export class PartnerRepository {
             select: { id: true },
           });
         } catch (e: any) {
-          // UNIQUE (campaign_id, publisher_user_ref): already counted. Roll back so the scan is not
-          // left consumed, and answer from the existing row.
+          // UNIQUE (campaign_id, publisher_user_ref): already counted. Roll back so the scan is not left consumed.
           if (e.code === 'P2002') {
             replayCampaignId = scan.campaign_id;
             throw new ConflictException('duplicate_user');
@@ -374,7 +350,7 @@ export class PartnerRepository {
         };
       })
       .catch((e): AcquisitionResult | null => {
-        // Rolled back on purpose; the caller still gets a 200 and the install stays claimable.
+        // Rolled back on purpose: still a 200, and the install stays claimable.
         if (e instanceof Rollback) return { status: 'unattributed', reason: e.reason };
         if (replayCampaignId) return null; // handled by the caller, as a replay rather than an error
         throw e;
@@ -385,10 +361,9 @@ export class PartnerRepository {
   }
 
   /**
-   * The row a replayed acquisition answers from. `kind` matches the PARTIAL unique index's
-   * predicate — without it Postgres cannot prove the index applies, and an unscoped findFirst can
-   * hand back the engagement row for a user who has both, which is a different fee and a
-   * `/confirm` that answers `already_full`.
+   * The row a replayed acquisition answers from. `kind` matches the PARTIAL unique index predicate —
+   * without it Postgres cannot prove the index applies, and an unscoped findFirst can return the
+   * engagement row for a user with both: wrong fee, and `/confirm` answers `already_full`.
    */
   priorAcquisition(campaignId: string, publisher_user_ref: string) {
     return this.db.redemption.findFirst({
@@ -410,9 +385,9 @@ export class PartnerRepository {
   // ------------------------------------------------------------------------------- engagement
 
   /**
-   * The engagement payout: a repeat purchase, paid on the code that proves it happened. Shares the
-   * budget lock, ledger, rollback-on-refusal and replay-never-re-pay with the acquisition path.
-   * No guest tier: a repeat customer already transacted with the promoter.
+   * Engagement payout: a repeat purchase, paid on the code that proves it. Shares the budget lock,
+   * ledger, rollback-on-refusal and replay-never-re-pay with acquisition. No guest tier — a repeat
+   * customer already transacted with the promoter.
    */
   async recordEngagement(
     publisherId: string,
@@ -427,7 +402,7 @@ export class PartnerRepository {
         if ('reason' in m) return { status: 'unattributed', reason: m.reason };
 
         const fee = m.engagement_rate;
-        // Fail closed, thrown so the whole transaction is undone and the code stays claimable.
+        // Fail closed, thrown so the transaction unwinds and the code stays claimable.
         if ((await lockedBalance(tx, `campaign:${m.campaign_id}`)) < fee)
           throw new Rollback('budget_exhausted');
 
@@ -441,7 +416,7 @@ export class PartnerRepository {
               publisher_user_ref,
               coins: fee,
               kind: 'engagement',
-              // Settled the moment it is written: nothing is held back for `/confirm` to release.
+              // Settled on write: nothing held back for `/confirm` to release.
               identified: true,
               match_method: 'code',
               confidence: 100,
@@ -492,14 +467,12 @@ export class PartnerRepository {
   // ---------------------------------------------------------------------------------- confirm
 
   /**
-   * Release the held-back part of a guest-tier fee. Idempotent, and every guard runs under the
-   * `FOR UPDATE OF rd` lock, so the domain refusals are thrown from inside the transaction rather
-   * than reported back to the service — outside the lock they would not be serialised.
+   * Release the held-back part of a guest-tier fee. Idempotent; domain refusals are thrown from
+   * inside the transaction because only under `FOR UPDATE OF rd` are the guards serialised.
    */
   confirm(publisherId: string, id: string): Promise<ConfirmResult> {
     return this.db.$transaction(async (tx: Tx): Promise<ConfirmResult> => {
-      // Raw because `FOR UPDATE OF rd` locks the attribution row across the join, and that lock
-      // is what makes a concurrent double-confirm safe.
+      // Raw because `FOR UPDATE OF rd` locks the attribution row across the join, making a concurrent double-confirm safe.
       const rows = await tx.$queryRaw<
         {
           id: string;
@@ -522,8 +495,8 @@ export class PartnerRepository {
         FOR UPDATE OF rd`;
       const red = rows[0];
       if (!red) throw new NotFoundException('attribution not found');
-      // Suspending a partnership must stop payouts too; every other spend filters on it in SQL.
-      // Surfaced as a reason rather than filtered out, so it does not read like a lost attribution.
+      // Suspending a partnership must stop payouts too; surfaced as a reason rather than filtered
+      // out, so it does not read like a lost attribution.
       if (red.partnership_status !== 'active')
         throw new ConflictException('partnership_not_active');
       if (red.identified) return { status: 'already_full', id: red.id, fee: red.coins };
@@ -535,7 +508,7 @@ export class PartnerRepository {
       if (delta > 0) {
         if ((await lockedBalance(tx, `campaign:${red.campaign_id}`)) < delta)
           throw new ConflictException('budget_exhausted');
-        // Same split as the guest payment, so the cut is taken on the whole coin_rate.
+        // Same split as the guest payment, so the cut lands on the whole coin_rate.
         await payout(tx, red.campaign_id, publisherId, delta, red.platform_fee_bps, `upgrade:${red.id}`);
       }
       await tx.redemption.update({

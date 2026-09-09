@@ -1,49 +1,36 @@
 /**
- * The one screen an actual scanner sees, dressed as the printed stub being validated.
- *
- * It exists for a functional reason before an aesthetic one: iOS has no install-referrer
- * channel, so this browser moment is the only place the claim can be handed to the pasteboard
- * before the App Store takes the session away.
- *
- * Three constraints shape it: self-contained (CSP is `default-src 'none'`, relaxed only to a
- * nonce and `data:`, so nothing loads over the network), front-loaded (~900ms before hand-off),
- * and legible at rest (reduced motion, and with script blocked entirely, still works).
+ * The one screen a scanner sees. iOS has no install-referrer channel, so this is the only place to
+ * hand the claim to the pasteboard before the App Store takes the session. Must be self-contained
+ * (CSP `default-src 'none'` + nonce/`data:`), ~900ms, and legible with no motion and no script.
  */
 
 /**
- * How long the page is held before the hand-off starts. Not decoration: a `location.replace` in
- * the same tick as page load is swallowed by in-app webviews (Instagram, TikTok).
- *
- * ponytail: fixed hold. `client.held_ms` on every scan row is the measurement to shorten it
- * against if drop-off ever justifies it.
+ * Hold before hand-off starts: a `location.replace` in the page-load tick is swallowed by in-app
+ * webviews (Instagram, TikTok). `client.held_ms` per scan row is the data to shorten it against.
  */
 const HOLD_MS = 900;
 
 /**
- * The hold when this page is carrying a claim. Safari only permits a clipboard write inside a
- * user gesture, so on iOS the tap is the carrier and a 900ms auto-hand-off would mean nobody
- * ever taps. This is the bail-out for someone who put the phone down: they still reach the
- * store, simply unattributed.
+ * Hold when carrying a claim. Safari allows clipboard writes only inside a user gesture, so the
+ * tap is the carrier and a 900ms auto-hand-off would mean nobody taps; this is the unattributed bail-out.
  */
 const CARRY_HOLD_MS = 9000;
 
-/** The hand-off itself: card away, store tile forward. Runs after the hold, then it navigates. */
+/** Hand-off animation: card away, store tile forward, then navigate. */
 const EXIT_MS = 340;
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-/** Laid fibre as a data URI rather than a file: one request fewer on a page whose job is to get
- *  out of the way. The same tile the console uses. */
+/** Fibre as a data URI, not a file: one request fewer. Same tile the console uses. */
 const FIBRE =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23f)' opacity='.5'/%3E%3C/svg%3E\")";
 
 export type Store = 'ios' | 'android' | 'web';
 
 /**
- * The destination's own mark, drawn rather than fetched. Real brand colours against the house
- * duotone rule — this tile's job is instant recognition of where the next tap lands. The
- * geometry is authored rather than traced, so it is not passed off as the vendors' asset.
+ * Destination marks, drawn not fetched. Brand colours override the house duotone rule for instant
+ * recognition; geometry is authored rather than traced, so it is not the vendors' asset.
  */
 const MARKS: Record<Store, { heading: string; title: string; svg: string }> = {
   ios: {
@@ -58,8 +45,7 @@ const MARKS: Record<Store, { heading: string; title: string; svg: string }> = {
   android: {
     heading: 'Opening Google Play',
     title: 'Google Play',
-    // Four facets folded about the spine. Each is a flat gradient, which is what gives the mark
-    // its fold without a single filter.
+    // Four facets folded about the spine; flat gradients give the fold without a filter.
     svg: `<svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
     <defs>
       <linearGradient id="pl" x1="0" y1="0" x2="1" y2="1">
@@ -82,8 +68,7 @@ const MARKS: Record<Store, { heading: string; title: string; svg: string }> = {
   </svg>`,
   },
   web: {
-    // Filled in by the caller with the publisher's own name: "Opening their site" reads as
-    // nowhere, and this tile is the one case where the destination has no name of its own.
+    // Caller fills in the publisher's name — the only tile whose destination has no name of its own.
     heading: '',
     title: 'Website',
     svg: `<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#fff"
@@ -95,17 +80,14 @@ const MARKS: Record<Store, { heading: string; title: string; svg: string }> = {
 };
 
 interface InterstitialCopy {
-  /** the publisher's org name — the destination this scan routes to */
+  /** publisher org name — the destination this scan routes to */
   destination: string;
-  /** where the Continue link and the scripted redirect both point */
+  /** target of both the Continue link and the scripted redirect */
   go: string;
   nonce: string;
-  /** which listing the scan resolves to; picks the tile, the headline and the title */
+  /** listing the scan resolves to; picks tile, headline and title */
   store: Store;
-  /**
-   * Whether the scanner's tap has to carry the claim to the clipboard — iOS with no App Clip.
-   * It changes the timings as much as the copy: every automatic exit sits behind the tap.
-   */
+  /** iOS with no App Clip: the tap must carry the claim to the clipboard, so every auto exit waits on it. */
   carry?: boolean;
 }
 
@@ -118,8 +100,7 @@ export function interstitialHtml({
 }: InterstitialCopy): string {
   const href = esc(go);
   const hold = carry ? CARRY_HOLD_MS : HOLD_MS;
-  // The no-script fallback must outlast the scripted one, or the two race and the slower path
-  // wins on a fast phone.
+  // No-script fallback must outlast the scripted hold, or the two race on a fast phone.
   const refresh = Math.ceil(hold / 1000) + 3;
   const dest = esc(destination);
   const mark = MARKS[store] ?? MARKS.web;

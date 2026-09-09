@@ -3,10 +3,7 @@ import { AuthController } from './auth.controller';
 import { AuthGuard, AdminGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 
-/**
- * The guards are exported as providers so every module that `@UseGuards(AuthGuard)` gets the same
- * instance rather than one constructed per consuming module.
- */
+// Guards are exported as providers so every `@UseGuards(AuthGuard)` shares one instance.
 @Module({
   controllers: [AuthController],
   providers: [AuthService, AuthGuard, AdminGuard],

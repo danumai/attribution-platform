@@ -34,8 +34,7 @@ import { newClaimId } from '../auth/tokens';
 @ApiTags('Public')
 @Controller()
 export class PublicController {
-  // Liveness + readiness. Hits the DB on purpose: a process that cannot reach Postgres serves
-  // nothing but 500s and should be pulled from rotation.
+  // Liveness + readiness. Hits the DB on purpose: no Postgres means 500s only, so pull from rotation.
   @Get('healthz')
   async health(@Res() res: Response) {
     try {
@@ -52,10 +51,8 @@ export class PublicController {
   }
 
   /**
-   * The same scan, at the URL an App Clip is invoked by. The camera recognises the registered
-   * `/c/<slug>/` prefix offline and offers the clip card; the clip then calls this URL with
-   * `?format=json` to collect the claim id and writes it to the App Group container its full app
-   * reads after install. Everything else is identical to `/r/:code`.
+   * `/r/:code` at the App Clip invocation URL: camera matches the registered `/c/<slug>/` prefix
+   * offline, then the clip calls with `?format=json` to store the claim id for its full app.
    */
   @Get('c/:slug/:code')
   async appClipScan(
@@ -69,9 +66,8 @@ export class PublicController {
   }
 
   /**
-   * Which App Clips this domain vouches for. Apple verifies the association in both directions,
-   * and one document lists every registered publisher. Cached for an hour; the ids are
-   * CHECK-constrained because one malformed entry invalidates the file for everyone at once.
+   * Every App Clip this domain vouches for, in one Apple-verified document. Cached 1h; ids are
+   * CHECK-constrained since one malformed entry invalidates the file for all publishers.
    */
   @Get('.well-known/apple-app-site-association')
   async appSiteAssociation(@Res() res: Response) {
@@ -86,19 +82,17 @@ export class PublicController {
     res.json(aasa(orgs.map((o) => o.ios_appclip_id!)));
   }
 
-  /** One handler because it is one event — the only differences are which URL the QR encoded and
-   *  whether an App Clip wants JSON. */
+  /** One handler because it is one event — only the QR's URL and whether an App Clip wants JSON differ. */
   private async handleScan(
     code: string,
     req: Request,
     res: Response,
-    /** the slug from an App Clip invocation URL, checked against the publisher that owns it */
+    /** App Clip invocation slug, checked against the publisher that owns it */
     slug: string | null,
-    /** the App Clip collecting its claim id, rather than a browser being redirected */
+    /** App Clip collecting its claim id, rather than a browser being redirected */
     json: boolean,
   ) {
-    // An App Clip is code, not a browser: it gets the reason as data it can act on, where a
-    // browser gets the page a human can read.
+    // An App Clip is code, not a browser: reason as actionable data, not a human-readable page.
     const end = (reason: string) =>
       json
         ? res.status(reason === 'rate_limited' ? 429 : 410).json({ ok: false, reason })
@@ -124,8 +118,7 @@ export class PublicController {
                 status: true,
                 publisher: {
                   select: {
-                    // Printed on the interstitial as the destination field — the scanner is
-                    // told where they are being sent before they get sent there.
+                    // Printed on the interstitial's destination field, before the redirect happens.
                     name: true,
                     landing_url: true,
                     android_package: true,
@@ -148,33 +141,29 @@ export class PublicController {
     const campaign = qr.campaign;
     if (campaign.status !== 'active')
       return end(campaign.status === 'paused' ? 'paused' : 'ended');
-    // Checked at campaign creation, but an admin can suspend a partnership afterwards, and that
-    // has to stop scans or the lever does nothing while claims keep paying out.
+    // Re-checked here: an admin suspending a partnership after creation must stop scans, or claims
+    // keep paying out.
     if (campaign.partnership.status !== 'active') return end('partnership_inactive');
     if ((await balance(`campaign:${campaign.id}`)) <= 0) return end('budget');
 
-    // App Store Connect routes on the slug prefix, so a mismatch means the URL was assembled by
-    // hand against the wrong QR. Honouring it would hand one publisher's scan to another's clip.
+    // App Store Connect routes on the slug prefix; a mismatch is a hand-assembled URL that would
+    // hand one publisher's scan to another's clip.
     if (slug !== null && slug !== campaign.partnership.publisher.slug) return end('invalid');
 
-    // Resolve the destination *before* burning a use: a publisher with no app and no web
-    // fallback would otherwise eat the print run's uses redirecting nobody.
+    // Resolve the destination *before* burning a use, or a publisher with no app and no web
+    // fallback eats the print run's uses redirecting nobody.
     const platform = detectPlatform(req.headers['user-agent'] ?? '');
     const claim_id = newClaimId();
     const publisher = campaign.partnership.publisher;
 
     /**
-     * An engagement scan goes to the publisher's App Link / Universal Link so the OS can open the
-     * app when it is installed. Two things ride along, neither spendable alone: `qrm_code`, the
-     * transaction code its backend claims with a server-side key, and `qrm_fallback`, built here
-     * because it contains the Play referrer and one assembled wrong is silent zero attribution.
-     *
-     * On iOS the fallback is the interstitial, not the bare listing: a traveller without the app
-     * is about to become an acquisition too.
+     * Engagement scans use the App Link / Universal Link so an installed app opens, carrying
+     * `qrm_code` (claimed server-side) and `qrm_fallback` (built here: holds the Play referrer, and
+     * one assembled wrong is silent zero attribution). iOS fallback is the interstitial, not the
+     * bare listing — an app-less scanner is an acquisition too.
      */
     const engagement = campaign.mode === 'engagement';
-    // `campaign_token` only ever reaches an App Store campaign link, which reports a download
-    // count per campaign and nothing per user.
+    // `campaign_token` only reaches an App Store campaign link: downloads per campaign, nothing per user.
     const targets = { ...publisher, campaign_token: campaignToken(campaign.id) };
     const iosHandoff = platform === 'ios' && publisher.ios_app_id;
     const destination = engagement
@@ -188,11 +177,10 @@ export class PublicController {
       : storeUrl(platform, targets, claim_id);
     if (!destination) return end('no_destination');
 
-    // One transaction, because the two writes are one fact. A use claimed without the matching
-    // scan row burns a use of a physical print run that can then never be attributed.
+    // One transaction: a use claimed without its scan row burns a printed use that can never be attributed.
     const claimed = await prisma.$transaction(async (tx) => {
-      // Claim one use atomically — both the expiry and single/multi-use check, so two scans cannot
-      // both take the last one. Raw because `uses < max_uses` compares two columns.
+      // Atomic expiry + max_uses check so two scans cannot both take the last use. Raw because
+      // `uses < max_uses` compares two columns.
       const rows = await tx.$queryRaw<{ uses: number }[]>`
         UPDATE qr_codes SET uses = uses + 1
         WHERE id = ${qr.id}::uuid AND NOT voided
@@ -201,8 +189,8 @@ export class PublicController {
         RETURNING uses`;
       if (!rows.length) return false;
 
-      // An opaque id, and nothing that describes the handset. The reporting columns ride along on
-      // the same insert, so the hot path never costs a second write.
+      // Opaque id, nothing describing the handset. Reporting columns ride the same insert to keep
+      // the hot path at one write.
       await tx.scan.create({
         data: {
           qr_code_id: qr.id,
@@ -219,53 +207,44 @@ export class PublicController {
     if (!claimed)
       return end(qr.expires_at && qr.expires_at <= new Date() ? 'expired' : 'used_up');
 
-    // The one response that hands a claim id to a device, and safe for the same reason Play's
-    // referrer is: inert without the publisher's server-side API key.
+    // The only response handing a claim id to a device — inert without the publisher's server-side API key.
     if (json)
       return res.json({
         ok: true,
         claim_id,
         campaign_id: campaign.id,
         publisher: publisher.name,
-        /** What this campaign advertises, scoped to its mode. Previously the whole raw column,
-         *  which had the clip promising a repeat-purchase offer to somebody with no app yet. */
+        /** Scoped to campaign mode — the raw column had the clip promising repeat-purchase offers
+         *  to people with no app yet. */
         bonuses: campaignBonuses(publisher.bonuses, campaign.mode, campaign.bonus_types),
-        /** where to send someone who wants the full app, if the clip prefers a link to SKOverlay */
+        /** full-app link, for clips that prefer a link to SKOverlay */
         store_url: destination,
       });
 
-    // The hand-off screen. On iOS it is load-bearing rather than decorative: the pasteboard
-    // write needs a user gesture, so this page is where the scanner's tap happens. Skipped where
-    // it buys nothing — Android with a Play listing, desktop and app-less publishers, and an
-    // engagement scan with a deep link (whose `qrm_fallback` routes through `/i/:claim_id`).
+    // Hand-off screen, load-bearing on iOS: the pasteboard write needs the scanner's tap. Skipped
+    // for Android/Play, desktop, app-less publishers, and deep-linked engagement (`/i/:claim_id`).
     if (iosHandoff && !(engagement && publisher.deeplink_url))
       return this.interstitial(res, claim_id, publisher.name, 'ios');
 
-    // Straight to the store listing. No token, no code, nothing the app can read and spend — on
-    // Android the claim id travels only inside Play's install-referrer channel.
+    // Straight to the listing, nothing spendable in the URL — on Android the claim id travels only
+    // inside Play's install-referrer channel.
     res.redirect(destination);
   }
 
   /**
-   * The only page in this API that runs script, so also the only one with a relaxed CSP.
-   *
-   * Fallbacks all the way down, because the failure mode is silent:
-   *   - script runs             → the tap writes the claim to the clipboard, then hands off
-   *   - clipboard write refused → the hand-off still happens; the install is simply organic
-   *   - script blocked / errors → `<meta refresh>`, so the scanner still reaches the store
-   *   - all of it fails         → the Continue key is a real anchor to a real URL
-   *
-   * `claim_id` is base64url and cannot carry markup, but it is interpolated into an href and a
-   * script literal, so the shape is asserted rather than assumed.
+   * The only scripted page here, so the only relaxed CSP. Failures are silent, hence layers: tap
+   * carries then hands off, a refused clipboard still hands off (organic install), blocked script
+   * falls to `<meta refresh>`, and Continue is a real anchor. `claim_id`'s shape is asserted
+   * because it lands in an href and a script literal.
    */
   private interstitial(res: Response, claim_id: string, destination: string, store: Store) {
-    // The pasteboard carrier is the iOS fallback for publishers with no App Clip. Everywhere else
-    // the claim already has a carrier or there is no install to attribute.
+    // Pasteboard carrier is the iOS-without-App-Clip fallback; elsewhere the claim already has a
+    // carrier or there is no install to attribute.
     const carry = store === 'ios';
     if (!/^[A-Za-z0-9_-]{6,64}$/.test(claim_id)) throw new Error('malformed claim id');
     const nonce = randomBytes(16).toString('base64');
-    // Overrides the global `default-src 'none'`. A nonce rather than 'unsafe-inline', so a future
-    // injection still cannot execute. `data:` is for the fibre tile.
+    // Overrides the global `default-src 'none'`. Nonce, not 'unsafe-inline', so injected script
+    // still cannot execute. `data:` is for the fibre tile.
     res.setHeader(
       'Content-Security-Policy',
       `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; ` +
@@ -280,12 +259,9 @@ export class PublicController {
   }
 
   /**
-   * The interstitial, reached from an engagement deep link that found no app installed. `/r/:code`
-   * renders this inline, but the OS decides offline whether the app opens, so the hand-off screen
-   * needs a URL of its own to be a deep link's `qrm_fallback`.
-   *
-   * No use is burned and no scan created. An unknown or already-bound claim id is turned away, so
-   * a replayed link cannot re-open the signal window on a paid attribution.
+   * The interstitial at its own URL, so a deep link's `qrm_fallback` can reach it when the OS finds
+   * no app installed. Burns no use and creates no scan; unknown or already-bound claim ids are
+   * rejected so a replayed link cannot re-open the signal window on a paid attribution.
    */
   @Get('i/:claimId')
   async handoff(@Param('claimId') claimId: string, @Req() req: Request, @Res() res: Response) {
@@ -306,17 +282,13 @@ export class PublicController {
   }
 
   /**
-   * Second half of the interstitial: hand the scanner on to the store. A GET so the no-script
-   * `<meta refresh>` and the visible link reach it too.
-   *
-   * This URL is also the pasteboard payload — what the tap writes and the SDK reads back at first
-   * open — so a scanner who pastes it somewhere gets the listing they were going to anyway.
+   * Hands the scanner to the store. A GET so the no-script `<meta refresh>` and visible link reach
+   * it too. Also the pasteboard payload the SDK reads at first open, so pasting it just yields the listing.
    */
   @Get('go/:claimId')
   async go(
     @Param('claimId') claimId: string,
-    // Two keys, both about this page rather than the device: how long it was held, and whether
-    // the scanner tapped or the bail-out fired.
+    // About this page, not the device: how long it was held, and tap vs. bail-out.
     @Query() q: Record<string, string>,
     @Req() req: Request,
     @Res() res: Response,
@@ -352,8 +324,8 @@ export class PublicController {
     });
     if (!scan) return end('invalid');
 
-    // What the hand-off screen cost, and nothing about the handset. The `consumed` guard stops a
-    // replayed link rewriting the record after an install is bound.
+    // Hand-off cost only, nothing about the handset. `consumed` guard stops a replayed link
+    // rewriting the record after an install is bound.
     const client = clientSignals(q);
     if (!scan.consumed && client)
       await prisma.scan.updateMany({
@@ -404,8 +376,8 @@ export class PublicController {
       style = validateStyle(style);
     }
     const url = scanUrl(BASE_URL, qr.code, qr.campaign.partnership.publisher.slug);
-    // The flat PNG encoder cannot express shapes, gradients, logos or frames — those styles are
-    // SVG-only here, and the studio rasterises them in the browser instead.
+    // The flat PNG encoder cannot express shapes, gradients, logos or frames — SVG-only here, and
+    // the studio rasterises them in the browser.
     if (format === 'png' && !isAdvanced(style)) {
       res.setHeader('Content-Type', 'image/png');
       res.send(await renderPng(url, style));
@@ -415,8 +387,7 @@ export class PublicController {
     }
   }
 
-  // Style preview. A logo data URL is far past what a query string can carry, so the live editor
-  // posts the style instead of encoding it into the image URL.
+  // Style preview via POST: a logo data URL is far past what a query string can carry.
   @Post('v1/qr-codes/:id/preview')
   async qrPreview(
     @Param('id') id: string,
@@ -438,8 +409,7 @@ export class PublicController {
     if (!qr) throw new NotFoundException();
     const style = validateStyle(body?.style ?? {});
     res.setHeader('Content-Type', 'image/svg+xml');
-    // Same URL the printed code will carry — a preview that encodes a different one is a preview
-    // of something else.
+    // Same URL the printed code will carry, or it is a preview of something else.
     res.send(
       await renderSvg(scanUrl(BASE_URL, qr.code, qr.campaign.partnership.publisher.slug), style),
     );

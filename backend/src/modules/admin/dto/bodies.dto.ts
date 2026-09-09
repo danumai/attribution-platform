@@ -20,9 +20,8 @@ import {
 import { AppTargetsDto } from '../../../common/dto/app-targets.dto';
 
 /**
- * Free text an admin types to explain a privileged override, stored in the audit detail. Bounded
- * like every other free-text field crossing the boundary — it was not, and an unbounded string
- * went straight into a JSONB column that every notification listing then renders.
+ * Why an admin overrode something, stored in the audit detail. Bounded because it lands in a JSONB
+ * column that every notification listing renders.
  */
 export function ReasonProperty(max = 300) {
   return (target: object, key: string) => {
@@ -45,8 +44,7 @@ export class PatchOrgDto extends AppTargetsDto {
   @IsOptional()
   @IsString()
   @NotContains('\0', { message: '$property must not contain null bytes' })
-  // Bounded like every other free-text field crossing the boundary: unbounded, one PATCH bloats
-  // the row and every listing that renders it.
+  // Bounded: unbounded, one PATCH bloats the row and every listing that renders it.
   @MinLength(1)
   @MaxLength(120)
   name?: string;
@@ -68,11 +66,8 @@ export class PatchOrgDto extends AppTargetsDto {
 
 export class PatchPartnershipDto {
   /**
-   * The four negotiated numbers. Deliberately carrying no range decorators: `validateRates`
-   * resolves a patch against the row already stored and enforces `guest_rate <= coin_rate` on the
-   * *post-patch* pair, which needs the current values and so cannot happen in a DTO. Duplicating
-   * the bounds here would make a money rule with two definitions, which is a money rule with two
-   * answers.
+   * The four negotiated numbers, with no range decorators on purpose: `validateRates` checks
+   * `guest_rate <= coin_rate` post-patch, which needs the stored row. One money rule, one definition.
    */
   @ApiPropertyOptional({ minimum: 1, maximum: 100_000 })
   @IsOptional()
@@ -96,8 +91,8 @@ export class PatchPartnershipDto {
   engagement_rate?: number;
 
   /**
-   * Admin-only, unlike the four negotiated rates: the take rate is the platform's own side of the
-   * deal, and neither counterparty may set it. Bounded here because nothing else defines it.
+   * Admin-only: the take rate is the platform's own side of the deal, so neither counterparty may
+   * set it. Bounded here because nothing else defines it.
    */
   @ApiPropertyOptional({ minimum: 0, maximum: 10_000 })
   @IsOptional()
@@ -107,9 +102,8 @@ export class PatchPartnershipDto {
   platform_fee_bps?: number;
 
   /**
-   * `suspended` rather than `pending` is the pause lever: `pending` is the publisher's own inbox
-   * state and it can accept its way out of one, which made an admin suspension revertible by the
-   * org it was aimed at.
+   * `suspended`, not `pending`, is the pause lever: `pending` is the publisher's inbox state and it
+   * can accept its way out of one, making an admin suspension revertible by its target.
    */
   @ApiPropertyOptional({ enum: ['pending', 'active', 'suspended'] })
   @IsOptional()
@@ -129,15 +123,13 @@ export class PatchCampaignDto {
 }
 
 /**
- * Per-code override of the default expiry/single-use rules — e.g. a permanent code on store
- * signage. `null` clears the limit; an absent key leaves the field alone, which is why these use
- * `@ValidateIf` rather than `@IsOptional()`: the latter skips null too, and null is a *value* here.
+ * Per-code override of the default expiry/single-use rules, e.g. permanent store signage. `null`
+ * clears the limit and absent leaves it alone, so `@ValidateIf` — `@IsOptional()` skips null too.
  */
 export class PatchQrCodeDto {
   @ApiPropertyOptional({ nullable: true, format: 'date-time' })
   @ValidateIf((o) => o.expires_at !== undefined && o.expires_at !== null)
-  // Stricter than the old `Date.parse` check, which also accepted `Jan 1 2026`. The message always
-  // claimed ISO; now it is true.
+  // Stricter than `Date.parse`, which accepted `Jan 1 2026` while the message claimed ISO.
   @IsISO8601({}, { message: 'expires_at must be an ISO timestamp or null' })
   expires_at?: string | null;
 
@@ -157,8 +149,8 @@ export class PatchQrCodeDto {
 }
 
 /**
- * Manual budget adjustment (goodwill credit, or clawing back a mis-funded campaign). Negative
- * amounts allowed, but the service still refuses to take a budget below zero.
+ * Manual budget adjustment (goodwill credit, or clawback). Negatives allowed, but the service still
+ * refuses to take a budget below zero.
  */
 export class AdjustBudgetDto {
   @ApiProperty({ minimum: -10_000_000, maximum: 10_000_000 })
@@ -172,16 +164,16 @@ export class AdjustBudgetDto {
   reason?: string;
 
   /**
-   * A goodwill credit is a hand-driven money-in path, so a double-submitted form is the likeliest
-   * way this ever pays twice. With a key the retry collides on `UNIQUE (account, ref)` instead.
+   * Hand-driven money-in, so a double-submitted form is the likeliest double pay; with a key the
+   * retry collides on `UNIQUE (account, ref)` instead.
    */
   @ApiPropertyOptional({ maxLength: 64 })
   @IsOptional()
   @IsString()
   @NotContains('\0', { message: '$property must not contain null bytes' })
   @MaxLength(64)
-  // `''` is "no key", not a key — otherwise every blank submission shares the ref
-  // `admin-adjust:{id}:` and the second one is swallowed as an already-applied retry.
+  // `''` is "no key": otherwise every blank submission shares the ref `admin-adjust:{id}:` and the
+  // second is swallowed as an already-applied retry.
   @Transform(({ value }) => (value === '' ? undefined : value))
   idempotency_key?: string;
 }
@@ -192,8 +184,7 @@ export class AckNotificationsDto {
   @IsOptional()
   @IsArray({ message: 'ids must be an array of strings' })
   @IsString({ each: true, message: 'ids must be an array of strings' })
-  // Capped at the ceiling the inbox itself reads under, so `id IN (...)` cannot be handed an
-  // unbounded list. Acknowledging more than a page at a time is what omitting `ids` is for.
+  // Capped at the inbox's own read ceiling so `id IN (...)` stays bounded; omit `ids` for more.
   @ArrayMaxSize(1000)
   ids?: string[];
 }

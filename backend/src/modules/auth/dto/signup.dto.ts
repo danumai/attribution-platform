@@ -8,17 +8,15 @@ import { MaxByteLength } from '../../../common/validation';
 const SIGNUP_TYPES = ['promoter', 'publisher'] as const;
 
 /**
- * bcrypt silently ignores everything past 72 bytes, so without a ceiling a 200-character
- * passphrase is only ever its first 72 bytes — and any other string sharing that prefix would log
- * in. Rejecting is honest; truncating is a trap.
+ * bcrypt ignores everything past 72 bytes, so without this ceiling any string sharing a long
+ * passphrase's first 72 bytes would log in. Rejecting is honest; truncating is a trap.
  */
 export const MAX_PASSWORD_BYTES = 72;
 
 export class SignupDto extends AppTargetsDto {
   @ApiProperty({ maxLength: 120 })
   @IsString()
-  // Rejecting loudly beats truncating silently, and Postgres cannot store NUL in a text column —
-  // it rejects mid-transaction, which surfaces as a 500 rather than the 400 it is.
+  // Postgres cannot store NUL in text: it rejects mid-transaction, surfacing as a 500, not a 400.
   @NotContains('\0', { message: '$property must not contain null bytes' })
   @MinLength(1)
   @MaxLength(120)
@@ -28,16 +26,14 @@ export class SignupDto extends AppTargetsDto {
   @IsString()
   @NotContains('\0', { message: '$property must not contain null bytes' })
   @MaxLength(254)
-  // Shape check only — the address is proven by nothing here, so it stays a display field. The
-  // permissive pattern is deliberate and predates `@IsEmail()`: tightening it now would start
-  // rejecting addresses already registered.
+  // Shape only, and deliberately looser than `@IsEmail()`: tightening would reject addresses
+  // already registered. Nothing proves the address, so it stays a display field.
   @Matches(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, { message: 'email must be a valid address' })
   @Transform(({ value }) => (typeof value === 'string' ? value.toLowerCase() : value))
   email!: string;
 
   @ApiProperty({ minLength: 8, maxLength: 200 })
-  // Through `@IsString` like every other field: a non-string password reached `.length` as
-  // `undefined` (so the minimum silently passed) and then threw inside `byteLength` as a 500.
+  // `@IsString` first: a non-string password passed the minimum silently, then 500'd in `byteLength`.
   @IsString()
   @NotContains('\0', { message: '$property must not contain null bytes' })
   @MinLength(8, { message: 'password min 8 chars' })

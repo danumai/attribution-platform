@@ -6,20 +6,8 @@ import { audit, balance, balances, ledger, lockedBalance } from '../../common/le
 import { PrismaService, Tx } from '../../config/prisma';
 
 /**
- * Every read and write the admin console performs, and nothing else — no shaping, no policy.
- *
- * Two things live here that look like business rules and are not misplaced:
- *
- *  - the five transactional units (`offboard`, `deleteOrg`, `killCampaign`, `adjustBudget`,
- *    `payWithdrawal`). A transaction is a data-access boundary, so the service never handles a
- *    `tx`. Where a guard has to run *inside* one — under a `FOR UPDATE` row lock, or against a
- *    count that must not change mid-request — the check has to be here or it is not serialised at
- *    all, so those methods throw the domain exception themselves.
- *  - `audit`, `balance(s)` and `scanAnalytics`, which are already data access shared with the
- *    other modules. Wrapped rather than duplicated.
- *
- * `audit()` is deliberately *not* called inside the transactions: the audit row outlives the org
- * it names, because `org:{id}` is a string and not a foreign key.
+ * Data access only. The five `$transaction` methods throw their own domain exceptions — their
+ * guards must run inside the tx to be serialised. `audit()` stays outside: `org:{id}` is not an FK.
  */
 
 /** Only the columns `PATCH /orgs/:id` may write; presence of a key is what makes it written. */
@@ -119,9 +107,8 @@ export class AdminRepository {
         (SELECT count(*)::int FROM campaigns)                             AS campaigns,
         (SELECT count(*)::int FROM campaigns WHERE status='active')       AS active_campaigns,
         (SELECT count(*)::int FROM campaigns WHERE mode='engagement')     AS engagement_campaigns,
-        -- Split out because they are different products and their conversion rates are not
-        -- comparable: an acquisition converts once per person ever, an engagement payout
-        -- converts once per purchase, and averaging the two describes neither.
+        -- Split out: acquisition converts once per person ever, engagement once per purchase,
+        -- so a blended conversion rate describes neither.
         (SELECT count(*)::int FROM redemptions WHERE kind='engagement')   AS engagement_redemptions,
         (SELECT coalesce(sum(coins),0)::int FROM redemptions WHERE kind='engagement') AS engagement_coins,
         (SELECT count(*)::int FROM qr_codes)                              AS qr_codes,
@@ -133,28 +120,21 @@ export class AdminRepository {
         (SELECT count(*)::int FROM qr_codes WHERE voided)                 AS voided_codes,
         (SELECT coalesce(sum(coins),0)::int FROM redemptions)             AS coins_granted,
         (SELECT coalesce(-sum(amount),0)::int FROM ledger_entries WHERE account='external:funding') AS total_funded,
-        -- The platform's own revenue: every payout's retained cut, accumulated. This is the
-        -- number the business runs on.
+        -- Platform revenue: every payout's retained cut, accumulated.
         (SELECT coalesce(sum(amount),0)::int FROM ledger_entries WHERE account='platform:fees') AS platform_revenue,
         (SELECT coalesce(sum(amount),0)::int FROM ledger_entries WHERE account='external:payouts') AS total_paid_out,
         (SELECT count(*)::int FROM withdrawals WHERE status='requested')  AS open_withdrawals,
         (SELECT count(*)::int FROM orgs WHERE type='publisher' AND NOT approved AND NOT suspended) AS unapproved_publishers,
         (SELECT count(*)::int FROM payments WHERE status='pending')       AS pending_payments,
         (SELECT coalesce(sum(amount),0)::int FROM ledger_entries)         AS ledger_sum,
-        -- The check ledger_sum cannot make. A global zero says the *book* is double-entry;
-        -- it says nothing about whether the cached account_balances row every money path
-        -- reads and locks still equals the entries behind it. Drift there spends real budget
-        -- against a wrong number, and it stays invisible until someone reconciles by hand --
-        -- which until now only the e2e script ever did.
-        -- ponytail: aggregates the whole ledger. Fine at admin-dashboard frequency; when the
-        -- book is big enough to feel it, move this to a scheduled reconciliation job that
-        -- alerts, rather than a number rendered on page load.
+        -- ledger_sum=0 only proves the book is double-entry; this catches cached account_balances
+        -- rows (which every money path locks and reads) drifting from their entries.
+        -- ponytail: aggregates the whole ledger — move to a scheduled reconciliation job once big.
         (SELECT count(*)::int FROM account_balances b
            LEFT JOIN (SELECT account, sum(amount)::int AS s FROM ledger_entries GROUP BY account) e
              ON e.account = b.account
           WHERE b.balance <> coalesce(e.s, 0))                            AS drifted_accounts,
-        -- What tenants have done that nobody here has looked at yet — a funded budget, a
-        -- repriced partnership. The same slice GET /notifications serves, counted for the badge.
+        -- Badge count for the same unacknowledged tenant-action slice GET /notifications serves.
         (SELECT count(*)::int FROM audit_log a
            JOIN orgs ao ON ao.id = a.actor_org_id
           WHERE a.acknowledged_at IS NULL AND ao.type <> 'admin')          AS open_notifications`;
@@ -182,14 +162,8 @@ export class AdminRepository {
     });
   }
 
-  /**
-   * Per-org campaign count and "has this org ever traded" flag.
-   *
-   * Campaigns are reachable from either side of a partnership, which is not a relation Prisma can
-   * `_count` — it spans two foreign keys on the same table. The ledger is checked by account
-   * string rather than a join: entries carry `publisher:{id}` rather than a foreign key, which is
-   * exactly why they cannot be cleaned up after the fact.
-   */
+  // Raw because campaigns hang off either side of a partnership (two FKs on one table), which
+  // Prisma cannot `_count`; ledger history is matched on the `publisher:{id}` account string.
   orgCampaignCounts() {
     return this.db.$queryRaw<{ org_id: string; n: number; has_history: boolean }[]>`
       SELECT o.id AS org_id, count(c.id)::int AS n,
@@ -232,11 +206,8 @@ export class AdminRepository {
     return count;
   }
 
-  /**
-   * Suspend, revoke the API key and end every campaign on either side of the org, atomically —
-   * a departed tenant must retain neither access nor coin-grant capability, and doing the two
-   * halves in separate statements leaves a window where it has one without the other.
-   */
+  // Atomic: separate statements would leave a window where a departed tenant still has access or
+  // coin-grant capability.
   offboard(id: string) {
     return this.db.$transaction(async (tx) => {
       const suspended = await tx.org.updateMany({
@@ -261,26 +232,19 @@ export class AdminRepository {
     });
   }
 
-  /**
-   * The one deletion this system allows: an org that never traded.
-   *
-   * Everything else is `offboard`. The ledger is append-only by trigger and carries the org id
-   * inside an opaque `account` string rather than a foreign key, so removing a tenant that ever
-   * earned or spent would leave balances pointing at nothing. A signup typo has none of that.
-   */
+  // The only allowed deletion: an org that never traded (everything else is `offboard`). The
+  // ledger is append-only and holds the org id in an opaque `account` string, not an FK.
   deleteOrg(id: string) {
     return this.db.$transaction(async (tx) => {
       const o = await tx.org.findUnique({
         where: { id },
         select: { id: true, name: true, type: true, email: true },
       });
-      // Admins are excluded the way every other org route excludes them, and a missing org is
-      // the same 404 — neither tells a caller which of the two it hit.
+      // Admin and missing both 404 — a caller cannot tell which it hit.
       if (!o || o.type === 'admin') throw new NotFoundException('org not found');
 
-      // Counted inside the transaction: checking outside would let a partnership created
-      // mid-request survive the delete. The FKs are ON DELETE RESTRICT and would catch three of
-      // these four anyway — `ledger_entries` has no foreign key at all, so it needs the guard.
+      // Inside the tx, else a partnership created mid-request survives the delete. ON DELETE
+      // RESTRICT covers three of the four; `ledger_entries` has no FK, so it needs the guard.
       const [partnerships, payments, withdrawals, ledger_entries] = await Promise.all([
         tx.partnership.count({ where: { OR: [{ promoter_org_id: id }, { publisher_org_id: id }] } }),
         tx.payment.count({ where: { org_id: id } }),
@@ -365,14 +329,8 @@ export class AdminRepository {
     });
   }
 
-  /**
-   * Manual budget adjustment. The floor check holds the balance row for the rest of the
-   * transaction, so it lives here rather than in the service: outside the lock two concurrent
-   * clawbacks would both pass the same `>= 0` test.
-   *
-   * With an idempotency key a double-submitted form collides on `UNIQUE (account, ref)` and is
-   * swallowed; without one, `Date.now()` makes every call a fresh ref, as before.
-   */
+  // Floor check is here, not the service: outside the row lock two concurrent clawbacks would both
+  // pass `>= 0`. With a key, a double submit collides on `UNIQUE (account, ref)` and is swallowed.
   adjustBudget(campaignId: string, coins: number, key?: string) {
     return this.db
       .$transaction(async (tx: Tx) => {
@@ -401,9 +359,8 @@ export class AdminRepository {
         max_uses: true,
         uses: true,
         voided: true,
-        // The promoter's own reference for the transaction this code was minted against — a PNR,
-        // an order number. NULL for portal-designed codes, set only on machine-issued ones, so a
-        // support search can find a code by the reference the promoter actually holds.
+        // Promoter's own reference (PNR, order number) so support can search by it; NULL for
+        // portal-designed codes, set only on machine-issued ones.
         issued_ref: true,
         campaign: {
           select: {
@@ -429,10 +386,8 @@ export class AdminRepository {
 
   // ----------------------------------------------------------------- notifications / audit log
 
-  /**
-   * The unacknowledged, tenant-authored end of the audit log. The actor is the whole rule, so
-   * every tenant action audited from now on arrives here for free.
-   */
+  // The unacknowledged, tenant-authored end of the audit log — the actor filter is the whole rule,
+  // so any newly audited tenant action shows up here for free.
   listNotifications(take: number) {
     return this.db.auditLog.findMany({
       where: { acknowledged_at: null, actor: NOT_ADMIN },
@@ -444,8 +399,7 @@ export class AdminRepository {
 
   async acknowledgeNotifications(ids?: string[]): Promise<number> {
     const { count } = await this.db.auditLog.updateMany({
-      // Acknowledging must not reach into admin's own entries or re-date one already handled:
-      // the same slice the inbox reads is the only slice this can touch.
+      // Same slice the inbox reads: never admin's own entries, never re-dating a handled one.
       where: {
         acknowledged_at: null,
         actor: NOT_ADMIN,
@@ -481,13 +435,12 @@ export class AdminRepository {
         os: true,
         browser: true,
         device_type: true,
-        // How the hand-off screen behaved. `exit: 'auto'` on an iOS scan is the shape of an
-        // install that could never be attributed — nobody tapped, so nothing was carried.
+        // Hand-off screen behaviour: `exit: 'auto'` on iOS means nobody tapped, so nothing was
+        // carried and the install could never be attributed.
         client: true,
         consumed: true,
         qr_code: { select: { code: true } },
-        // Plural: a boarding-pass scan by somebody with no app yet pays twice — once as an
-        // acquisition, once as the purchase it also was.
+        // Plural: a scan by somebody with no app pays twice, as acquisition and as purchase.
         redemptions: { select: { coins: true, match_method: true, kind: true } },
         campaign: {
           select: { id: true, name: true, partnership: { select: ORG_NAMES } },
@@ -517,13 +470,8 @@ export class AdminRepository {
     });
   }
 
-  /**
-   * Real money leaving: debit the publisher, credit `external:payouts` under `withdrawal:{id}`.
-   *
-   * Both guards must be inside the transaction, so both throw from here. The status is flipped by
-   * the same UPDATE that tests it, so two admins clicking pay at once move the money once; and the
-   * balance is read under a lock, so a clawback that landed in between cannot be paid over.
-   */
+  // Real money leaving. Status is flipped by the same UPDATE that tests it, so two admins paying
+  // at once move it once; the locked balance read stops paying over a clawback that landed since.
   payWithdrawal(id: string, note: string | null) {
     return this.db.$transaction(async (tx: Tx) => {
       const taken = await tx.withdrawal.updateMany({

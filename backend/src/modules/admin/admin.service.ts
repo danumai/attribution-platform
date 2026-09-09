@@ -29,12 +29,8 @@ import { LimitQuery } from '../../common/dto/paging.dto';
 const RESET_TOKEN_TTL_MS = 3_600_000;
 
 /**
- * What the admin console *means*, on top of what the repository reads and writes: the derived
- * dashboard numbers, the response shapes the console renders, the rate rules that need the stored
- * row, and the audit record every privileged override leaves behind.
- *
- * No org scoping anywhere in here on purpose — super admin reads everything across all orgs and
- * can act on anything. The `AdminGuard` on the controller is the entire boundary.
+ * Derived dashboard numbers, console response shapes, rate rules that need the stored row, and the
+ * audit trail for every override. No org scoping: the controller's `AdminGuard` is the boundary.
  */
 @Injectable()
 export class AdminService {
@@ -79,11 +75,8 @@ export class AdminService {
       ...(dto.suspended === undefined ? {} : { suspended: dto.suspended }),
       ...(dto.approved === undefined ? {} : { approved: dto.approved }),
       ...(dto.name === undefined ? {} : { name: dto.name }),
-      // Keyed on what was *sent*, so `""` clears a field instead of being ignored — and the
-      // distinction is `undefined` vs `null`, not `in`. Every declared property exists on the
-      // instance (target ES2022 defines class fields), but class-transformer only *visits* keys
-      // the payload carried, so an unmentioned field keeps its `undefined` while a `""` one has
-      // been normalised to `null` by its transform.
+      // `undefined` vs `null`, not `in`: ES2022 class fields make every key exist on the instance,
+      // so an unsent field stays `undefined` while a sent `""` is transformed to `null` and clears.
       ...(dto.landing_url === undefined ? {} : { landing_url: dto.landing_url }),
       ...(dto.deeplink_url === undefined ? {} : { deeplink_url: dto.deeplink_url }),
       ...(dto.android_package === undefined ? {} : { android_package: dto.android_package }),
@@ -96,9 +89,8 @@ export class AdminService {
   }
 
   /**
-   * Support path: tenant lost its key, or it leaked. Both tenant types hold one — the publisher's
-   * earns fees on `/v1/attribution/*`, the promoter's mints codes on `/v1/issue` — so restricting
-   * this to publishers left a promoter with a leaked key unrecoverable.
+   * Both tenant types hold a key — publisher's for `/v1/attribution/*`, promoter's for `/v1/issue`
+   * — so this must not be publisher-only or a promoter's leaked key is unrecoverable.
    */
   async rotateKey(actorOrgId: string | null, id: string) {
     const api_key = newApiKey();
@@ -109,9 +101,8 @@ export class AdminService {
   }
 
   /**
-   * Issue a single-use password-reset token for a locked-out tenant. Shown once, expires in an
-   * hour, stored hashed. Audited: a reset token is an account takeover in the wrong hands, and
-   * "who issued it, for whom, when" is the whole defence.
+   * Single-use reset token for a locked-out tenant: shown once, stored hashed. Audited because in
+   * the wrong hands it is an account takeover, and "who issued it, for whom, when" is the defence.
    */
   async resetToken(actorOrgId: string | null, id: string) {
     const token = randomBytes(24).toString('base64url');
@@ -135,8 +126,7 @@ export class AdminService {
 
   async deleteOrg(actorOrgId: string | null, id: string) {
     const org = await this.repo.deleteOrg(id);
-    // After the transaction, like `offboard`: the audit row outlives the org it names, because
-    // `org:{id}` is a string, not a foreign key.
+    // After the tx, like `offboard`: the audit row outlives the org since `org:{id}` is not an FK.
     await this.repo.audit(actorOrgId, 'org.delete', `org:${id}`, {
       name: org.name,
       type: org.type,
@@ -159,15 +149,12 @@ export class AdminService {
   async patchPartnership(actorOrgId: string | null, id: string, dto: PatchPartnershipDto) {
     const current = await this.repo.findPartnership(id);
     if (!current) throw new NotFoundException('partnership not found');
-    // Resolved against the existing row, so the pair rule is checked on post-patch values —
-    // raising only `guest_rate` is judged against the `coin_rate` already stored. This is why the
-    // four rates carry no bounds in the DTO: the rule needs the row, so it cannot live in a pipe.
+    // Pair rule is checked on post-patch values against the stored row, which is why the four
+    // rates carry no bounds in the DTO — the rule needs the row, so it cannot live in a pipe.
     const rates = validateRates(dto, current);
 
-    // An open proposal is cleared by any rate override, or the override is revertible by the
-    // party it was aimed at: promoter proposes 80, admin overrides to 30, publisher accepts the
-    // proposal still in its inbox — `decideRates` compare-and-sets on the `proposed_*` columns
-    // alone, so it passes and 80 is back in force.
+    // Any rate override must clear an open proposal: `decideRates` compare-and-sets on the
+    // `proposed_*` columns alone, so a stale accept (proposed 80, overridden to 30) would win.
     const repriced =
       rates.coin_rate !== current.coin_rate ||
       rates.guest_rate !== current.guest_rate ||
@@ -183,8 +170,7 @@ export class AdminService {
     });
     await this.repo.audit(actorOrgId, 'partnership.patch', `partnership:${id}`, {
       ...dto,
-      // The proposal did not merely go stale, it was discarded, and the publisher is about to
-      // find an empty inbox where its pending price was.
+      // Recorded because the publisher will find an empty inbox where its pending price was.
       proposal_cleared,
     });
     return updated;
@@ -224,9 +210,8 @@ export class AdminService {
   }
 
   /**
-   * Manual budget adjustment (goodwill credit, or clawing back a mis-funded campaign). The
-   * campaign is proved to exist before the transaction so a typo'd id is a 404 rather than a
-   * ledger entry against an account nothing owns.
+   * Manual budget adjustment (goodwill credit or clawback). Existence is proved before the tx so a
+   * typo'd id 404s instead of writing a ledger entry against an account nothing owns.
    */
   async adjust(actorOrgId: string | null, id: string, dto: AdjustBudgetDto) {
     if (!(await this.repo.campaignExists(id))) throw new NotFoundException('campaign not found');
@@ -266,10 +251,7 @@ export class AdminService {
 
   // ------------------------------------------------------------- notifications and audit log
 
-  /**
-   * The admin's inbox: everything a *tenant* did that nobody here has acknowledged yet. Not a
-   * second table — the audit log stays the record; this is only its unread end.
-   */
+  /** Admin inbox: unacknowledged tenant actions — the unread end of audit_log, not a new table. */
   async notifications(query: LimitQuery) {
     const rows = await this.repo.listNotifications(query.limit);
     return rows.map(({ actor, ...a }) => ({
@@ -295,10 +277,7 @@ export class AdminService {
 
   // --------------------------------------------------------------------- scans / redemptions
 
-  /**
-   * Where scans come from, on what, when — platform-wide or narrowed to one campaign. Same
-   * function the promoter's own campaign page calls, so the two never disagree.
-   */
+  /** Same `scanAnalytics` the promoter's campaign page calls, so the two never disagree. */
   analytics(query: AnalyticsQuery) {
     return this.repo.scanAnalytics(query.campaign_id ?? null, query.days);
   }
@@ -326,11 +305,9 @@ export class AdminService {
       promoter_name: s.campaign.partnership.promoter.name,
       publisher_name: s.campaign.partnership.publisher.name,
       redeemed: s.redemptions.length > 0,
-      // Summed, not first: this column is what the scan cost the campaign budget, and a scan
-      // that was both an acquisition and a purchase cost it both.
+      // Summed, not first: this is total budget cost, and one scan can be acquisition + purchase.
       coins: s.redemptions.length ? s.redemptions.reduce((n, r) => n + r.coins, 0) : null,
-      // referrer | appclip | pasteboard | code. A publisher whose App Clip is misconfigured
-      // shows up here as a column of `pasteboard`.
+      // referrer | appclip | pasteboard | code — a misconfigured App Clip shows all `pasteboard`.
       match_method: s.redemptions.map((r) => r.match_method).join('+') || null,
       kind: s.redemptions.map((r) => r.kind).join('+') || null,
     }));
@@ -357,10 +334,7 @@ export class AdminService {
     }));
   }
 
-  /**
-   * Pay a withdrawal: the review happened, real money is leaving. The balance floor guarantees a
-   * publisher is never paid below zero even if a clawback landed in between.
-   */
+  /** Real money leaving; the balance floor keeps a publisher from being paid below zero. */
   async payWithdrawal(actorOrgId: string | null, id: string, dto: WithdrawalDecisionDto) {
     const note = dto.note ?? null;
     const paid = await this.repo.payWithdrawal(id, note);

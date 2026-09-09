@@ -13,18 +13,16 @@ import { CheckoutBody, WebhookBody } from './dto/bodies.dto';
 import { PaymentsRepository } from './payments.repository';
 
 /**
- * The funding policy: who may buy budget for which campaign, and what makes a PSP callback
- * believable. The repository holds the statements; the two guarantees those statements enforce —
- * one credit per webhook, one completed payment per charge — are documented there.
+ * Funding policy: who may buy budget for which campaign, and what makes a PSP callback
+ * believable. One credit per webhook and one completed payment per charge are the repository's.
  */
 @Injectable()
 export class PaymentsService {
   constructor(private readonly repo: PaymentsRepository) {}
 
   /**
-   * Step one of funding: record what the promoter is buying before any money moves. The PSP
-   * checkout is created against this row's id, so an unsolicited "payment succeeded" for an id we
-   * never minted is a 404, not a credit.
+   * Records the intended purchase before money moves, so an unsolicited "payment succeeded" for
+   * an id we never minted is a 404, not a credit.
    */
   async checkout(orgId: string, b: CheckoutBody) {
     const campaign_id = str(b.campaign_id, 'campaign_id', 36)!;
@@ -32,8 +30,7 @@ export class PaymentsService {
       throw new BadRequestException('coins must be 1–10000000');
     const campaign = await this.repo.ownedCampaign(campaign_id, orgId);
     if (!campaign) throw new NotFoundException('campaign not found');
-    // Funding an ended campaign is a mistake worth catching before the card is charged; a paused
-    // one is fine — topping up mid-pause is a normal way to prepare a relaunch.
+    // Catch this before the card is charged. Paused is fine: topping up prepares a relaunch.
     if (campaign.status === 'ended')
       throw new BadRequestException('campaign has ended — create a new one to fund');
 
@@ -47,15 +44,14 @@ export class PaymentsService {
     };
   }
 
-  /** The promoter's own funding history — pending rows here are checkouts the PSP never confirmed. */
+  /** The promoter's funding history; `pending` rows are checkouts the PSP never confirmed. */
   list(orgId: string, limit?: string) {
     return this.repo.listPayments(orgId, capped(limit));
   }
 
   /**
-   * The PSP's server calling back. Authentication is the HMAC signature over the raw body, and
-   * with no secret configured the endpoint does not exist: an unsigned funding webhook is a mint
-   * for whoever finds the URL.
+   * Authenticated by HMAC over the raw body. With no secret the endpoint 404s: an unsigned
+   * funding webhook is a mint for whoever finds the URL.
    */
   async webhook(raw: Buffer | undefined, signature: string, b: WebhookBody) {
     if (!PAYMENT_WEBHOOK_SECRET) throw new NotFoundException();
@@ -63,7 +59,7 @@ export class PaymentsService {
       .update(raw ?? Buffer.alloc(0))
       .digest('hex');
     const presented = (signature ?? '').trim().toLowerCase();
-    // Constant-time, same reason as the metrics token: `!==` leaks the prefix to a prober.
+    // Constant-time like the metrics token: `!==` leaks the prefix to a prober.
     const ok =
       presented.length === expected.length &&
       timingSafeEqual(Buffer.from(presented), Buffer.from(expected));

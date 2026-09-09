@@ -9,8 +9,7 @@ import { ResetDto } from './dto/reset.dto';
 import { SignupDto } from './dto/signup.dto';
 import { asOrgType, newApiKey, signSession } from './tokens';
 
-/** A real bcrypt hash of a value nothing can match, so the no-such-account path costs the
- *  same as the wrong-password path. Cost 10 to match what `signup` writes. */
+// Unmatchable real hash so no-such-account costs the same as wrong-password. Cost 10 matches signup.
 const DUMMY_HASH = bcrypt.hashSync('unmatchable-placeholder-password', 10);
 
 const BCRYPT_COST = 10;
@@ -20,13 +19,10 @@ export class AuthService {
   constructor(private readonly db: PrismaService) {}
 
   async signup(dto: SignupDto) {
-    // Both tenant types get a key: a publisher's answers "is this attributable" and earns fees,
-    // a promoter's mints a transaction code per purchase on `/v1/issue`. Minting unconditionally
-    // keeps the two symmetric — a promoter that later runs an engagement campaign does not have
-    // to discover its account was created without a credential.
+    // Both tenant types get a key: a publisher's answers "is this attributable", a promoter's mints
+    // transaction codes on `/v1/issue`. Minted unconditionally so neither has to discover it lacks one.
     const apiKey = newApiKey();
-    // Approval gates the *publisher* side only — publishers receive money. Promoters pay in and
-    // gate themselves with their own budget.
+    // Approval gates publishers only — they receive money. Promoters pay in, gated by their budget.
     const approved = dto.type === 'promoter' || AUTO_APPROVE_PUBLISHERS;
     let org;
     try {
@@ -61,8 +57,7 @@ export class AuthService {
   }
 
   async reset(dto: ResetDto) {
-    // Single-use: the same UPDATE that matches the token clears it, so a race between two
-    // submissions of one token changes the password once.
+    // Single-use: the UPDATE that matches the token also clears it, so a race applies once.
     const updated = await this.db.org.updateMany({
       where: { reset_token_hash: sha256(dto.token), reset_token_expires: { gt: new Date() } },
       data: {
@@ -75,10 +70,7 @@ export class AuthService {
     return { reset: true };
   }
 
-  /**
-   * `email` and `password` arrive unvalidated by design — see LoginDto. They are coerced here,
-   * where a wrong type is indistinguishable from a wrong password.
-   */
+  // Unvalidated by design (see LoginDto): coerced here so a wrong type looks like a wrong password.
   loginCredentials(dto: LoginDto) {
     return {
       email: typeof dto.email === 'string' ? dto.email.toLowerCase() : '',
@@ -88,8 +80,7 @@ export class AuthService {
 
   async login(email: string, password: string) {
     const org = await this.db.org.findUnique({ where: { email } });
-    // Hash even when the account does not exist, or an unknown email returns in microseconds
-    // against bcrypt's ~100ms — a reliable oracle for which addresses are registered.
+    // Hash even with no account: microseconds vs bcrypt's ~100ms is an account-existence oracle.
     const ok = await bcrypt.compare(password, org?.password_hash ?? DUMMY_HASH);
     if (!org || !ok) throw new UnauthorizedException('invalid credentials');
     if (org.suspended) throw new UnauthorizedException('account suspended');

@@ -1,9 +1,6 @@
 /**
- * The two Payments request bodies. Plain object types rather than validated DTO classes, matching
- * what these two callers are: the checkout body is bounded by `str()` and then re-checked against
- * the campaign it names, and the webhook body arrives from a PSP whose signature — not its shape —
- * is what makes it trustworthy. Declared here so the controller and the service can share them
- * without importing each other.
+ * The two Payments request bodies, shared by controller and service. Plain types, not DTO classes:
+ * checkout is `str()`-bounded then re-checked against its campaign; the webhook is trusted by signature.
  */
 
 export type CheckoutBody = {

@@ -13,14 +13,8 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   /**
-   * The per-IP ceilings stay in the controller because they are the one thing here that needs the
-   * request rather than the body.
-   *
-   * They now run *after* validation, where they used to run before it: the global ValidationPipe
-   * is ahead of the handler. That is deliberate on all three routes — a malformed body creates no
-   * account and guesses no token, so it is not what these buckets exist to slow down, and the
-   * 300/min global limiter in main.ts still covers plain flooding. `login` validates nothing at
-   * all, so its ordering is unchanged.
+   * Per-IP ceilings live in the controller because they need the request, not the body. They run
+   * after the global ValidationPipe by design — plain flooding is the 300/min limiter's job.
    */
   @Post('signup')
   async signup(@Req() req: Request, @Body() dto: SignupDto) {
@@ -30,7 +24,7 @@ export class AuthController {
   }
 
   /**
-   * Complete an admin-issued password reset. The token arrives out of band, via
+   * Complete an admin-issued password reset. Token arrives out of band via
    * `POST /v1/admin/orgs/:id/reset-token`; this endpoint is deliberately mailer-free.
    */
   @Post('reset')
@@ -43,10 +37,8 @@ export class AuthController {
   @Post('login')
   async login(@Req() req: Request, @Body() dto: LoginDto) {
     const { email, password } = this.auth.loginCredentials(dto);
-    // Two buckets: per-IP stops credential stuffing across many accounts, per-account stops a
-    // distributed brute force against one. The account key is sliced because it is
-    // attacker-controlled and becomes a *retained* map key — 254 is the address ceiling `signup`
-    // enforces, so no real login is truncated into somebody else's bucket.
+    // Two buckets: per-IP stops credential stuffing across accounts, per-account stops distributed
+    // brute force against one. Sliced to 254 (`signup`'s ceiling) — the key is retained and attacker-fed.
     if (
       (await rateLimited(`login-ip:${clientIp(req)}`, 20)) ||
       (await rateLimited(`login-acct:${email.slice(0, 254)}`, 10))

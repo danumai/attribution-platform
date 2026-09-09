@@ -3,27 +3,16 @@ import { audit, balance, ledger } from '../../common/ledger';
 import { PrismaService, Tx } from '../../config/prisma';
 
 /**
- * Every read and write the funding path performs, and nothing else — no signature checking, no
- * shaping.
- *
- * Two things live here that look like policy and are not misplaced:
- *
- *  - `complete`, the transactional unit. Its idempotency gate is the `updateMany` that flips
- *    `pending` to `completed`: the same statement that tests the status sets it, so a redelivered
- *    webhook loses the race in the database rather than in a service branch. That gate and the two
- *    ledger entries have to commit or roll back together, so a transaction boundary is a
- *    data-access boundary and the service never handles a `tx`.
- *  - `audit` and `balance`, which are already data access shared with the other modules. Wrapped
- *    rather than duplicated.
+ * All funding-path data access, no signature checking or shaping. `complete` is here because its
+ * idempotency gate and its two ledger entries must commit together, so `tx` never leaves this
+ * file; `audit`/`balance` are wrapped, not duplicated.
  */
 @Injectable()
 export class PaymentsRepository {
   constructor(private readonly db: PrismaService) {}
 
-  /**
-   * Ownership is inside the WHERE rather than compared afterwards, so another tenant's campaign
-   * comes back `null` and the service answers 404 — a permission error would confirm the id exists.
-   */
+  // Ownership in the WHERE, not compared after: another tenant's campaign comes back `null` for
+  // a 404, since a permission error would confirm the id exists.
   ownedCampaign(campaignId: string, orgId: string) {
     return this.db.campaign.findFirst({
       where: { id: campaignId, partnership: { promoter_org_id: orgId } },
@@ -50,7 +39,7 @@ export class PaymentsRepository {
     return this.db.payment.findUnique({ where: { id: paymentId } });
   }
 
-  /** Guarded on `pending` for the same reason `complete` is: a failure after a credit is not news. */
+  // Guarded on `pending` like `complete`: a failure arriving after a credit must not undo it.
   async markFailed(paymentId: string, providerRef: string) {
     await this.db.payment.updateMany({
       where: { id: paymentId, status: 'pending' },
@@ -59,11 +48,9 @@ export class PaymentsRepository {
   }
 
   /**
-   * Take the payment and credit the budget, once. Returns false when this delivery lost the gate,
-   * which is the normal answer to a PSP redelivering — not an error.
-   *
-   * The ledger ref `fund:{payment_id}` is a second, independent guard: UNIQUE (account, ref) means
-   * even a gate that somehow passed twice cannot write the entries twice.
+   * Take the payment and credit the budget once; false means this delivery lost the gate, the
+   * normal answer to a redelivery. Ref `fund:{payment_id}` is a second guard via
+   * UNIQUE (account, ref).
    */
   complete(
     paymentId: string,
@@ -72,9 +59,8 @@ export class PaymentsRepository {
     providerRef: string,
   ): Promise<boolean> {
     return this.db.$transaction(async (tx: Tx) => {
-      // The idempotency gate: flipped by the same UPDATE that tests it, so ten redeliveries reach
-      // the ledger once. The partial unique index on provider_ref additionally stops one PSP
-      // charge completing a *different* payment row.
+      // Idempotency gate: the same UPDATE tests and flips the status, so redeliveries reach the
+      // ledger once. The partial unique index on provider_ref stops one charge completing two rows.
       const taken = await tx.payment.updateMany({
         where: { id: paymentId, status: 'pending' },
         data: { status: 'completed', provider_ref: providerRef, completed_at: new Date() },
@@ -87,11 +73,8 @@ export class PaymentsRepository {
     });
   }
 
-  /**
-   * Actor is the tenant whose money arrived, so it lands in the admin inbox — money entering the
-   * system is always news. Written after the credit commits, so the budget it quotes is the one
-   * the campaign now holds.
-   */
+  // Tenant actor so it lands in the admin inbox; called after the credit commits so the quoted
+  // budget is the one the campaign now holds.
   async auditFunding(
     orgId: string,
     campaignId: string,

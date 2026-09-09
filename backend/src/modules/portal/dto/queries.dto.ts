@@ -6,10 +6,7 @@ export class CampaignAnalyticsQuery {
   days!: number;
 }
 
-/**
- * 100 rather than the usual 200: this is the reconciliation view a publisher books revenue off,
- * and it was always read a page at a time.
- */
+/** 100 rather than the usual 200: the revenue-reconciliation view, always read a page at a time. */
 export class RedemptionsQuery {
   @CappedLimit(100)
   limit!: number;

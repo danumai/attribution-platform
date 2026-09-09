@@ -2,14 +2,8 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
 
 /**
- * The one DTO on the platform that validates nothing, on purpose.
- *
- * A non-string credential simply cannot match, and a 400 here would tell a prober something a 401
- * does not — that the field reached the handler in a usable shape. So the values are coerced in
- * the service instead, and every failure leaves by the same door.
- *
- * `@Allow()` rather than a bare property: `whitelist: true` strips any property carrying no
- * decorator at all, which would delete both credentials before the service ever saw them.
+ * Validates nothing on purpose: a 400 would tell a prober what a 401 does not, so the service coerces
+ * and every failure leaves by one door. `@Allow()` stops `whitelist: true` stripping both credentials.
  */
 export class LoginDto {
   @ApiProperty()
