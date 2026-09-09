@@ -41,4 +41,4 @@ EXPOSE 4000
 WORKDIR /app/backend
 # Migrate before serving, then `exec` so node replaces the shell and receives SIGTERM
 # directly — the app drains in-flight requests on that signal.
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node dist/main.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node dist/src/main.js"]

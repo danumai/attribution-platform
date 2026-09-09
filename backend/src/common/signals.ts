@@ -6,7 +6,7 @@
  * coarse and stable. Everything here is reporting only and can change shape freely.
  */
 import { Request } from 'express';
-import { Prisma } from '../generated/prisma/client';
+import { Prisma } from '../../prisma/generated/client';
 
 interface ScanSignals {
   /** ISO-3166 alpha-2, from the CDN in front of us. NULL when nothing resolved it. */

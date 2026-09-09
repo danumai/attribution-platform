@@ -6,7 +6,7 @@
  */
 import { ALERT_WEBHOOK_URL } from '../config';
 import { count, log } from './obs';
-import { prisma } from '../database/prisma';
+import { prisma } from '../config/prisma';
 
 export async function alert(event: string, fields: Record<string, unknown> = {}) {
   log.error(event, fields);

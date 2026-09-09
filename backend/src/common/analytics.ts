@@ -3,7 +3,7 @@
  * function, two callers, because the numbers must agree. Scoping is the caller's job: the admin
  * passes no campaign, the portal passes one it has already proved the session owns.
  */
-import { prisma } from './prisma';
+import { prisma } from '../config/prisma';
 
 export interface Bucket {
   key: string;

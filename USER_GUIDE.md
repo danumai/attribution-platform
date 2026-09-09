@@ -2119,7 +2119,7 @@ rows straight to the frontend, so camelCasing in the schema would rename every J
 
 | Path | What lives there |
 |---|---|
-| `backend/src/config.ts` | Every setting, validated at import. Production boot guards |
+| `backend/src/config/env.ts` | Every setting, validated at import. Production boot guards |
 | `backend/src/main.ts` | Middleware order, Swagger, metrics, graceful shutdown |
 | `backend/src/common/attribution.ts` | **The matcher's brain** — signal normalisation, weights, `score()`, `decide()`, store URL building |
 | `backend/src/common/rates.ts` | `validateRates()` and `splitFee()`. One money rule, one implementation |
@@ -2128,8 +2128,8 @@ rows straight to the frontend, so camelCasing in the schema would rename every J
 | `backend/src/common/qr.ts` | Style validation and SVG/PNG rendering |
 | `backend/src/common/alerts.ts` | Reconciliation sweep, budget-low alerts |
 | `backend/src/common/obs.ts` | Structured logging, counters, `recordDecision`, metrics rendering |
-| `backend/src/database/ledger.ts` | **The money engine** — `ledger`, `payout`, `lockedBalance`, `withdrawable`, `audit` |
-| `backend/src/database/analytics.ts` | Every breakdown in one `UNION ALL` over one CTE |
+| `backend/src/common/ledger.ts` | **The money engine** — `ledger`, `payout`, `lockedBalance`, `withdrawable`, `audit` |
+| `backend/src/common/analytics.ts` | Every breakdown in one `UNION ALL` over one CTE |
 | `backend/src/modules/public/` | `/r/:code`, the iOS hand-off, QR images |
 | `backend/src/modules/partner/` | `/v1/attribution/*` (the money path) and `/v1/issue` |
 | `backend/src/modules/portal/` | Everything a signed-in tenant does |

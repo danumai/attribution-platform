@@ -9,7 +9,7 @@ dist/
 .DS_Store
 
 # Prisma client is generated from prisma/schema.prisma at install/build time
-backend/src/generated/
+backend/prisma/generated/
 
 # Per-developer editor and assistant config. These name absolute paths on one machine and
 # rewrite themselves on every edit, so tracking them is a merge conflict per commit.

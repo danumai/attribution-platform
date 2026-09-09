@@ -7,7 +7,7 @@
  */
 import { UnauthorizedException } from '@nestjs/common';
 import { rateLimited, sha256 } from '../../common/security';
-import { prisma } from '../../database/prisma';
+import { prisma } from '../../config/prisma';
 import type { OrgType } from '../auth/tokens';
 
 interface KeyedOrg {

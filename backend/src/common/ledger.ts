@@ -1,7 +1,7 @@
-import { budgetLow } from '../common/alerts';
-import { splitFee } from '../common/rates';
+import { budgetLow } from './alerts';
+import { splitFee } from './rates';
 import { SETTLEMENT_DELAY_DAYS } from '../config';
-import { Tx, prisma } from './prisma';
+import { Tx, prisma } from '../config/prisma';
 
 /**
  * Credit/debit an account inside an open transaction, keeping the balance in sync.

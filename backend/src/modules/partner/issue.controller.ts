@@ -23,7 +23,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BASE_URL } from '../../config';
 import { scanUrl } from '../../common/attribution';
 import { str } from '../../common/security';
-import { prisma } from '../../database/prisma';
+import { prisma } from '../../config/prisma';
 import { newShortCode } from '../auth/tokens';
 import { orgFromKey } from './api-key';
 

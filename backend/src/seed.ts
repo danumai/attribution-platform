@@ -1,7 +1,7 @@
 import * as bcrypt from 'bcryptjs';
-import { ADMIN_EMAIL, ADMIN_PASSWORD } from '../config';
-import { sha256 } from '../common/security';
-import { prisma } from './prisma';
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from './config';
+import { sha256 } from './common/security';
+import { prisma } from './config/prisma';
 
 const PROD = process.env.NODE_ENV === 'production';
 

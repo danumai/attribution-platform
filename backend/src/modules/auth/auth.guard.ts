@@ -7,11 +7,13 @@ import {
   createParamDecorator,
 } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
-import { prisma } from '../../database/prisma';
+import { PrismaService } from '../../config/prisma';
 import { JWT_SECRET, SessionClaims, asOrgType } from './tokens';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
+  constructor(protected readonly db: PrismaService) {}
+
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest();
     const token = (req.headers.authorization ?? '').replace(/^Bearer /, '');
@@ -25,7 +27,7 @@ export class AuthGuard implements CanActivate {
     }
     // Instant revocation: suspending or offboarding a tenant must cut access now, not whenever its
     // 12h JWT expires. Costs one primary-key lookup per request.
-    const org = await prisma.org.findUnique({
+    const org = await this.db.org.findUnique({
       where: { id: claims.org_id },
       select: { type: true, suspended: true },
     });
@@ -39,6 +41,13 @@ export class AuthGuard implements CanActivate {
 
 @Injectable()
 export class AdminGuard extends AuthGuard {
+  // Redeclared rather than inherited: TypeScript only emits `design:paramtypes` for a class that
+  // writes its own constructor, and that metadata is the only thing telling Nest what to inject.
+  // Omitting it leaves `this.db` undefined at the first request, not at boot.
+  constructor(db: PrismaService) {
+    super(db);
+  }
+
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     await super.canActivate(ctx);
     if (ctx.switchToHttp().getRequest().session?.type !== 'admin')

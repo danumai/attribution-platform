@@ -162,9 +162,10 @@ old script used different index and constraint names.
 | `.env.example` | Every setting, with what breaks if it is wrong |
 | `backend/prisma/schema.prisma` | Data model — tables, indexes, relations |
 | `backend/prisma/migrations/` | Migration history; money invariants live here (unique + CHECK constraints, append-only ledger) |
-| `backend/src/config.ts` | Externally-visible URLs + production config guards, validated at boot |
-| `backend/src/database/` | Prisma client + pool, ledger/audit helpers, boot-time account seeding |
-| `backend/src/common/` | Cross-cutting: rate limiting, security headers, URL validation, QR render |
+| `backend/src/config/env.ts` | Externally-visible URLs + production config guards, validated at boot |
+| `backend/src/config/` | pg pool, Prisma client + `PrismaModule`, Redis client |
+| `backend/src/seed.ts` | Boot-time account seeding |
+| `backend/src/common/` | Cross-cutting: ledger/audit, scan analytics, rate limiting, security headers, URL validation, QR render |
 | `backend/src/modules/auth/` | Signup/login, session JWT, API keys, claim ids, `AuthGuard` / `AdminGuard` |
 | `backend/src/modules/partner/` | `POST /v1/attribution/claim` — the money path, one DB transaction |
 | `backend/src/modules/public/` | `GET /r/:code` scan redirect + QR image render |
@@ -215,8 +216,8 @@ admin override and lands in `GET /v1/admin/audit-log`. A blocked scan redirects 
 | Landing URLs restricted to https (http for localhost only) — no `javascript:`/`data:` redirect XSS, no cleartext scan-token exfil | `common/security.ts` `validateLandingUrl` |
 | CSP `default-src 'none'` + `nosniff` on every response, which neuters script inside rendered SVG logos | `common/security.ts` `securityHeaders` |
 | Rate limits on login (per IP *and* per account), signup, scan, and QR rendering | `common/security.ts` `rateLimited` |
-| Refuses to boot in production with a default `JWT_SECRET`, a weak admin password, or non-https URLs | `modules/auth/tokens.ts`, `config.ts` |
-| Demo tenants never seeded, and the admin password never reset by a redeploy, in production | `database/seed.ts` `seedAccounts` |
+| Refuses to boot in production with a default `JWT_SECRET`, a weak admin password, or non-https URLs | `modules/auth/tokens.ts`, `config/env.ts` |
+| Demo tenants never seeded, and the admin password never reset by a redeploy, in production | `seed.ts` `seedAccounts` |
 | 96-bit unguessable codes | `modules/auth/tokens.ts` `newShortCode` |
 
 ## What the design doc has that this build doesn't

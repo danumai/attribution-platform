@@ -27,8 +27,8 @@ import { clientIp, rateLimited } from '../../common/security';
 import { Store, interstitialHtml } from './interstitial';
 import { randomBytes } from 'crypto';
 import { clientSignals, scanSignals } from '../../common/signals';
-import { balance } from '../../database/ledger';
-import { prisma } from '../../database/prisma';
+import { balance } from '../../common/ledger';
+import { prisma } from '../../config/prisma';
 import { newClaimId } from '../auth/tokens';
 
 @ApiTags('Public')

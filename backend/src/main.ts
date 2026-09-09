@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { ValidationPipe } from '@nestjs/common';
 import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NextFunction, Request, Response, json } from 'express';
@@ -9,9 +10,9 @@ import { startReconciliation } from './common/alerts';
 import { log, renderMetrics, requestContext } from './common/obs';
 import { globalRateLimit, securityHeaders } from './common/security';
 import { ENABLE_DOCS, FRONTEND_URLS, METRICS_TOKEN, REDIS_URL, TRUST_PROXY } from './config';
-import { prisma } from './database/prisma';
-import { closeRedis } from './database/redis';
-import { seedAccounts } from './database/seed';
+import { prisma } from './config/prisma';
+import { closeRedis } from './config/redis';
+import { seedAccounts } from './seed';
 
 async function bootstrap() {
   // Schema is owned by `prisma migrate deploy`, which runs before this process starts — never by
@@ -50,6 +51,21 @@ async function bootstrap() {
   // Turns a driver-level error (usually a malformed uuid in the URL) into the 4xx it actually is
   // rather than an unhandled 500. See prisma-filter.ts.
   app.useGlobalFilters(new PrismaExceptionFilter(app.get(HttpAdapterHost).httpAdapter));
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      // `transform: true` is load-bearing, not tidiness: the DTOs normalise as well as check —
+      // a landing_url is stored as `new URL(x).toString()`, an email lowercased — and without
+      // this the handler receives the raw body and writes the un-normalised value.
+      transform: true,
+      whitelist: true,
+      // Deliberately off. The Partner API ignores the old iOS fingerprint fields rather than
+      // rejecting them, so an un-upgraded publisher SDK degrades to "no claim carried" instead
+      // of breaking; `whitelist` strips them, and forbidding them would turn a third party's
+      // pending deploy into a 400 on every call. See readCarried in partner.controller.ts.
+      forbidNonWhitelisted: false,
+    }),
+  );
 
   // First, so every log line and every 429 below already carries a request id.
   app.use(requestContext);

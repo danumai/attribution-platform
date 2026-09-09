@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
 import { createHash } from 'crypto';
 import type Redis from 'ioredis';
-import { getRedis } from '../database/redis';
+import { getRedis } from '../config/redis';
 import { count, log } from './obs';
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
