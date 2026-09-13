@@ -1,5 +1,6 @@
 'use client';
-import { Empty, SkeletonTable } from '@/lib/ui';
+import { Empty } from '@/components/ui/empty';
+import { SkeletonTable } from '@/components/ui/skeleton';
 import { hint, sectionHead } from '@/lib/tw';
 import { RedemptionTable } from '../RedemptionTable';
 import type { SectionProps } from '../types';

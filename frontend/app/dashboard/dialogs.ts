@@ -3,7 +3,8 @@
  * permanently under their own lists, on screen whether or not anyone wanted one.
  */
 import { api } from '@/lib/api';
-import { formDialog, toast } from '@/lib/ui';
+import { formDialog } from '@/components/ui/dialog';
+import { toast } from '@/components/ui/toast';
 import { num, offerLine } from '@/lib/fmt';
 import type { Bonus, Campaign, Me, Partnership, PublisherOption } from '@/lib/types';
 import type { Act } from './types';

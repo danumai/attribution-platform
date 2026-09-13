@@ -2,7 +2,8 @@
 import type { Analytics } from '@/lib/audience';
 import { dailySeries } from '@/lib/audience';
 import type { CampaignStats } from '@/lib/types';
-import { Figures, Meter } from '@/lib/ui';
+import { Figures } from '@/components/ui/figures';
+import { Meter } from '@/components/ui/meter';
 import { num } from '@/lib/fmt';
 import { card, cx, figure, muted, stampCaps } from '@/lib/tw';
 

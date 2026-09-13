@@ -6,7 +6,7 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { change, num } from './fmt';
 import { Chart } from './chart';
-import { Figures } from './ui';
+import { Figures } from '@/components/ui/figures';
 import { card, cx, muted, sectionHead, select as selectField, stampCaps } from './tw';
 
 // The two inks every plot in the console is drawn in. Validated as a pair: ΔE 23.9 under
@@ -302,7 +302,7 @@ export function Audience({
     <>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <select
-          className={cx(selectField, 'max-w-[200px]')}
+          className={cx(selectField, 'max-w-50')}
           value={days}
           onChange={(e) => onDays(+e.target.value)}
           aria-label="Reporting window"

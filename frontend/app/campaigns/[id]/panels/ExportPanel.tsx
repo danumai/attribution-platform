@@ -1,6 +1,7 @@
 'use client';
 import { api } from '@/lib/api';
-import { confirmDialog, toast } from '@/lib/ui';
+import { confirmDialog } from '@/components/ui/dialog';
+import { toast } from '@/components/ui/toast';
 import type { QrCode } from '@/lib/types';
 import { download, svgToPng } from '@/lib/qr';
 import { btn, btnDanger, btnGhost, chip, chipWide, cx, field, hint, label as labelClass, swatches } from '@/lib/tw';

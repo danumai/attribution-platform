@@ -1,6 +1,7 @@
 'use client';
 import { api } from '@/lib/api';
-import { Empty, SkeletonTable } from '@/lib/ui';
+import { Empty } from '@/components/ui/empty';
+import { SkeletonTable } from '@/components/ui/skeleton';
 import type { Partnership } from '@/lib/types';
 import { GRANTED_ON, num } from '@/lib/fmt';
 import {

@@ -1,6 +1,7 @@
 'use client';
 import { MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { Empty, SkeletonTable } from '@/lib/ui';
+import { SkeletonTable } from '@/components/ui/skeleton';
+import { Empty } from '@/components/ui/empty';
 import {
   btnGhost,
   btnTinyGhost,
@@ -89,8 +90,8 @@ export function Table<T extends object>({
     const needle = q.trim().toLowerCase();
     const out = needle ? rows.filter((r) => haystack(r).includes(needle)) : rows.slice();
     if (sort) {
-  // A column with no `sort` sorts on its rendered value, which is only meaningful when that value
-  // is a primitive.
+      // A column with no `sort` sorts on its rendered value, which is only meaningful when that value
+      // is a primitive.
       const key = colsRef.current[sort.i].sort ?? colsRef.current[sort.i].get;
       out.sort((a, b) => {
         const [x, y] = [key(a), key(b)] as [any, any];
@@ -100,10 +101,10 @@ export function Table<T extends object>({
     return out;
   }, [q, rows, sort]);
 
-/**
- * Whether clicking this header actually reorders anything. Without an explicit `sort` the
- * comparator falls back to `get`, which for a column rendering markup compares React elements.
- */
+  /**
+   * Whether clicking this header actually reorders anything. Without an explicit `sort` the
+   * comparator falls back to `get`, which for a column rendering markup compares React elements.
+   */
   const sortable = (c: Col<T>) => {
     if (!c.h) return false;
     if (c.sort) return true;

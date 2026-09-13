@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { toast } from '@/lib/ui';
+import { toast } from '@/components/ui/toast';
 import type { QrCode } from '@/lib/types';
 import type { Style } from '@/lib/qr';
 import { btn, card, code as codeChip, codeTab, cx, field, label as labelClass } from '@/lib/tw';

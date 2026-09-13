@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { Empty, SkeletonCard } from '@/lib/ui';
+import { Empty } from '@/components/ui/empty';
+import { SkeletonCard } from '@/components/ui/skeleton';
 import { num, offerLine } from '@/lib/fmt';
 import { btn, btnGhost, card, cx, fact, meterInk, pill, sectionHead, stampCaps } from '@/lib/tw';
 import { editCampaign, newCampaign } from '../dialogs';
@@ -111,7 +112,7 @@ export function Campaigns({ d, isPromoter, loaded, act, go, canCreateCampaign }:
             {/* What this campaign promises the scanner — the publisher's own offer, picked out
                 of its list when the campaign was created. Printed here because it is the half
                 of the deal the money columns above cannot show, and the half a poster carries. */}
-            <p className="-mt-1 text-[12.5px] leading-[1.5] text-mut">
+            <p className="-mt-1 text-[12.5px] leading-normal text-mut">
               {c.publisher_bonuses?.length
                 ? `Promises: ${offerLine(c.publisher_bonuses)}`
                 : `${c.publisher_name} declares no offer for this kind of campaign — nothing to print.`}
