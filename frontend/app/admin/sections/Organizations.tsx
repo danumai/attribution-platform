@@ -1,5 +1,5 @@
 'use client';
-import { confirmDialog, promptDialog } from '@/lib/ui';
+import { confirmDialog, promptDialog } from '@/components/ui/dialog';
 import { when } from '@/lib/fmt';
 import { link as linkClass } from '@/lib/tw';
 import { Actions, Table } from '../Table';

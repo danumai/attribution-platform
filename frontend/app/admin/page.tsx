@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { Shell } from '@/lib/shell';
 import { Analytics, Audience } from '@/lib/audience';
-import { toast } from '@/lib/ui';
+import { toast } from '@/components/ui/toast';
 import type {
   AdminOrg,
   AdminOverview,

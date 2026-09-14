@@ -1,5 +1,6 @@
 'use client';
-import { promptDialog, toast } from '@/lib/ui';
+import { promptDialog } from '@/components/ui/dialog';
+import { toast } from '@/components/ui/toast';
 import { when } from '@/lib/fmt';
 import { menuItem } from '@/lib/tw';
 import { Actions, Table } from '../Table';

@@ -1,6 +1,6 @@
 'use client';
 /** The small render helpers the admin tables share: cell formatters and the two row controls. */
-import type { Figure } from '@/lib/ui';
+import type { Figure } from '@/components/ui/figures';
 import type { AdminScan, AuditEntry } from '@/lib/types';
 import type { Col } from './Table';
 import { num } from '@/lib/fmt';

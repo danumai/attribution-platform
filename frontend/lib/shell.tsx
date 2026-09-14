@@ -37,7 +37,7 @@ function Icon({ name, className }: { name: keyof typeof ICONS; className?: strin
   return (
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-         className={cx('size-[17px] shrink-0', className)}>
+         className={cx('size-4.25 shrink-0', className)}>
       {ICONS[name]}
     </svg>
   );
@@ -148,7 +148,7 @@ export function Shell({
           'sticky top-0 flex h-dvh flex-col self-start border-r border-line bg-card px-3 pt-4 pb-3',
           'max-[900px]:fixed max-[900px]:left-0 max-[900px]:z-60 max-[900px]:w-66 max-[900px]:shadow-contact',
           'max-[900px]:transition-transform max-[900px]:duration-[.24s] max-[900px]:ease-press',
-          open ? 'max-[900px]:translate-x-0' : 'max-[900px]:-translate-x-[101%]',
+          open ? 'max-[900px]:translate-x-0' : 'max-[900px]:translate-x-[-101%]',
         )}
       >
         <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
@@ -182,7 +182,7 @@ export function Shell({
         >
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"
                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-               className="size-[17px] shrink-0 text-mut">
+               className="size-4.25 shrink-0 text-mut">
             <path d="M8 3.5H5a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 5 16.5h3M12 13l3.5-3L12 7M15 10H7.5" />
           </svg>
           <span className="flex-1 truncate">Sign out</span>
@@ -208,7 +208,7 @@ export function Shell({
         </header>
         <main
           className={cx(
-            'w-full max-w-[1180px] px-8 pt-2 pb-24 max-[900px]:px-4 max-[900px]:pb-20',
+            'w-full max-w-295 px-8 pt-2 pb-24 max-[900px]:px-4 max-[900px]:pb-20',
             /* the first section head sits under the page header, so it needs no top rule */
             '[&>h2:first-child]:mt-6',
             riseStagger,

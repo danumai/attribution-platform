@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, org as getOrg, token } from '@/lib/api';
 import { NavItem, Shell } from '@/lib/shell';
-import { toast } from '@/lib/ui';
+import { toast } from '@/components/ui/toast';
 import type { Campaign, Me, Partnership, PublisherOption, Redemption } from '@/lib/types';
 import { alertWarn, btn, linkish } from '@/lib/tw';
 import { HEAD, isSection, type DashboardData, type Section } from './types';

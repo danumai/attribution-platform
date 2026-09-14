@@ -1,7 +1,7 @@
 'use client';
 import { ChangeEvent, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { confirmDialog } from '@/lib/ui';
+import { confirmDialog } from '@/components/ui/dialog';
 import { GRANTED_ON } from '@/lib/fmt';
 import { btn, btnGhost, card, code as codeChip, codeKey, cx, field, hint, label, muted, sectionHead, select } from '@/lib/tw';
 import type { Bonus } from '@/lib/types';

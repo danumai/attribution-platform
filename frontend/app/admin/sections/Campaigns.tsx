@@ -1,5 +1,5 @@
 'use client';
-import { promptDialog } from '@/lib/ui';
+import { promptDialog } from '@/components/ui/dialog';
 import { num } from '@/lib/fmt';
 import { cx, select as selectField } from '@/lib/tw';
 import { Actions, Table } from '../Table';

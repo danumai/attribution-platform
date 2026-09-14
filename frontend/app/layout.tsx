@@ -1,5 +1,5 @@
 import { Schibsted_Grotesk, JetBrains_Mono } from 'next/font/google';
-import { UI } from '@/lib/ui';
+import { UI } from '@/components/ui/index';
 import './globals.css';
 
 const sans = Schibsted_Grotesk({

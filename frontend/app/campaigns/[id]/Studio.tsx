@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { API, api } from '@/lib/api';
-import { toast } from '@/lib/ui';
+import { toast } from '@/components/ui/toast';
 import type { QrCode } from '@/lib/types';
 import { DEFAULT_STYLE, Style, contrastProblem, readLogo } from '@/lib/qr';
 import {

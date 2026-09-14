@@ -1,7 +1,10 @@
 'use client';
 import { Chart } from '@/lib/chart';
 import { INK } from '@/lib/audience';
-import { Empty, type Figure, Figures, SkeletonCard, SkeletonStrip, SkeletonTable, Split } from '@/lib/ui';
+import { type Figure, Figures, } from '@/components/ui/figures';
+import { Empty } from '@/components/ui/empty';
+import { Split } from '@/components/ui/split';
+import { SkeletonCard, SkeletonStrip, SkeletonTable } from '@/components/ui/skeleton';
 import type { Redemption } from '@/lib/types';
 import { change, num } from '@/lib/fmt';
 import { btn, card, cx, linkish, muted, queueCount, queueRow, sectionHead, stampCaps } from '@/lib/tw';

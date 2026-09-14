@@ -1,6 +1,9 @@
 'use client';
 import { ScanTrend, dailySeries } from '@/lib/audience';
-import { Figures, LoadError, SkeletonStrip, Split } from '@/lib/ui';
+import { Figures } from '@/components/ui/figures';
+import { LoadError } from '@/components/ui/loadError';
+import { SkeletonStrip } from '@/components/ui/skeleton';
+import { Split } from '@/components/ui/split';
 import { num } from '@/lib/fmt';
 import { card, cx, muted, queueCount, queueRow, sectionHead, stampCaps } from '@/lib/tw';
 import { LedgerHealth, counts } from '../cells';
