@@ -1,29 +1,20 @@
 /**
- * QR → app store → install → first open, with nothing redeemable in between.
- *
- * The QR is a *measurement* artifact, never an unlock mechanism: App Store 3.1.1 forbids QR codes
- * that unlock content, and Play restricts virtual currency to the app it was bought in. So a scan
- * hands the phone one store listing or App Clip, carrying nothing the app could spend, and
- * attribution happens server-to-server afterwards.
- *
- * Every match is deterministic — one opaque `claim_id` we minted, carried across the install by
- * Play's referrer, an App Clip's shared container, or the pasteboard.
- *
- * Deliberately absent: any attempt to recognise the device. Apple's DPLA forbids deriving data
- * from a device to identify it, naming browser and device configuration explicitly, so the scored
- * iOS match was deleted rather than tuned.
+ * QR → store → install → first open, nothing redeemable in between: App Store 3.1.1 forbids
+ * QR-unlocked content and Play confines virtual currency to its own app, so a scan carries only a
+ * store listing or App Clip and attribution runs server-to-server on our opaque `claim_id` (Play
+ * referrer, App Clip container, pasteboard). No device recognition — Apple's DPLA forbids it.
  */
 import { BadRequestException } from '@nestjs/common';
 import { str } from './security';
 
 export type Platform = 'android' | 'ios' | 'other';
 
-/** Which store listing to hand this scan to, and nothing more. Never compared against anything
- *  the app reports, so it carries no weight in who gets paid. */
+/** Which store listing to hand the scan to; never compared with what the app reports, so it
+ *  carries no weight in who gets paid. */
 export function detectPlatform(userAgent = ''): Platform {
   const ua = userAgent.toLowerCase();
   if (ua.includes('android')) return 'android';
-  // iPadOS 13+ reports a desktop Safari UA; the touch hint is what still gives it away.
+  // iPadOS 13+ reports a desktop Safari UA; the touch hint still gives it away.
   if (/iphone|ipad|ipod/.test(ua) || (ua.includes('macintosh') && ua.includes('mobile')))
     return 'ios';
   return 'other';
@@ -50,9 +41,8 @@ export function validateIosAppId(raw: unknown): string | null {
   return v;
 }
 
-/** The App Clip's app id, as it goes into the AASA `appclips.apps` array. Validated hard because
- *  one malformed entry invalidates the whole document and silently breaks App Clip invocation for
- *  every publisher in it. */
+/** App Clip app id for the AASA `appclips.apps` array. Validated hard: one malformed entry
+ *  invalidates the whole document and silently breaks every publisher in it. */
 export function validateAppClipId(raw: unknown): string | null {
   if (raw === undefined || raw === null || raw === '') return null;
   if (typeof raw !== 'string') throw new BadRequestException('ios_appclip_id must be a string');
@@ -75,9 +65,8 @@ export function validateProviderToken(raw: unknown): string | null {
   return v;
 }
 
-/** The publisher's path segment in the App Clip invocation URL, and so the prefix registered in
- *  App Store Connect. DNS-label shape, because the same string becomes a subdomain if Apple ever
- *  refuses two apps sharing one domain. */
+/** The publisher's path segment in the App Clip invocation URL, and so its App Store Connect
+ *  prefix. DNS-label shape: it becomes a subdomain if Apple ever refuses two apps on one domain. */
 export function validateSlug(raw: unknown): string | null {
   if (raw === undefined || raw === null || raw === '') return null;
   if (typeof raw !== 'string') throw new BadRequestException('slug must be a string');
@@ -87,27 +76,24 @@ export function validateSlug(raw: unknown): string | null {
   return v;
 }
 
-/**
- * What the publisher gives a user out of its *own* pocket — a list, not a field. `type` is free
- * text with no registry: the platform never issues or fulfils any of these, so an unrecognised
- * type costs it nothing, where anything narrower would be a deploy per invented offer.
- */
+/** What the publisher gives out of its *own* pocket — a list, not a field. `type` is free text
+ *  with no registry: the platform never fulfils these, and a registry means a deploy per offer. */
 export type BonusOn = 'acquisition' | 'engagement' | 'both';
 const BONUS_ON: BonusOn[] = ['acquisition', 'engagement', 'both'];
 
 export type Bonus = {
-  /** the publisher's own slug for the kind of thing granted: `coins`, `subscription`, … */
+  /** publisher's own slug for what is granted: `coins`, `subscription`, … */
   type: string;
   /** human wording, for artwork and reports */
   label: string;
-  /** optional amount, for the offers that have one: 100 coins, 7 days */
+  /** optional amount: 100 coins, 7 days */
   value?: number;
   /** optional unit for `value`: `coins`, `days`, `percent` */
   unit?: string;
-  /** which claim this is granted on; `both` is the default */
+  /** which claim this is granted on; default `both` */
   on: BonusOn;
-  // A type alias, not an interface: only an alias gets the implicit index signature Prisma's
-  // `InputJsonValue` requires, so this writes to a JSONB column uncast.
+  // Alias, not interface: only an alias gets the implicit index signature Prisma's
+  // `InputJsonValue` needs to write JSONB uncast.
 };
 
 /** Matches the CHECK in 9d_publisher_bonuses; one PATCH must not bloat every claim response. */
@@ -123,8 +109,7 @@ export function validateBonuses(raw: unknown): Bonus[] {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry))
       throw new BadRequestException(`${at} must be an object`);
     const e = entry as Record<string, unknown>;
-    // Slug rather than free text: `type` is the key the publisher's app switches on, and a key
-    // with spaces or punctuation is one nobody can match on reliably.
+    // Slug, not free text: `type` is the key the publisher's app switches on.
     const type = str(e.type, `${at}.type`, 40)!.trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9_-]*$/.test(type))
       throw new BadRequestException(`${at}.type must be a slug, e.g. coins or subscription`);
@@ -144,8 +129,7 @@ export function validateBonuses(raw: unknown): Bonus[] {
     if (unit) bonus.unit = unit;
     return bonus;
   });
-  // `type` is the key a campaign names its reward by, so it has to identify one offer. Two
-  // entries sharing a slug make "this campaign advertises `coins`" ambiguous.
+  // One entry per `type`: duplicates make "this campaign advertises `coins`" ambiguous.
   const seen = new Set<string>();
   for (const b of list)
     if (seen.has(b.type))
@@ -154,24 +138,21 @@ export function validateBonuses(raw: unknown): Bonus[] {
   return list;
 }
 
-/** The offers that apply to one claim. Read defensively — the column is JSONB, so an old or
+/** The offers that apply to one claim. Defensive read: the column is JSONB, so an old or
  *  hand-written row must degrade to "no offers" rather than throw inside a payout. */
 export function bonusesFor(raw: unknown, kind: 'acquisition' | 'engagement'): Bonus[] {
   return allBonuses(raw).filter((b) => b.on === kind || b.on === 'both' || b.on === undefined);
 }
 
-/**
- * The offers one *campaign* advertises: the publisher's eligible list for this mode, narrowed to
- * the slugs the promoter picked; an empty pick means all of them. Read live rather than
- * snapshotted, so an offer the publisher withdraws drops out of the campaign.
- */
+/** The offers one *campaign* advertises: the publisher's eligible list for this mode narrowed to
+ *  the promoter's slugs (empty = all). Read live, so a withdrawn offer drops out of the campaign. */
 export function campaignBonuses(raw: unknown, mode: string, types?: string[] | null): Bonus[] {
   const eligible = bonusesFor(raw, mode === 'engagement' ? 'engagement' : 'acquisition');
   return types?.length ? eligible.filter((b) => types.includes(b.type)) : eligible;
 }
 
-/** The promoter's pick, checked against what the publisher actually grants. An unknown slug is a
- *  400: it is a campaign about to print a promise nobody fulfils, and the print run pays for it. */
+/** The promoter's pick, checked against what the publisher actually grants. Unknown slug is a
+ *  400: otherwise the print run advertises a promise nobody fulfils. */
 export function validateBonusTypes(raw: unknown, eligible: Bonus[]): string[] {
   if (raw === undefined || raw === null || raw === '') return [];
   if (!Array.isArray(raw)) throw new BadRequestException('bonus_types must be an array');
@@ -199,22 +180,17 @@ interface AppTargets {
   android_package: string | null;
   ios_app_id: string | null;
   landing_url: string | null;
-  /** engagement only; an https origin the publisher has claimed as an App Link / Universal Link */
+  /** engagement only; https origin the publisher claimed as an App Link / Universal Link */
   deeplink_url?: string | null;
-  /** App Store Connect provider token, when the publisher wants the campaign-link cross-check */
+  /** App Store Connect provider token, for the campaign-link cross-check */
   ios_provider_token?: string | null;
   /** `campaignToken(campaign.id)` — resolved by the caller, which already has the campaign */
   campaign_token?: string | null;
 }
 
-/**
- * Where a scan is sent. Store listings only — a payload the app can read is what turns a QR into
- * an unlock mechanism. `claim_id` goes in Play's `referrer`, an install-attribution channel; the
- * App Store has no equivalent, so on iOS the claim travels beside the store hop.
- *
- * `code` rides in the same referrer under the same limits: an opaque reference, useless without
- * the publisher's API key, and the only way a traveller with no app yet is paid for both.
- */
+/** Where a scan is sent — store listings only; a payload the app can read is what turns a QR into
+ *  an unlock. `claim_id` and `code` ride Play's `referrer` (an install-attribution channel) as
+ *  opaque refs useless without the publisher's API key; the App Store has no equivalent. */
 export function storeUrl(
   platform: Platform,
   t: AppTargets,
@@ -231,24 +207,19 @@ export function storeUrl(
   }
   if (platform === 'ios' && t.ios_app_id) {
     const url = `https://apps.apple.com/app/id${t.ios_app_id}`;
-    // Aggregate only — Apple reports first-time downloads per `ct` and nothing per user — so it
-    // reconciles rather than attributes. Capped at 40 characters; ?, ! and & are rejected.
+    // Reconciles, never attributes: Apple reports first-time downloads per `ct`, nothing per
+    // user. `ct` is capped at 40 characters; ?, ! and & are rejected.
     return t.ios_provider_token && t.campaign_token
       ? `${url}?pt=${t.ios_provider_token}&ct=${t.campaign_token}&mt=8`
       : url;
   }
-  // Desktop scan, or a publisher with no app registered yet: their own web page, no token.
+  // Desktop scan, or no app registered yet: the publisher's own web page, no token.
   return t.landing_url;
 }
 
-/**
- * Where an *engagement* scan is sent: the publisher's App Link / Universal Link, carrying the code
- * and a store URL to fall back to.
- *
- * No "is the app installed" check, because both platforms answer that offline. Installed, the OS
- * opens the app and we never see the request; not installed, the page forwards to `qrm_fallback`,
- * a store URL we built so its Play referrer cannot be assembled wrong by a third party.
- */
+/** Where an *engagement* scan is sent: the publisher's App Link / Universal Link with the code and
+ *  a store fallback. No install check — both platforms answer that offline; `qrm_fallback` is a
+ *  store URL we build ourselves so a third party cannot assemble its Play referrer wrong. */
 export function engagementUrl(
   platform: Platform,
   t: AppTargets,
@@ -271,35 +242,24 @@ export function claimIdFromReferrer(referrer?: string | null): string | null {
   return m ? m[1] : null;
 }
 
-/** Pull the transaction code out of a referrer string, so a publisher already reading the referrer
- *  needs no second integration. Shaped like `newShortCode()` — anything else is not a code we
- *  issued and must not be looked up. */
+/** Transaction code from a referrer, so a publisher already reading it needs no second
+ *  integration. Must match `newShortCode()` shape — anything else is not ours to look up. */
 export function codeFromReferrer(referrer?: string | null): string | null {
   if (!referrer || typeof referrer !== 'string') return null;
   const m = /(?:^|[&?])qrm_code=([A-Za-z0-9_-]{6,64})(?:&|$)/.exec(referrer.trim());
   return m ? m[1] : null;
 }
 
-/**
- * The campaign token for an App Store campaign link (`ct=`). Keyed on the campaign, never the
- * scan: Apple caps it at 40 characters and reports it back only as a download count, so a
- * per-scan id would turn an aggregate report into the per-user join this design removes.
- */
+/** Campaign token for an App Store campaign link (`ct=`), keyed on the campaign and never the
+ *  scan: Apple caps it at 40 characters and reports only download counts, not per-user joins. */
 export const campaignToken = (campaignId: string) => `qrm-${campaignId.replace(/-/g, '').slice(0, 32)}`;
 
-/**
- * The Apple App Site Association document. One file lists every publisher with a registered App
- * Clip, each with its own `/c/<slug>/` prefix; routing is by longest prefix match.
- *
- * ponytail: one shared domain. If App Store Connect ever refuses two apps registering different
- * prefixes on one domain, the fallback is a subdomain per publisher.
- */
+/** Apple App Site Association document: one file, one shared domain, every App Clip publisher
+ *  under its own `/c/<slug>/` prefix (longest match wins). ponytail: subdomain per publisher if
+ *  App Store Connect ever refuses two apps registering prefixes on one domain. */
 export const aasa = (appClipIds: string[]) => ({ appclips: { apps: appClipIds } });
 
-/**
- * What a QR code actually encodes. One definition, because this string is *printed*. A publisher
- * with a registered App Clip gets `/c/<slug>/<code>`, everyone else `/r/<code>`; both resolve to
- * the same handler. Changing a slug after a run is printed orphans every code in the world.
- */
+/** What a QR encodes, defined once because this string is *printed*: `/c/<slug>/<code>` for a
+ *  registered App Clip, else `/r/<code>`. Changing a slug orphans every code already printed. */
 export const scanUrl = (base: string, code: string, slug?: string | null) =>
   slug ? `${base}/c/${slug}/${code}` : `${base}/r/${code}`;

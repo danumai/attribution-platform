@@ -1,10 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 
-/**
- * The four numbers a partnership is priced on, validated in one place — a money rule with two
- * implementations is a money rule with two answers. `guest_rate <= coin_rate` is also a database
- * CHECK; this exists so the caller gets a message it can act on instead of a driver error.
- */
+// Partnership pricing validated in one place — a money rule with two implementations has two
+// answers. `guest_rate <= coin_rate` is also a DB CHECK; here it yields an actionable message.
 
 const DEFAULTS = { coin_rate: 50, grace_days: 7, engagement_rate: 20 };
 
@@ -22,11 +19,8 @@ export interface Rates {
   engagement_rate: number;
 }
 
-/**
- * Resolve a patch against what is already there; omit `current` to resolve against the platform
- * defaults, which is what creating a partnership does. Returns the whole post-patch set, so the
- * caller writes values that were checked *together* — the pair rule cannot be half-satisfied.
- */
+/** Resolve a patch against `current`, or against platform defaults on create. Returns the whole
+ *  post-patch set, so the pair rule cannot be half-satisfied by a partial write. */
 export function validateRates(patch: Partial<Rates>, current?: Rates): Rates {
   const coin_rate =
     patch.coin_rate === undefined
@@ -41,8 +35,7 @@ export function validateRates(patch: Partial<Rates>, current?: Rates): Rates {
     patch.grace_days === undefined
       ? (current?.grace_days ?? DEFAULTS.grace_days)
       : int(patch.grace_days, 'grace_days', 0, 365);
-  // Not bounded against `coin_rate`, on purpose: a repeat purchase is a different thing being
-  // bought and may honestly cost more than a signup, or a tenth of one.
+  // Deliberately unbounded against `coin_rate`: a repeat purchase may honestly cost more or less.
   const engagement_rate =
     patch.engagement_rate === undefined
       ? (current?.engagement_rate ?? DEFAULTS.engagement_rate)
@@ -52,11 +45,8 @@ export function validateRates(patch: Partial<Rates>, current?: Rates): Rates {
   return { coin_rate, guest_rate, grace_days, engagement_rate };
 }
 
-/**
- * Split a gross payout into the publisher's net and the platform's cut, in basis points. One
- * place, because two call sites rounding differently is a ledger that fails to sum to zero.
- * `floor` on the cut so rounding always favours the publisher.
- */
+/** Split gross into net and cut (basis points). One place, because two call sites rounding
+ *  differently is a ledger that fails to sum to zero. `floor` the cut so rounding favours net. */
 export function splitFee(gross: number, bps: number): { net: number; cut: number } {
   const cut = Math.floor((gross * bps) / 10_000);
   return { net: gross - cut, cut };

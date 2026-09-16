@@ -1,23 +1,23 @@
 import { Module } from '@nestjs/common';
-import { AdminController } from './modules/admin/admin.controller';
-import { AuthController } from './modules/auth/auth.controller';
-import { IssueController } from './modules/partner/issue.controller';
-import { PartnerController } from './modules/partner/partner.controller';
-import { PaymentsController } from './modules/payments/payments.controller';
-import { PortalController } from './modules/portal/portal.controller';
+import { PrismaModule } from './config/prisma';
+import { AdminModule } from './modules/admin/admin.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { PartnerModule } from './modules/partner/partner.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { PortalModule } from './modules/portal/portal.module';
 import { PublicController } from './modules/public/public.controller';
 
-// One module: none of these controllers have providers to scope, so a feature module each
-// would be five files of `@Module({ controllers: [...] })` and nothing else.
+// `PublicController` is listed directly because it has no providers — it is the unauthenticated
+// scan redirect, holding its own queries, so a `@Module` wrapper would say nothing.
 @Module({
-  controllers: [
-    AuthController,
-    PortalController,
-    PublicController,
-    PartnerController,
-    IssueController,
-    PaymentsController,
-    AdminController,
+  imports: [
+    PrismaModule,
+    AuthModule,
+    AdminModule,
+    PortalModule,
+    PartnerModule,
+    PaymentsModule,
   ],
+  controllers: [PublicController],
 })
 export class AppModule {}

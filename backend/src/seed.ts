@@ -1,14 +1,13 @@
 import * as bcrypt from 'bcryptjs';
-import { ADMIN_EMAIL, ADMIN_PASSWORD } from '../config';
-import { sha256 } from '../common/security';
-import { prisma } from './prisma';
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from './config';
+import { sha256 } from './common/security';
+import { prisma } from './config/prisma';
 
 const PROD = process.env.NODE_ENV === 'production';
 
 /**
- * Accounts come from env, never from signup. Development re-asserts the demo logins on every boot;
- * in production that is a backdoor, since a redeploy would reset the admin password and un-suspend
- * the account. So production bootstraps the admin once, if absent, and never touches the tenants.
+ * Accounts come from env, never signup. Dev re-asserts the demo logins every boot; production only
+ * bootstraps the admin if absent (re-asserting would reset its password and un-suspend it).
  */
 export async function seedAccounts() {
   const e = process.env;
@@ -37,9 +36,8 @@ async function seedOrg(
   landingUrl?: string,
   overwrite = true,
 ) {
-  // Raw upsert rather than prisma.upsert: read-then-write would let two replicas booting at once
-  // collide on the unique email, and `xmax = 0` is how Postgres reports insert-vs-update.
-  // `approved: true`: seeded accounts are the operator's own demo tenants, not signups to vet.
+  // Raw upsert, not prisma.upsert: read-then-write lets two replicas booting at once collide on
+  // the unique email. `xmax = 0` is how Postgres reports insert-vs-update; seeded orgs skip vetting.
   const rows = await prisma.$queryRaw<{ created: boolean }[]>`
     INSERT INTO orgs (name, type, email, password_hash, api_key_hash, landing_url, approved)
     VALUES (${name}, ${type}, ${email.toLowerCase()}, ${await bcrypt.hash(password, 10)},

@@ -154,7 +154,7 @@ graph LR
 
 | Layer | Choice | Note |
 |---|---|---|
-| API | NestJS 10 on Express | one `AppModule`, seven controllers, **no providers** — nothing to scope, so feature modules would be five files of boilerplate |
+| API | NestJS 10 on Express | a feature module per bounded area, each controller → service → repository; only `PublicController` stays on `AppModule`, having nothing to scope |
 | ORM | Prisma 7 + `@prisma/adapter-pg` | the pool is ours to tune; every money path drops to `$queryRaw` for `FOR UPDATE` |
 | DB | PostgreSQL 16 | the *only* stateful dependency; it holds every invariant |
 | Cache | Redis, **optional** | counts rate limits and nothing else. No read path falls back to it, so a cold Redis costs throttling accuracy and zero correctness |
@@ -1049,7 +1049,7 @@ Three design notes:
 Every per-IP control reads `req.ip`, and `req.ip` is whatever this setting says to believe.
 `true` means "trust `X-Forwarded-For` from anyone", which lets a client name its own address:
 one attacker becomes unlimited distinct IPs and every limit evaporates. Express accepts it
-happily, so **`config.ts` throws at boot** if it is set. Name the real hops (`1` for one load
+happily, so **`config/env.ts` throws at boot** if it is set. Name the real hops (`1` for one load
 balancer) or the proxy subnet.
 
 ### Input validation at the boundary
@@ -1382,9 +1382,9 @@ the revenue model, and it is snapshotted so a config change never reprices an ag
 | the scan hot path | `backend/src/modules/public/public.controller.ts` |
 | the interstitial and its fallbacks | `backend/src/modules/public/interstitial.ts` |
 | matching, scoring, refusals | `backend/src/common/attribution.ts` (pure) |
-| both payout paths, all the races | `backend/src/modules/partner/partner.controller.ts` |
+| both payout paths, all the races | `backend/src/modules/partner/partner.repository.ts` |
 | code minting | `backend/src/modules/partner/issue.controller.ts` |
-| the ledger and the split | `backend/src/database/ledger.ts`, `backend/src/common/rates.ts` |
+| the ledger and the split | `backend/src/common/ledger.ts`, `backend/src/common/rates.ts` |
 | every security helper | `backend/src/common/security.ts` |
 | every invariant | `backend/prisma/migrations/*/migration.sql` |
 | the whole loop, executable | `e2e-test.sh` |

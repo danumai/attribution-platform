@@ -1,9 +1,9 @@
 /**
- * Scan breakdowns, shared by the admin console and the promoter's own campaign page — one
- * function, two callers, because the numbers must agree. Scoping is the caller's job: the admin
- * passes no campaign, the portal passes one it has already proved the session owns.
+ * Scan breakdowns shared by the admin console and the promoter's campaign page, so the numbers
+ * agree. Scoping is the caller's job: admin passes no campaign, the portal passes one it has
+ * already proved the session owns.
  */
-import { prisma } from './prisma';
+import { prisma } from '../config/prisma';
 
 export interface Bucket {
   key: string;
@@ -19,11 +19,8 @@ interface ScanAnalytics {
     coins: number;
     /** how many scans the CDN resolved a country for; 0 means geo is simply not wired up */
     geo_known: number;
-    /**
-     * How many iPhone scanners tapped Continue rather than letting the bail-out fire. That tap
-     * carries the claim to the clipboard, so on publishers with no App Clip this is the ceiling
-     * on how many iOS installs can ever be attributed.
-     */
+    /** iPhone scanners who tapped Continue; that tap carries the claim to the clipboard, so with
+     *  no App Clip this is the ceiling on attributable iOS installs. */
     handoff_tapped: number;
     conversion_rate: number;
   };
@@ -42,12 +39,9 @@ const DIMENSIONS: Record<string, string> = {
   // 'direct' is the interesting bucket: no referer is what a real camera scan looks like.
   referer_host: `coalesce(referer_host, 'direct')`,
 
-  // Screen, timezone, theme and network class were here and were the most interesting panels.
-  // They went with the fingerprint they were a by-product of — Apple names browser and device
-  // configuration explicitly as data that may not be derived to identify a device.
-  //
-  // How the hand-off screen was left is about the page rather than the phone. On a publisher with
-  // no App Clip, `auto` is an install that could never be attributed.
+  // Screen, timezone, theme and network class were dropped with the fingerprint they came from:
+  // Apple forbids deriving browser/device configuration to identify a device. Hand-off exit is
+  // about the page, not the phone — with no App Clip, `auto` is an unattributable install.
   handoff: `coalesce(client->>'exit', 'skipped')`,
   qr_code: `coalesce(code, 'unknown')`,
   campaign: `campaign_name`,
@@ -69,19 +63,14 @@ const dimensionSql = Object.entries(DIMENSIONS)
   .join(' UNION ALL ');
 
 /**
- * Every breakdown in one round trip. Each `GROUP BY` could be its own query; as one `UNION ALL`
- * over a single CTE the window of scans is scanned once and reused. The dimension names are
- * interpolated as plain SQL because they come from the constant map above — the only
- * caller-supplied values are the two bound parameters.
- *
- * Timestamps bucket in the database's timezone (UTC everywhere here), so "hour" is UTC rather
- * than the scanner's local clock, which would need a per-scan offset we do not collect.
+ * Every breakdown in one round trip: `UNION ALL` over one CTE scans the window once. Dimension
+ * SQL is interpolated because it comes from the constant map above; the only caller-supplied
+ * values are bound. Buckets use the database timezone, so "hour" is UTC, not the scanner's clock.
  */
 export async function scanAnalytics(campaignId: string | null, days = 30): Promise<ScanAnalytics> {
   const window = Math.min(Math.max(Math.trunc(days) || 30, 1), 365);
 
-  // `$queryRawUnsafe` because the dimension list is built above; `$1`/`$2` keep the two
-  // caller-controlled values bound and out of the SQL text.
+  // `Unsafe` for the built dimension list; `$1`/`$2` keep caller values out of the SQL text.
   const rowsPromise = prisma.$queryRawUnsafe<
     { dim: string; key: string; scans: number; conversions: number }[]
   >(
@@ -93,10 +82,8 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
        FROM scans sc
        JOIN qr_codes q  ON q.id = sc.qr_code_id
        JOIN campaigns c ON c.id = sc.campaign_id
-       -- Aggregated rather than joined straight through, because one scan can now carry two
-       -- redemptions: an acquisition (the scanner was a new user) and an engagement (they had
-       -- just bought something). A plain LEFT JOIN would emit that scan twice and silently
-       -- inflate every scan count on this dashboard.
+       -- Aggregated, not joined through: one scan can carry both an acquisition and an engagement
+       -- redemption, and a plain LEFT JOIN would emit it twice and inflate every scan count.
        LEFT JOIN LATERAL (
          SELECT count(*)::int AS n FROM redemptions r WHERE r.scan_id = sc.id
        ) r ON true
@@ -109,9 +96,8 @@ export async function scanAnalytics(campaignId: string | null, days = 30): Promi
   );
 
   const totalsPromise = prisma.$queryRawUnsafe<Record<string, number>[]>(
-    // `conversions` counts scans that paid at least once — a scan that produced both a signup and
-    // a purchase reward is still one converted scan — while `coins` sums both, because the
-    // campaign budget really did pay for both.
+    // `conversions` counts scans that paid at least once; `coins` sums every payout, because the
+    // budget really did pay for both a signup and a purchase reward on the same scan.
     `SELECT count(*)::int                                        AS scans,
             count(*) FILTER (WHERE r.n > 0)::int                 AS conversions,
             coalesce(sum(r.coins), 0)::int                       AS coins,

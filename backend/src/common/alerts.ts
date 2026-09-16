@@ -1,12 +1,10 @@
 /**
- * Operational alerts: the findings that must reach a human, pushed instead of waiting to be
- * noticed on a dashboard. The observability layer already records everything, but a number on a
- * page nobody has open is not an alert. Structured `error` log always, plus a Slack-compatible
- * `{ text }` POST when ALERT_WEBHOOK_URL is set.
+ * Findings pushed to a human rather than left on a dashboard nobody has open. Structured `error`
+ * log always, plus a Slack-compatible `{ text }` POST when ALERT_WEBHOOK_URL is set.
  */
 import { ALERT_WEBHOOK_URL } from '../config';
 import { count, log } from './obs';
-import { prisma } from '../database/prisma';
+import { prisma } from '../config/prisma';
 
 export async function alert(event: string, fields: Record<string, unknown> = {}) {
   log.error(event, fields);
@@ -26,11 +24,9 @@ export async function alert(event: string, fields: Record<string, unknown> = {})
 }
 
 /**
- * The reconciliation the admin overview runs on page load, run on a clock instead — drift between
- * a cached balance and its ledger entries means something is spending against a wrong number.
- *
- * ponytail: aggregates the whole ledger every sweep. Move to an incremental check keyed on recent
- * refs when a sweep is ever slow enough to notice.
+ * The admin overview's reconciliation on a clock: drift between a cached balance and its ledger
+ * entries means something is spending against a wrong number.
+ * ponytail: aggregates the whole ledger every sweep; make it incremental if a sweep gets slow.
  */
 export function startReconciliation(intervalMs = 10 * 60_000) {
   const sweep = async () => {
@@ -55,10 +51,9 @@ export function startReconciliation(intervalMs = 10 * 60_000) {
 }
 
 /**
- * A campaign budget crossing "about to run dry": the promoter's print run is live and every
- * scan after zero dies at /campaign-ended. Alerted once per campaign per process, because a
- * draining budget crosses the threshold on every payout after the first.
- * ponytail: process-lifetime dedupe set; a restart may re-alert once. Harmless.
+ * Budget about to run dry: the print run is live and every scan after zero dies at
+ * /campaign-ended. Once per campaign per process, since a draining budget re-crosses on every
+ * payout. ponytail: process-lifetime dedupe set, so a restart may re-alert once. Harmless.
  */
 const lowBudgetAlerted = new Set<string>();
 

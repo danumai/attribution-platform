@@ -89,8 +89,8 @@ export function validateStyle(s: QrStyle): QrStyle {
   }
 
   const light = out.light ?? '#ffffff';
-  // Every ink that lands on the background has to stay readable against it. Transparent
-  // backgrounds are exempt — whatever they are printed on is out of our hands.
+  // Every ink must stay readable against the background; transparent backgrounds are exempt since
+  // what they print onto is out of our hands.
   if (alphaOf(light) > 0.5) {
     const inks = [
       out.gradient ? out.gradient.from : out.dark ?? '#000000',
@@ -141,8 +141,7 @@ export function validateStyle(s: QrStyle): QrStyle {
     out.logoShape = s.logoShape === undefined ? 'rounded' : oneOf(s.logoShape, LOGO_SHAPES, 'logoShape');
   }
 
-  // Shapes that shrink each module lose ink at the edges; hold the floor at Q so a decorative
-  // code still survives a cheap camera and a cheap print run.
+  // Module-shrinking shapes lose edge ink; floor at Q to survive a cheap camera and print run.
   if ((out.shape === 'dots' || out.shape === 'diamond') && !out.logo) {
     const rank = { L: 0, M: 1, Q: 2, H: 3 } as const;
     if (rank[out.ecc ?? 'M'] < rank.Q) out.ecc = 'Q';
@@ -236,10 +235,8 @@ function moduleShapes(on: (x: number, y: number) => boolean, n: number, shape: M
   return out.join('');
 }
 
-/**
- * Render as SVG. Built from the raw module matrix rather than qrcode's own SVG output,
- * because shapes, per-eye colours, gradients and frames all need module-level control.
- */
+/** Built from the raw module matrix, not qrcode's SVG output: shapes, per-eye colours, gradients
+ *  and frames all need module-level control. */
 export async function renderSvg(url: string, s: QrStyle): Promise<string> {
   const qr = QRCode.create(url, { errorCorrectionLevel: s.ecc ?? 'M' });
   const n = qr.modules.size;
@@ -322,13 +319,11 @@ export async function renderSvg(url: string, s: QrStyle): Promise<string> {
           `<rect x="0.6" y="${w - 0.4}" width="${w - 1.2}" height="${capH - 0.8}" rx="1.6" fill="${fc}"/>`,
         );
       const textFill = s.frame === 'box' ? fc : s.frameTextColor ?? '#ffffff';
-      // A long call to action must never overrun the ribbon. Font size shrinks with length as an
-      // estimate, and textLength/lengthAdjust makes the fit exact whatever font the viewer has.
+      // Font size shrinks with length so a long call to action never overruns the ribbon.
       const len = s.frameText!.length;
       const fontSize = Math.min(3.4, Math.max(1.6, 34 / Math.max(6, len)));
       const avail = w - 4;
-      // A bold caps grotesque runs roughly 0.66em per glyph; only clamp with textLength when the
-      // estimate would actually overrun, since clamping short text stretches it oddly.
+      // Bold caps run ~0.66em per glyph; only clamp on overrun, as clamping short text stretches it.
       const estWidth = len * fontSize * 0.66;
       const clamp = estWidth > avail ? ` textLength="${avail.toFixed(2)}" lengthAdjust="spacingAndGlyphs"` : '';
       parts.push(
@@ -346,8 +341,7 @@ export async function renderSvg(url: string, s: QrStyle): Promise<string> {
   );
 }
 
-// PNG for plain styles only (no native canvas dep). Anything the flat encoder cannot express is
-// exported from the SVG in the browser instead — see the studio's PNG download.
+// Plain styles only (no native canvas dep); the studio exports advanced styles from the SVG.
 export async function renderPng(url: string, s: QrStyle): Promise<Buffer> {
   return QRCode.toBuffer(url, {
     type: 'png',

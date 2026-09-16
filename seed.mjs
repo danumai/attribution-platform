@@ -14,7 +14,7 @@ import { createHmac } from 'node:crypto';
 const API = (process.env.API ?? process.env.BASE_URL ?? 'http://localhost:4000').replace(/\/+$/, '');
 const WEB = (process.env.WEB ?? process.env.FRONTEND_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 
-/* The two demo tenants. Read from env so the boot seeder in backend/src/database/seed.ts and
+/* The two demo tenants. Read from env so the boot seeder in backend/src/seed.ts and
  * this one agree on who they are — one place to rename the world for a customer demo. */
 const PROMOTER = process.env.PROMOTER_NAME ?? 'NovoAir';
 const PUBLISHER = process.env.PUBLISHER_NAME ?? 'BanglaReels';

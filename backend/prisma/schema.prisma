@@ -11,8 +11,9 @@
 
 generator client {
   provider = "prisma-client"
-  // Inside src/ so `tsc` compiles it with everything else — Prisma 7 emits TypeScript, not JS.
-  output   = "../src/generated/prisma"
+  // Next to the schema it is generated from. Prisma 7 emits TypeScript, not JS, so `generated/`
+  // is its own tsconfig include root and tsc compiles it alongside src/.
+  output   = "generated"
 }
 
 datasource db {

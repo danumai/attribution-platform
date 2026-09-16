@@ -10,13 +10,12 @@ if (process.env.NODE_ENV === 'production' && (process.env.JWT_SECRET ?? DEV_SECR
 // ponytail: HS256 shared secret; move to ES256 + KMS for production
 export const JWT_SECRET = process.env.JWT_SECRET ?? DEV_SECRET;
 
-/** The three roles, enforced by a CHECK on `orgs.type`. One definition, so a fourth cannot be
- *  added without every `switch` and validator here seeing it. */
+// The three roles, enforced by a CHECK on `orgs.type`. Single definition so a fourth can't slip past.
 const ORG_TYPES = ['promoter', 'publisher', 'admin'] as const;
 export type OrgType = (typeof ORG_TYPES)[number];
 
-/** Narrow a role read out of the database. Throws rather than casting blind: an unknown value
- *  means the CHECK constraint was bypassed, and a session must not be minted for it. */
+/** Narrows a role read from the DB. Throws instead of casting: an unknown value means the CHECK
+ *  constraint was bypassed, and no session may be minted for it. */
 export function asOrgType(type: string): OrgType {
   if (!(ORG_TYPES as readonly string[]).includes(type))
     throw new Error(`unknown org type: ${type}`);
@@ -34,10 +33,8 @@ export const signSession = (c: SessionClaims) =>
 export const newApiKey = () => 'pk_' + randomBytes(24).toString('hex');
 
 /**
- * Attribution claim id, carried in Play's install referrer. Deliberately not a signed token: a
- * token is a bearer credential the device could spend, and nothing reaching the phone is
- * spendable. An opaque lookup key whose only power is to name a scan the publisher's *server*
- * must then claim with its API key. base64url so it survives a referrer without escaping.
+ * Attribution claim id, carried in Play's install referrer. Deliberately not a signed token — an
+ * opaque key naming a scan the publisher's *server* claims with its API key. base64url for referrers.
  */
 export const newClaimId = () => randomBytes(16).toString('base64url'); // 128 bits
 export const newShortCode = () => randomBytes(12).toString('base64url'); // 96 bits — not guessable

@@ -1,23 +1,18 @@
 /**
- * Observability: a request id that follows a request everywhere, structured logs, and counters
- * for the decisions that *are* the product.
- *
- * It exists to catch the silent failure. A publisher who mistypes their `android_package`
- * generates no errors — every install just looks organic. Refusals are never persisted, so the
- * refusal rate is invisible in the database by construction and has to be emitted here.
+ * Request id, structured logs, and decision counters. Catches the silent failure: a mistyped
+ * `android_package` raises no errors, and refusals are never persisted, so the refusal rate is
+ * invisible in the database by construction and has to be emitted here.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { NextFunction, Request, Response } from 'express';
 
-/** Threads the request id through everything one request touches, without putting it in every
- *  call signature. */
+/** Threads the request id through a request without putting it in every call signature. */
 const ctx = new AsyncLocalStorage<{ request_id: string }>();
 
 type Fields = Record<string, unknown>;
 
-/** One JSON object per line on stdout. Not a logging library: the whole feature is four lines,
- *  and `console` keeps stdout ordering. */
+// One JSON object per line. No logging library: `console` keeps stdout ordering.
 function emit(level: 'info' | 'warn' | 'error', event: string, fields: Fields = {}) {
   const line = {
     ts: new Date().toISOString(),
@@ -26,7 +21,7 @@ function emit(level: 'info' | 'warn' | 'error', event: string, fields: Fields = 
     request_id: ctx.getStore()?.request_id,
     ...fields,
   };
-  // Errors to stderr so a container's log routing can split them without parsing.
+  // stderr so a container's log routing can split errors out without parsing.
   (level === 'error' ? console.error : console.log)(JSON.stringify(line));
 }
 
@@ -36,19 +31,13 @@ export const log = {
   error: (event: string, fields?: Fields) => emit('error', event, fields),
 };
 
-/**
- * Counters — Prometheus text format, rendered by hand. Per-process and reset by a restart, which
- * is correct rather than a shortcut: Prometheus scrapes each instance separately and `rate()`
- * already accounts for counter resets.
- */
+// Prometheus text format by hand. Per-process, reset by restart: Prometheus scrapes each instance
+// separately and `rate()` already accounts for counter resets.
 
 const counters = new Map<string, number>();
 
-/**
- * Label cardinality is the one way a metrics endpoint becomes an outage, so labels here are
- * closed sets only. Anything unbounded (campaign id, user ref, path with ids in it) belongs in
- * the structured log, where one line costs one line rather than a permanent time series.
- */
+/** Closed-set labels only — label cardinality is how a metrics endpoint becomes an outage. Anything
+ *  unbounded (campaign id, user ref, path with ids) belongs in the structured log. */
 export function count(name: string, labels: Record<string, string | number> = {}) {
   const key = Object.keys(labels).length
     ? `${name}{${Object.entries(labels)
@@ -58,7 +47,7 @@ export function count(name: string, labels: Record<string, string | number> = {}
   counters.set(key, (counters.get(key) ?? 0) + 1);
 }
 
-/** Prometheus exposition format. `# TYPE` once per metric family, then every labelled series. */
+/** Prometheus exposition format: `# TYPE` once per family, then its labelled series. */
 export function renderMetrics(): string {
   const families = new Map<string, string[]>();
   for (const [series, value] of counters) {
@@ -75,12 +64,9 @@ export function renderMetrics(): string {
 
 
 /**
- * Assigns the request id and logs how every request ended.
- *
- * An inbound `X-Request-Id` is honoured so a trace started at the proxy survives into our logs —
- * bounded and stripped, because it is attacker-controlled text that lands in every log line. The
- * id is echoed back: when a publisher reports "this claim did not attribute", that header is the
- * whole investigation.
+ * Assigns the request id and logs how every request ended. An inbound `X-Request-Id` is honoured
+ * so a proxy-started trace survives, but bounded and stripped — it is attacker-controlled text in
+ * every log line. Echoed back, because it is the whole investigation for a reported bad claim.
  */
 export function requestContext(req: Request, res: Response, next: NextFunction) {
   const inbound = req.headers['x-request-id'];
@@ -92,8 +78,7 @@ export function requestContext(req: Request, res: Response, next: NextFunction) 
   const started = process.hrtime.bigint();
   res.on('finish', () => {
     const ms = Number(process.hrtime.bigint() - started) / 1e6;
-    // `req.route?.path` is the *pattern* (`/r/:code`), never the resolved URL — one time series
-    // per route instead of one per QR code ever scanned.
+    // The pattern (`/r/:code`), never the resolved URL — one series per route, not per QR code.
     const route = req.route?.path ?? 'unmatched';
     count('http_requests_total', {
       method: req.method,
@@ -116,13 +101,9 @@ export function requestContext(req: Request, res: Response, next: NextFunction) 
   ctx.run({ request_id }, next);
 }
 
-/**
- * Every attribution decision, paid or refused.
- *
- * `reason` is a closed set, so it is safe as a label and it is the series to alert on: a
- * misconfigured store target shows up as `no_match` going to 100% with no error rate to notice
- * it by. Tenant ids go to the log — as labels they would mint a time series per campaign forever.
- */
+/** Every attribution decision, paid or refused. `reason` is a closed set and the series to alert
+ *  on: a misconfigured store target shows as `no_match` at 100% with no error rate. Tenant ids go
+ *  to the log — as labels they would mint a time series per campaign forever. */
 export function recordDecision(
   stage: 'first_open' | 'claim',
   outcome: { reason?: string; match_method?: string; confidence?: number },

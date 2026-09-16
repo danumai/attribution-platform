@@ -70,7 +70,7 @@ async function rateLimitChecks() {
   assert.equal(await rateLimited(k2, 1, 1), true);
 }
 // --- production config guards: each of these is a silent prod outage or auth bypass ---
-// config.ts validates at import time, so each case needs its own process.
+// config/env.ts validates at import time, so each case needs its own process.
 function prodBootError(env: Record<string, string>): string {
   const base = {
     NODE_ENV: 'production',
@@ -87,7 +87,7 @@ function prodBootError(env: Record<string, string>): string {
       '-r',
       'ts-node/register',
       '-e',
-      "require('./src/config'); require('./src/modules/auth/tokens'); require('./src/database/prisma')",
+      "require('./src/config'); require('./src/modules/auth/tokens'); require('./src/config/prisma')",
     ],
     { cwd: join(__dirname, '..'), env: { ...process.env, ...base, ...env }, encoding: 'utf8' },
   );

@@ -10,10 +10,9 @@ import {
 import { BaseExceptionFilter } from '@nestjs/core';
 
 /**
- * Turns a driver-level error into the 4xx it actually is. Every route takes an id straight from
- * the URL and every id column is `@db.Uuid`, so `/v1/qr-codes/not-a-uuid/image` reaches Postgres
- * as an invalid uuid literal and Nest's default handler answers 500 for a plainly malformed
- * request. Only codes with an unambiguous HTTP meaning are mapped.
+ * Turns a driver-level error into the 4xx it actually is. Ids come straight from the URL into
+ * `@db.Uuid` columns, so `/v1/qr-codes/not-a-uuid/image` would otherwise 500. Only codes with an
+ * unambiguous HTTP meaning are mapped.
  */
 @Catch()
 export class PrismaExceptionFilter extends BaseExceptionFilter {
@@ -28,8 +27,7 @@ export class PrismaExceptionFilter extends BaseExceptionFilter {
 
 function translate(e: any): HttpException | null {
   switch (e?.code) {
-    // P2023 ("Inconsistent column data") is what a malformed uuid on a normal query raises — the
-    // code this file exists for.
+    // P2023 ("Inconsistent column data") is the malformed-uuid case this file exists for.
     case 'P2023':
     case 'P2007':
     case 'P2006':
@@ -40,8 +38,7 @@ function translate(e: any): HttpException | null {
       return new BadRequestException('referenced record does not exist');
     case 'P2025':
       return new NotFoundException();
-    // Raw query failure, or the pg adapter's own error with no Prisma code. Only `22P02`
-    // (invalid_text_representation — a bad `::uuid` cast) is a client mistake; the rest is ours.
+    // Raw/adapter error with no Prisma code. Only `22P02` (bad `::uuid` cast) is a client mistake.
     default:
       return /\b22P02\b/.test(String(e?.message ?? ''))
         ? new BadRequestException('malformed identifier')
