@@ -1,5 +1,5 @@
 'use client';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { ago, num, when } from '@/lib/fmt';
 import { cx, muted } from '@/lib/tw';
 import { Table } from '../Table';
@@ -8,6 +8,14 @@ import { device, handoff } from '../cells';
 import type { SectionProps } from '../types';
 
 type Props = Pick<SectionProps, 'd' | 'loading'> & { campaignPicker: ReactNode };
+
+/** `ago()` reads `Date.now()`, which differs between the server render and client hydration —
+ *  render the server-matching absolute stamp first, then swap to relative time after mount. */
+function RelativeTime({ iso }: { iso: string }) {
+  const [text, setText] = useState(() => when(iso));
+  useEffect(() => setText(ago(iso)), [iso]);
+  return <span title={new Date(iso).toLocaleString()}>{text}</span>;
+}
 
 export function Scans({ d, loading, campaignPicker }: Props) {
   // Redemptions carry the publisher's user ref; scans only know the device. Join so a scan row
@@ -25,7 +33,7 @@ export function Scans({ d, loading, campaignPicker }: Props) {
         rows={d.scans ?? []}
         empty="No scans recorded."
         cols={[
-          { h: 'When', sort: (x) => x.scanned_at, get: (x) => <span title={when(x.scanned_at)}>{ago(x.scanned_at)}</span> },
+          { h: 'When', sort: (x) => x.scanned_at, get: (x) => <RelativeTime iso={x.scanned_at} /> },
           { h: 'Campaign', get: (x) => x.campaign_name },
           { h: 'Publisher', get: (x) => x.publisher_name },
           { h: 'QR', sort: (x) => x.qr_code, get: (x) => <code>{x.qr_code}</code> },

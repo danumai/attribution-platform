@@ -16,14 +16,19 @@ export function middleware(req: NextRequest) {
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
-  if (org.type === 'admin') {
+  if (org.type === 'admin' && !req.nextUrl.pathname.startsWith('/admin')) {
     const url = req.nextUrl.clone();
     url.pathname = '/admin';
+    return NextResponse.redirect(url);
+  }
+  if (org.type !== 'admin' && req.nextUrl.pathname.startsWith('/admin')) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/dashboard';
     return NextResponse.redirect(url);
   }
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*'],
+  matcher: ['/dashboard/:path*', '/admin/:path*'],
 };
