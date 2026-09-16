@@ -138,6 +138,11 @@ function Login() {
       });
       localStorage.setItem('token', res.token);
       localStorage.setItem('org', JSON.stringify(res.org));
+      await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: res.token, org: res.org }),
+      }).catch(() => {});
       if (res.api_key) {
         // shown once — publisher needs it for the Partner API
         localStorage.setItem('api_key', res.api_key);

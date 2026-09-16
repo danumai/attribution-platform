@@ -177,6 +177,7 @@ export function Shell({
   // as a hash and can never show again.
             localStorage.removeItem('token');
             localStorage.removeItem('org');
+            fetch('/api/session', { method: 'DELETE' }).catch(() => {});
             r.push('/login');
           }}
         >
