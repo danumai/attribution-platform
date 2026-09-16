@@ -118,16 +118,15 @@
   }
 
 /* --- the posting board ---
-   A row does not appear in a slot that was already there; it opens one, and the rows below are
-   pushed down. */
+   The row lands already at full size and only fades/slides into place. Animating height (as this
+   once did, 0 -> auto) resizes the board on every post; since neither the board nor the list
+   reserves a height for that growth, the resize is a real reflow that ripples into whatever sits
+   below the board on the page, not just the rows inside it. */
   .lp .lp-board-post {
-    interpolate-size: allow-keywords;
-    overflow: hidden;
-    animation: lp-post-in 0.44s var(--ease-out) both;
+    animation: lp-post-in 0.32s var(--ease-out) both;
   }
   @keyframes lp-post-in {
-    from { height: 0; padding-block: 0; opacity: 0; }
-    52% { opacity: 0; }
+    from { opacity: 0; transform: translateY(-8px); }
   }
 
 /* --- the settlement ---
