@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SCAN_EVENT } from './ScanStub';
 import * as lp from '@/lib/lp';
 
@@ -44,23 +44,27 @@ export default function ActivityBoard() {
   const [events, setEvents] = useState<Event[]>(() =>
     POOL.slice(0, VISIBLE).map((e, i) => ({ ...e, id: i })),
   );
+// Single source of ids for every row added after the initial VISIBLE, shared by both the scan
+// listener and the ambient interval below — a `Date.now()` or per-effect counter can hand out
+// the same value twice if either fires more than once within the same millisecond.
+  const nextId = useRef(VISIBLE);
 
 // The scan the reader just performed on the pass above — the payoff for dragging the phone onto
 // the code is that the row which posts is theirs, by name.
   useEffect(() => {
     const post = () =>
-      setEvents((prev) => [{ ...OWN_SCAN, id: Date.now() }, ...prev].slice(0, VISIBLE));
+      setEvents((prev) => [{ ...OWN_SCAN, id: nextId.current++ }, ...prev].slice(0, VISIBLE));
     addEventListener(SCAN_EVENT, post);
     return () => removeEventListener(SCAN_EVENT, post);
   }, []);
 
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    let n = VISIBLE;
+    let poolIndex = 0;
     const id = setInterval(() => {
-      const next = POOL[n % POOL.length];
-      setEvents((prev) => [{ ...next, id: n }, ...prev].slice(0, VISIBLE));
-      n += 1;
+      const next = POOL[poolIndex % POOL.length];
+      setEvents((prev) => [{ ...next, id: nextId.current++ }, ...prev].slice(0, VISIBLE));
+      poolIndex += 1;
     }, INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
