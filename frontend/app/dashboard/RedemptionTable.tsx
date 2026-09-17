@@ -1,7 +1,16 @@
 'use client';
+import { useEffect, useState } from 'react';
 import type { Redemption } from '@/lib/types';
-import { ago, num } from '@/lib/fmt';
+import { ago, num, when } from '@/lib/fmt';
 import { table, tableWrap, td, tdNum, th, thNum, tr } from '@/lib/tw';
+
+/** `ago()` reads `Date.now()`, which differs between the server render and client hydration —
+ *  render the server-matching absolute stamp first, then swap to relative time after mount. */
+function RelativeTime({ iso }: { iso: string }) {
+  const [text, setText] = useState(() => when(iso));
+  useEffect(() => setText(ago(iso)), [iso]);
+  return <span title={new Date(iso).toLocaleString()}>{text}</span>;
+}
 
 /** Newest first, and never more rows than the caller asked for. */
 export function RedemptionTable({ rows }: { rows: Redemption[] }) {
@@ -22,8 +31,8 @@ export function RedemptionTable({ rows }: { rows: Redemption[] }) {
               <td className={td}>{x.campaign_name}</td>
               <td className={td}>{x.publisher_user_ref}</td>
               <td className={tdNum}>{num(x.coins)}</td>
-              <td className={td} title={new Date(x.created_at).toLocaleString()}>
-                {ago(x.created_at)}
+              <td className={td}>
+                <RelativeTime iso={x.created_at} />
               </td>
             </tr>
           ))}

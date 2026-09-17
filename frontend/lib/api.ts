@@ -1,6 +1,10 @@
 // Baked in at build time — set NEXT_PUBLIC_API_URL before `next build`, not at runtime.
 export const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
+/** Accepted tradeoff: the backend is cross-origin with no same-origin proxy yet, so the bearer
+ *  token lives in localStorage rather than an httpOnly cookie. An XSS on this app can still read
+ *  it — the httpOnly session cookie added for server-rendered pages (see `lib/session.ts`) does
+ *  not close this gap for client-side requests that still go through `api()`. */
 export function token() {
   return typeof window === 'undefined' ? null : localStorage.getItem('token');
 }

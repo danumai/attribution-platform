@@ -1,18 +1,17 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { apiServer, withAuthRedirect } from '@/lib/apiServer';
-import type { Campaign, Me, Partnership, Redemption } from '@/lib/types';
-import { HEAD } from './types';
-import { buildDashboardNav, noDestination } from './navItems';
-import { OverviewClient } from './OverviewClient';
+import type { Me, Partnership, Redemption } from '@/lib/types';
+import { HEAD } from '../types';
+import { buildDashboardNav, noDestination } from '../navItems';
+import { RedemptionsClient } from './RedemptionsClient';
 
-export default async function DashboardOverviewPage() {
+export default async function DashboardRedemptionsPage() {
   const session = getSession();
   if (!session) redirect('/login');
 
-  const [campaigns, redemptions, partnerships, profile] = await withAuthRedirect(() =>
+  const [redemptions, partnerships, profile] = await withAuthRedirect(() =>
     Promise.all([
-      apiServer<Campaign[]>('/v1/campaigns'),
       apiServer<Redemption[]>('/v1/redemptions'),
       apiServer<Partnership[]>('/v1/partnerships'),
       apiServer<Me>('/v1/orgs/me'),
@@ -20,16 +19,15 @@ export default async function DashboardOverviewPage() {
   );
 
   return (
-    <OverviewClient
+    <RedemptionsClient
       org={session.org}
-      campaigns={campaigns}
       redemptions={redemptions}
       partnerships={partnerships}
       profile={profile}
       items={buildDashboardNav(session.org.type, partnerships)}
       showNoDestination={noDestination(session.org.type, profile)}
-      title={HEAD.overview.title}
-      lede={HEAD.overview.lede}
+      title={HEAD.redemptions.title}
+      lede={HEAD.redemptions.lede}
     />
   );
 }

@@ -17,10 +17,30 @@ const mono = JetBrains_Mono({
   variable: '--font-jetbrains',
 });
 
+// Mirrors FRONTEND_URL's dev default (backend/.env.example) — there is no frontend-exposed
+// site URL env var yet. Point this at the real production origin (ideally via a
+// NEXT_PUBLIC_SITE_URL) before this ships.
+const SITE_URL = 'http://localhost:3000';
+const TITLE = 'QR Reward Platform';
+const DESCRIPTION =
+  'Run QR reward campaigns with publishers — scans, redemptions and budgets in one place.';
+
 export const metadata = {
-  title: 'QR Reward Platform',
-  description:
-    'Run QR reward campaigns with publishers — scans, redemptions and budgets in one place.',
+  metadataBase: new URL(SITE_URL),
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: {
+    title: TITLE,
+    description: DESCRIPTION,
+    url: SITE_URL,
+    siteName: TITLE,
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: TITLE,
+    description: DESCRIPTION,
+  },
 };
 
 /* One scheme, so one colour — and no pre-paint boot script to restore a stored

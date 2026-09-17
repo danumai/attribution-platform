@@ -18,6 +18,7 @@ backend/prisma/generated/
 .claude/
 .superpowers/
 .agents/
+CLAUDE.local.md
 # Contents, not the directory itself — git cannot re-include a file whose parent directory
 # is excluded, and the design system below has to survive the rule above it.
 **/.impeccable/*

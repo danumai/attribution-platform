@@ -1,28 +1,27 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { apiServer, withAuthRedirect } from '@/lib/apiServer';
-import type { Analytics } from '@/lib/audience';
-import type { AdminOverview } from '@/lib/types';
-import { buildAdminNav } from './navItems';
-import { OverviewClient } from './OverviewClient';
+import type { AdminOverview, Redemption } from '@/lib/types';
+import { buildAdminNav } from '../navItems';
+import { RedemptionsClient } from './RedemptionsClient';
 
-export default async function AdminOverviewPage() {
+export default async function AdminRedemptionsPage() {
   const session = getSession();
   if (!session) redirect('/login');
   if (session.org.type !== 'admin') redirect('/dashboard');
 
-  const [overview, analytics] = await withAuthRedirect(() =>
+  const [redemptions, overview] = await withAuthRedirect(() =>
     Promise.all([
+      apiServer<Redemption[]>('/v1/admin/redemptions?limit=1000'),
       apiServer<AdminOverview>('/v1/admin/overview'),
-      apiServer<Analytics>('/v1/admin/analytics?days=30'),
     ]),
   );
 
   return (
-    <OverviewClient
+    <RedemptionsClient
       org={session.org}
+      redemptions={redemptions}
       overview={overview}
-      analytics={analytics}
       items={buildAdminNav(overview)}
     />
   );
