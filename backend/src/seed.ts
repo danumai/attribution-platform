@@ -38,6 +38,10 @@ async function seedOrg(
 ) {
   // Raw upsert, not prisma.upsert: read-then-write lets two replicas booting at once collide on
   // the unique email. `xmax = 0` is how Postgres reports insert-vs-update; seeded orgs skip vetting.
+  //
+  // `landing_url` is seeded on INSERT only and never re-asserted, even when `overwrite`: it is a
+  // scan destination the publisher owns from Settings, and reverting it on the next boot sends
+  // every scan to the demo page with nothing in the UI to explain why.
   const rows = await prisma.$queryRaw<{ created: boolean }[]>`
     INSERT INTO orgs (name, type, email, password_hash, api_key_hash, landing_url, approved)
     VALUES (${name}, ${type}, ${email.toLowerCase()}, ${await bcrypt.hash(password, 10)},
@@ -47,7 +51,6 @@ async function seedOrg(
       type          = CASE WHEN ${overwrite} THEN EXCLUDED.type          ELSE orgs.type          END,
       password_hash = CASE WHEN ${overwrite} THEN EXCLUDED.password_hash ELSE orgs.password_hash END,
       api_key_hash  = CASE WHEN ${overwrite} THEN COALESCE(EXCLUDED.api_key_hash, orgs.api_key_hash) ELSE orgs.api_key_hash END,
-      landing_url   = CASE WHEN ${overwrite} THEN COALESCE(EXCLUDED.landing_url,  orgs.landing_url)  ELSE orgs.landing_url  END,
       suspended     = CASE WHEN ${overwrite} THEN false                 ELSE orgs.suspended     END
     RETURNING (xmax = 0) AS created`;
   const verb = rows[0]?.created ? 'seeded' : overwrite ? 'updated' : 'left unchanged';
