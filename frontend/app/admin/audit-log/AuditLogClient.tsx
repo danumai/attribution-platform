@@ -21,6 +21,7 @@ export function AuditLogClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="Audit log"

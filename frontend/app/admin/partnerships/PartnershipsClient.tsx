@@ -44,6 +44,7 @@ export function PartnershipsClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="Partnerships"

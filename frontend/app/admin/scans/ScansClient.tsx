@@ -43,6 +43,7 @@ export function ScansClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="Scans"

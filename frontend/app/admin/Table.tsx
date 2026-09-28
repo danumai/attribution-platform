@@ -27,8 +27,49 @@ import {
 /**
  * A column over rows of `T`. `sort` is required whenever `get` returns markup: comparing two React
  * elements with `>` is always false both ways.
+ *
+ * Cells stay on one line by default and the table scrolls sideways when it runs out of room;
+ * squeezing columns instead wrapped dates over three lines and broke IDs at every hyphen. A column
+ * with no heading is the row-actions column: it shrinks to fit and stays pinned to the right edge.
  */
-export type Col<T> = { h: string; get: (row: T) => ReactNode; sort?: (row: T) => unknown; num?: boolean };
+export type Col<T> = {
+  h: string;
+  get: (row: T) => ReactNode;
+  sort?: (row: T) => unknown;
+  num?: boolean;
+  /** Let long text wrap (JSON, free text). Pair it with a `width` floor so it can't collapse. */
+  wrap?: boolean;
+  /** One line with an ellipsis, the full value as its tooltip. For IDs and URLs. */
+  truncate?: boolean;
+  /** Width classes for the column: `min-w-80` on a wrapping column, `max-w-60` on a truncated one. */
+  width?: string;
+  /** Pin the column to the left edge while the table scrolls sideways — the row's name, usually. */
+  sticky?: boolean;
+};
+
+/** The text a truncated cell shows in full on hover: its sort key, else its value, when plain. */
+function plain<T>(c: Col<T>, row: T): string | undefined {
+  for (const v of [c.sort?.(row), c.get(row)]) if (typeof v === 'string' || typeof v === 'number') return String(v);
+}
+
+/**
+ * Layout classes for one column's cells. Pinned body cells take the row's background so scrolled
+ * content passes under them, hover included, and carry no z-index: that would trap an open Actions
+ * menu under the rows below it. Pinned heads already have a background and need to sit over the
+ * other heads.
+ */
+function cellClass<T>(c: Col<T>, head = false) {
+  const pinned = c.sticky || !c.h;
+  return cx(
+    c.wrap ? 'whitespace-normal wrap-anywhere' : 'whitespace-nowrap',
+    c.wrap && !c.width && 'min-w-60',
+    !c.truncate && c.width,
+    !c.h && 'w-px',
+    pinned && (head ? 'z-3!' : 'bg-inherit'),
+    c.sticky && 'sticky left-0 shadow-[inset_-1px_0_0_var(--color-line-soft)]',
+    !c.h && 'sticky right-0 shadow-[inset_1px_0_0_var(--color-line-soft)]',
+  );
+}
 
 const PAGE = 50;
 
@@ -149,7 +190,11 @@ export function Table<T extends object>({
                   return (
                     <th
                       key={i}
-                      className={cx(c.num ? thNum : th, sort?.i === i && 'text-accent-text')}
+                      className={cx(
+                        c.num ? thNum : th,
+                        cellClass(c, true),
+                        sort?.i === i && 'text-accent-text',
+                      )}
                       aria-sort={
                         can && sort?.i === i ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined
                       }
@@ -168,10 +213,16 @@ export function Table<T extends object>({
             <tbody>
               {shown.slice(0, limit).map((r, i) => (
                 // every row type here carries one or the other; the index is the last resort
-                <tr className={tr} key={(r as { id?: string; account?: string }).id ?? (r as { account?: string }).account ?? i}>
+                <tr className={cx(tr, 'bg-card')} key={(r as { id?: string; account?: string }).id ?? (r as { account?: string }).account ?? i}>
                   {cols.map((c, j) => (
-                    <td key={j} className={c.num ? tdNum : td}>
-                      {c.get(r)}
+                    <td key={j} className={cx(c.num ? tdNum : td, cellClass(c))}>
+                      {c.truncate ? (
+                        <div className={cx('truncate', c.width ?? 'max-w-60')} title={plain(c, r)}>
+                          {c.get(r)}
+                        </div>
+                      ) : (
+                        c.get(r)
+                      )}
                     </td>
                   ))}
                 </tr>

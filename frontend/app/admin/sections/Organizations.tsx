@@ -16,11 +16,13 @@ export function Organizations({ d, loading, busy, patch, post, del }: Props) {
       loading={loading}
       rows={d.orgs ?? []}
       cols={[
-        { h: 'Name', get: (x) => x.name },
+        { h: 'Name', sticky: true, get: (x) => x.name },
         { h: 'Type', sort: (x) => x.type, get: (x) => pill(x.type) },
         { h: 'Email', get: (x) => x.email },
         {
           h: 'Landing URL',
+          truncate: true,
+          width: 'max-w-64',
           sort: (x) => x.landing_url ?? '',
           get: (x) =>
             x.landing_url ? (

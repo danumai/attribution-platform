@@ -25,3 +25,12 @@ export async function DELETE() {
   res.cookies.delete('org');
   return res;
 }
+
+/** Where a server-side 401 lands: drop the dead session cookies, then go to /login. Without this
+ *  the stale cookie keeps satisfying middleware and / keeps bouncing to the portal. */
+export function GET(req: Request) {
+  const res = NextResponse.redirect(new URL('/login', req.url));
+  res.cookies.delete('token');
+  res.cookies.delete('org');
+  return res;
+}

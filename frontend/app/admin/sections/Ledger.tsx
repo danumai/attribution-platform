@@ -27,7 +27,7 @@ export function Ledger({ d, loading, busy, account, onAccount }: Props) {
         rows={d.ledger?.balances ?? []}
         empty="No accounts."
         cols={[
-          { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
+          { h: 'Account', truncate: true, width: 'max-w-72', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
           {
             h: 'Balance',
             num: true,
@@ -77,14 +77,14 @@ export function Ledger({ d, loading, busy, account, onAccount }: Props) {
         empty="No entries."
         cols={[
           { h: 'When', sort: (x) => x.created_at, get: (x) => when(x.created_at) },
-          { h: 'Account', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
+          { h: 'Account', truncate: true, width: 'max-w-72', sort: (x) => x.account, get: (x) => <code>{x.account}</code> },
           {
             h: 'Amount',
             num: true,
             sort: (x) => x.amount,
             get: (x) => <span className={x.amount < 0 ? 'text-bad' : 'text-ok'}>{num(x.amount)}</span>,
           },
-          { h: 'Ref', sort: (x) => x.ref, get: (x) => <code>{x.ref}</code> },
+          { h: 'Ref', truncate: true, sort: (x) => x.ref, get: (x) => <code>{x.ref}</code> },
         ]}
       />
     </>

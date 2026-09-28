@@ -22,7 +22,7 @@ export function Campaigns({ d, loading, busy, patch, post, filterScans, filterLe
       loading={loading}
       rows={d.campaigns ?? []}
       cols={[
-        { h: 'Campaign', get: (x) => x.name },
+        { h: 'Campaign', sticky: true, get: (x) => x.name },
         { h: 'Promoter', get: (x) => x.promoter_name },
         { h: 'Publisher', get: (x) => x.publisher_name },
         // Which guarantee this campaign's redemptions live under. Worth a column of its own

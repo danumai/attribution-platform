@@ -24,6 +24,7 @@ export function RedemptionsClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="Redemptions"

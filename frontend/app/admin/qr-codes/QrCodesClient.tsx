@@ -44,6 +44,7 @@ export function QrCodesClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="QR codes"

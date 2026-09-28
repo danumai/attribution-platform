@@ -174,8 +174,8 @@ export function Overview({ d, isPromoter, loaded, go, onNewCampaign, canCreateCa
           {queue.map(([k, v, dest]) => (
             <button className={queueRow} key={k} onClick={() => go(dest)}>
               <span className={queueCount(Boolean(v))}>{v}</span>
-              <span>{k}</span>
-              <span className="ml-auto text-mut" aria-hidden="true">
+              <span className="min-w-0 flex-1">{k}</span>
+              <span className="shrink-0 text-mut" aria-hidden="true">
                 →
               </span>
             </button>

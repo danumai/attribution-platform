@@ -27,6 +27,7 @@ export function LedgerClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="Ledger"

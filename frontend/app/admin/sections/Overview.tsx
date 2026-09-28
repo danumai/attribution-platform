@@ -82,8 +82,8 @@ export function Overview({ d, go, failed, loadErr, onRetry }: Props) {
         ).map(([k, v, dest]) => (
           <button className={queueRow} key={k} onClick={() => go(dest)}>
             <span className={queueCount(Boolean(v))}>{num(v ?? 0)}</span>
-            <span>{k}</span>
-            <span className="ml-auto text-mut" aria-hidden="true">
+            <span className="min-w-0 flex-1">{k}</span>
+            <span className="shrink-0 text-mut" aria-hidden="true">
               →
             </span>
           </button>

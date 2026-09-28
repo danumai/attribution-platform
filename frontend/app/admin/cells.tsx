@@ -38,11 +38,13 @@ export const handoff = (x: AdminScan) => {
  */
 export const auditCols: Col<AuditEntry>[] = [
   { h: 'Action', sort: (x) => x.action, get: (x) => <code>{x.action}</code> },
-  { h: 'Target', sort: (x) => x.target, get: (x) => <code>{x.target}</code> },
+  { h: 'Target', truncate: true, sort: (x) => x.target, get: (x) => <code>{x.target}</code> },
   {
     h: 'Detail',
+    wrap: true,
+    width: 'min-w-80',
     sort: (x) => JSON.stringify(x.detail),
-    get: (x) => <span className={cx(muted, 'whitespace-pre-wrap')}>{JSON.stringify(x.detail)}</span>,
+    get: (x) => <span className={muted}>{JSON.stringify(x.detail)}</span>,
   },
 ];
 

@@ -57,6 +57,7 @@ export function OrganizationsClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="Organizations"

@@ -48,6 +48,7 @@ export function CampaignsClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="Campaigns"
