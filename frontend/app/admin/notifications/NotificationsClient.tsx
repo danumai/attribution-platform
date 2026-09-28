@@ -44,6 +44,7 @@ export function NotificationsClient({
 
   return (
     <Shell
+      wide
       org={org}
       items={items}
       active="Notifications"

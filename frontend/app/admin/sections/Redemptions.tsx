@@ -19,7 +19,7 @@ export function Redemptions({ d, loading, busy, filterLedger }: Props) {
         { h: 'Campaign', get: (x) => x.campaign_name },
         { h: 'Promoter', get: (x) => x.promoter_name },
         { h: 'Publisher', get: (x) => x.publisher_name },
-        { h: 'Publisher user', sort: (x) => x.publisher_user_ref, get: (x) => <code>{x.publisher_user_ref}</code> },
+        { h: 'Publisher user', truncate: true, sort: (x) => x.publisher_user_ref, get: (x) => <code>{x.publisher_user_ref}</code> },
         { h: 'Pays for', sort: (x) => x.kind, get: (x) => pill(x.kind === 'engagement' ? 'repeat' : 'signup') },
         // An engagement row is always settled in full — there is no guest tier for somebody
         // who already transacted — so this column only ever varies on acquisitions.

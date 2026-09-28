@@ -69,6 +69,7 @@ export function Shell({
   title,
   lede,
   actions,
+  wide,
   children,
 }: {
   org: { name: string; type: string };
@@ -78,6 +79,8 @@ export function Shell({
   title: string;
   lede?: string;
   actions?: ReactNode;
+  /** Let the content run the full width beside the rail, as the header does. For table-led pages. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   const r = useRouter();
@@ -209,9 +212,10 @@ export function Shell({
         </header>
         <main
           className={cx(
-            'w-full max-w-295 px-8 pt-2 pb-24 max-[900px]:px-4 max-[900px]:pb-20',
+            'w-full px-8 pt-2 pb-24 max-[900px]:px-4 max-[900px]:pb-20',
             /* the first section head sits under the page header, so it needs no top rule */
             '[&>h2:first-child]:mt-6',
+            !wide && 'max-w-295',
             riseStagger,
           )}
         >

@@ -122,10 +122,12 @@ export const table = 'w-full border-collapse text-[13.5px]';
 /* A column heading is the archetypal label-as-identity, so it takes the caps stamp — which also
    stops the head row needing a heavier weight to separate itself. */
 export const th =
-  `border-b border-line bg-card-alt px-3.5 py-3.5 text-left ${stampCaps}`;
+  `whitespace-nowrap border-b border-line bg-card-alt px-3.5 py-3.5 text-left ${stampCaps}`;
 
+/* No `tabular-nums` here: most faces give `.`, `,` and `:` a digit's width under it, which spaced
+   out every email, URL and date. Number columns get it from `tdNum`. */
 export const td =
-  'border-b border-line-soft px-3.5 py-3 text-left text-ink-soft tabular-nums';
+  'border-b border-line-soft px-3.5 py-3 text-left text-ink-soft';
 
 export const tr = 'transition-colors duration-200 ease-press hover:bg-card-alt last:[&>td]:border-b-0';
 
@@ -193,16 +195,18 @@ export const figureCellLink = cx(
 export const fact = 'mt-1.5 text-[22px] font-semibold tracking-[-0.03em] tabular-nums';
 
 /** a work queue row: count, what it is, and where it takes you */
+/* A button, but a row of prose: `btnBase` keeps a button's label on one line, which pushed a long
+   label and its arrow straight out of the card on a narrow screen. */
 export const queueRow = cx(
   btnBase,
-  'flex w-full items-center gap-3.5 rounded-lg border-transparent bg-transparent px-3 py-3 text-left text-[14px] font-normal text-ink-soft',
+  'flex w-full items-center gap-3.5 rounded-lg border-transparent bg-transparent px-3 py-3 text-left text-[14px] font-normal whitespace-normal! text-ink-soft',
   'enabled:hover:bg-card-alt',
   '[&+&]:rounded-none [&+&]:border-t [&+&]:border-t-line-soft',
 );
 
 export function queueCount(hot: boolean) {
   return cx(
-    'min-w-8 rounded-md border px-2 py-0.5 text-center text-[13px] font-semibold tabular-nums',
+    'min-w-8 shrink-0 rounded-md border px-2 py-0.5 text-center text-[13px] font-semibold tabular-nums',
     hot ? 'border-warn-line bg-warn-soft text-warn' : 'border-line bg-card-alt text-mut',
   );
 }

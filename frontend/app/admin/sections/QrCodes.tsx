@@ -18,7 +18,7 @@ export function QrCodes({ d, loading, busy, patch }: Props) {
       rows={d.qrCodes ?? []}
       empty="No codes issued."
       cols={[
-        { h: 'Code', sort: (x) => x.code, get: (x) => <code>{x.code}</code> },
+        { h: 'Code', sticky: true, sort: (x) => x.code, get: (x) => <code>{x.code}</code> },
         // Set only on codes minted by `POST /v1/issue` — a promoter's own PNR or order number.
         // Studio-designed codes carry none, and search already covers this column for free.
         { h: 'Ticket ref', sort: (x) => x.issued_ref ?? '', get: (x) => x.issued_ref ?? '—' },

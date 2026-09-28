@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getSession } from './session';
+import { API_UNREACHABLE } from './apiErrors';
 
 const API = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -13,15 +14,23 @@ export class ApiError extends Error {
 
 export async function apiServer<T = void>(path: string, opts: RequestInit = {}): Promise<T> {
   const session = getSession();
-  const res = await fetch(`${API}${path}`, {
-    ...opts,
-    cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(session ? { Authorization: `Bearer ${session.token}` } : {}),
-      ...(opts.headers ?? {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API}${path}`, {
+      ...opts,
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session ? { Authorization: `Bearer ${session.token}` } : {}),
+        ...(opts.headers ?? {}),
+      },
+    });
+  } catch (cause) {
+    // fetch only rejects when no response came back at all — the API is down or unreachable.
+    const err = new ApiError(503, `API unreachable at ${API} (${path}) — is the backend running?`);
+    Object.assign(err, { digest: API_UNREACHABLE, cause });
+    throw err;
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, body?.message ?? `HTTP ${res.status}`);
   return body as T;
@@ -34,7 +43,7 @@ export async function withAuthRedirect<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) redirect('/login');
+    if (e instanceof ApiError && e.status === 401) redirect('/api/session');
     throw e;
   }
 }

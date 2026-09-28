@@ -36,7 +36,7 @@ export function Scans({ d, loading, campaignPicker }: Props) {
           { h: 'When', sort: (x) => x.scanned_at, get: (x) => <RelativeTime iso={x.scanned_at} /> },
           { h: 'Campaign', get: (x) => x.campaign_name },
           { h: 'Publisher', get: (x) => x.publisher_name },
-          { h: 'QR', sort: (x) => x.qr_code, get: (x) => <code>{x.qr_code}</code> },
+          { h: 'QR', truncate: true, width: 'max-w-40', sort: (x) => x.qr_code, get: (x) => <code>{x.qr_code}</code> },
           // Edge geo when a CDN resolved it; otherwise the handset's own time zone or locale,
           // shown muted with a leading `~` so an inference is never read as an address.
           {
@@ -85,6 +85,8 @@ export function Scans({ d, loading, campaignPicker }: Props) {
           },
           {
             h: 'User',
+            truncate: true,
+            width: 'max-w-40',
             sort: (x) => userByScan.get(x.id)?.publisher_user_ref ?? '',
             get: (x) => {
               const u = userByScan.get(x.id);
